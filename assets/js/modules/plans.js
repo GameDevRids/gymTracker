@@ -1,7 +1,7 @@
-import { apiClient } from "../api/apiClient.js";
+import { fetchPlans } from "../api/plansApi.js";
 import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
-import { escapeHTML, formatCurrency } from "../utils.js";
+import { escapeHTML, formatINR } from "../utils.js";
 
 const pageSize = 12;
 let plans = [];
@@ -27,7 +27,7 @@ export function renderPlansPage() {
 
     const cards = plans.map((plan) => `<article class="card plan-card">
         <div class="plan-card-heading"><h3>${escapeHTML(plan.name)}</h3><span class="status status-${plan.is_active ? "active" : "inactive"}">${plan.is_active ? "Active" : "Inactive"}</span></div>
-        <div class="plan-price">${formatCurrency(plan.price, "INR")}<small> / ${plan.duration_days} days</small></div>
+        <div class="plan-price">${formatINR(plan.price)}<small> / ${plan.duration_days} days</small></div>
         <p>${escapeHTML(plan.description || "No description provided.")}</p>
         <div class="plan-card-footer"><span class="helper-text">Updated ${plan.updated_at ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(plan.updated_at)) : "—"}</span>
             <span class="inline-actions"><button class="text-button" data-action="edit-plan" data-id="${escapeHTML(plan.id)}">Edit</button><button class="text-button" data-action="toggle-plan" data-id="${escapeHTML(plan.id)}">${plan.is_active ? "Deactivate" : "Activate"}</button><button class="text-button" data-action="delete-plan" data-id="${escapeHTML(plan.id)}">Delete</button></span>
@@ -46,17 +46,21 @@ export async function loadPlans(onRender = () => {}) {
     errorMessage = "";
     onRender();
     try {
-        const response = await apiClient.get("/api/plans", {
-            params: {
-                page: pagination.page,
-                limit: pageSize,
-                ...(status === "all" ? {} : { status }),
-                ...(search ? { search } : {})
-            }
+        const response = await fetchPlans({
+            page: pagination.page,
+            limit: pageSize,
+            ...(status === "all" ? {} : { status }),
+            ...(search ? { search } : {})
         });
         if (version !== requestVersion) return;
         plans = Array.isArray(response?.data?.plans) ? response.data.plans : [];
-        pagination = response?.data?.pagination || { page: 1, total: plans.length, totalPages: 1 };
+        const page = response?.page ?? response?.data?.pagination?.page ?? 1;
+        const total = response?.total ?? response?.data?.pagination?.total ?? plans.length;
+        pagination = {
+            page,
+            total,
+            totalPages: response?.data?.pagination?.totalPages ?? Math.ceil(total / pageSize)
+        };
         loading = false;
         onRender();
     } catch (error) {

@@ -1,6 +1,7 @@
 import { state, getMember, getPlan, memberBalance, persist } from "../state.js";
-import { escapeHTML, formatCurrency, formatDate, localISODate, daysBetween, uid } from "../utils.js";
+import { escapeHTML, formatINR, formatDate, localISODate, daysBetween, uid } from "../utils.js";
 import { toast } from "../components/toast.js";
+import { apiClient } from "../api/apiClient.js";
 
 const defaultTemplates = [
     { id: "expiry", name: "Membership expiry", metaName: "membership_expiry_reminder", language: "en", body: "Hi {{1}}, your membership expires on {{2}}. Reply to ask us about renewal.", variables: ["first_name", "expiry_date"] },
@@ -15,6 +16,9 @@ function ensureWhatsAppState() {
     const data = state.whatsapp;
     if (!["demo", "live"].includes(data.mode)) data.mode = "demo";
     if (!Array.isArray(data.templates)) data.templates = structuredClone(defaultTemplates);
+    if (!data.expiryReminderTemplate) {
+        data.expiryReminderTemplate = "Hi {name}, your {plan} membership expires on {expiry_date}. We would love to see you again!";
+    }
     if (!Array.isArray(data.conversations)) {
         data.conversations = state.members.slice(0, 5).map((member, index) => ({
             memberId: member.id,
@@ -50,10 +54,10 @@ function displayText(template, member) {
         const key = template.variables[Number(number) - 1];
         if (key === "first_name") return member.name.split(/\s+/)[0];
         if (key === "expiry_date") return formatDate(member.expiryDate);
-        if (key === "balance") return formatCurrency(memberBalance(member));
+        if (key === "balance") return formatINR(memberBalance(member));
         if (key === "amount") {
             const payment = state.payments.find((entry) => entry.memberId === member.id);
-            return formatCurrency(payment?.amount || 0);
+            return formatINR(payment?.amount || 0);
         }
         if (key === "plan") return plan?.name || "membership";
         return "";
@@ -98,10 +102,11 @@ export function renderWhatsAppPage() {
     const messages = conversation?.messages || [];
     const activeMembers = state.members;
     return `<div class="page-heading"><div><h1>WhatsApp inbox</h1><p>Manage member conversations, approved templates and delivery events.</p></div><div class="heading-actions"><span class="wa-mode-badge ${data.mode === "demo" ? "wa-mode-demo" : "wa-mode-live"}">${data.mode === "demo" ? "DEMO MODE" : "LIVE MODE"}</span><button class="button button-secondary" data-action="whatsapp-followups">Run inactive follow-ups</button><button class="button button-secondary" data-action="whatsapp-refresh">↻ Refresh statuses</button></div></div>
-        <div class="wa-mode-settings card"><div><strong>Messaging mode</strong><p>${data.mode === "demo" ? "Fictional conversations only. No WhatsApp messages are sent." : "Meta Cloud API only. API acceptance is not delivery; delivery requires a webhook status."}</p></div><div class="wa-mode-controls"><label for="whatsapp-mode">Mode</label><select class="field-control" id="whatsapp-mode" data-whatsapp-change="mode"><option value="demo" ${data.mode === "demo" ? "selected" : ""}>Demo · simulated</option><option value="live" ${data.mode === "live" ? "selected" : ""}>Live · Meta Cloud API</option></select><label class="wa-api-url-label" for="whatsapp-api-url">Backend</label><input id="whatsapp-api-url" class="field-control" type="url" value="${escapeHTML(baseUrl)}" placeholder="http://localhost:3001" aria-label="WhatsApp backend URL"><label class="wa-api-key-label" for="whatsapp-api-token">API access key</label><input id="whatsapp-api-token" class="field-control" type="password" autocomplete="off" placeholder="Optional for local backend" aria-label="Backend API access key"><button class="button button-secondary button-small" data-action="whatsapp-save-settings">Save</button><small class="wa-token-help">Key stays in this tab; Meta credentials stay on the server.</small></div></div>
+        <div class="wa-mode-settings card"><div><strong>Messaging mode</strong><p>${data.mode === "demo" ? "Fictional conversations only. No WhatsApp messages are sent." : "Meta Cloud API only. API acceptance is not delivery; delivery requires a webhook status."}</p></div><div class="wa-mode-controls"><label for="whatsapp-mode">Mode</label><select class="field-control" id="whatsapp-mode" data-whatsapp-change="mode"><option value="demo" ${data.mode === "demo" ? "selected" : ""}>Demo · simulated</option><option value="live" ${data.mode === "live" ? "selected" : ""}>Live · Meta Cloud API</option></select><label class="wa-api-url-label" for="whatsapp-api-url">Backend</label><input id="whatsapp-api-url" class="field-control" type="url" value="${escapeHTML(baseUrl)}" placeholder="http://localhost:3001" aria-label="WhatsApp backend URL"></div></div>
         <div class="note-box wa-mode-note">${data.mode === "demo" ? "Every message in demo mode is marked DEMO and is never represented as delivered. Switch modes deliberately; Live mode requires a configured backend, Meta credentials and a verified webhook. Sample member records are fictional; replace them with consented member data before enabling live sends." : "Live mode will never fall back to simulation. Messages show accepted/sent/delivered/read/failed only from the actual API response and Meta webhook. Use only opted-in recipients and Meta-approved templates for messages outside the customer-service window. Sample member records are fictional; do not mark them opted in or send to them."}</div>
         <section class="wa-inbox card ${mobileConversationOpen ? "show-thread" : ""}"><aside class="wa-sidebar"><div class="wa-sidebar-heading"><div><h2>Conversations</h2><p>${data.conversations.length} member chats</p></div><div class="wa-list-actions"><button class="text-button wa-close-inbox" data-action="whatsapp-close">← Close inbox</button><button class="text-button" data-action="whatsapp-add-chat">＋ New</button></div></div><div class="wa-contact-list">${renderConversationList(data)}</div><div class="wa-start-chat"><label for="whatsapp-member">Start a conversation</label><select class="field-control" id="whatsapp-member"><option value="">Choose member…</option>${activeMembers.map((item) => `<option value="${escapeHTML(item.id)}">${escapeHTML(item.name)}</option>`).join("")}</select></div></aside>
         <div class="wa-thread">${member ? `<header class="wa-thread-header"><button class="wa-back" type="button" data-action="whatsapp-back" aria-label="Back to conversations">←</button><span class="wa-avatar">${escapeHTML(member.name.slice(0, 1))}</span><span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.phone)} · Member ID ${escapeHTML(member.id)}</small></span><button class="button button-secondary button-small" data-action="whatsapp-send-card" data-id="${escapeHTML(member.id)}">Send ID card</button></header><div class="wa-thread-messages" id="wa-thread-messages" role="log" aria-label="Conversation messages" aria-live="polite">${messages.map((message) => renderMessage(message, data.mode === "demo")).join("") || `<div class="empty-state">No messages in this conversation yet.</div>`}</div><form id="whatsapp-compose" class="wa-compose" data-member-id="${escapeHTML(member.id)}"><div class="wa-compose-options"><label for="whatsapp-template">Message type</label><select id="whatsapp-template" name="templateId" class="field-control"><option value="">Text message</option>${templates.map((template) => `<option value="${escapeHTML(template.id)}">${escapeHTML(template.name)}${data.mode === "live" ? ` · ${escapeHTML(template.metaName)}` : ""}</option>`).join("")}</select></div><textarea name="message" rows="2" placeholder="${data.mode === "live" ? "Type a message (within the 24-hour service window)..." : "Write a simulated demo message..."}" aria-label="Message to ${escapeHTML(member.name)}" maxlength="4096"></textarea><div class="wa-compose-footer"><span>${data.mode === "demo" ? "DEMO · not sent" : "Live send · recipient consent required"}</span><button class="button button-primary" type="submit">Send message</button></div></form>` : `<div class="empty-state">Choose a member to view a conversation.</div>`}</div></section>
+        <section class="card wa-templates"><div class="wa-sidebar-heading"><div><h2>WhatsApp click-to-chat reminder</h2><p>Used by membership expiry reminders; no Meta API is involved.</p></div></div><form id="whatsapp-click-template-form" class="wa-template-form"><textarea name="body" aria-label="Expiry reminder message" required maxlength="1000">${escapeHTML(data.expiryReminderTemplate)}</textarea><p class="helper-text">Placeholders: {name}, {plan}, {expiry_date}</p><button class="button button-secondary" type="submit">Save reminder message</button></form></section>
         <section class="card wa-templates"><div class="wa-sidebar-heading"><div><h2>Message templates</h2><p>In live mode, names must match approved Meta templates.</p></div></div><div class="wa-template-list">${templates.map((template) => `<article class="wa-template"><div><strong>${escapeHTML(template.name)}</strong><small>${escapeHTML(template.metaName)} · ${escapeHTML(template.language)}</small><p>${escapeHTML(template.body)}</p></div><button class="text-button" data-action="whatsapp-delete-template" data-id="${escapeHTML(template.id)}" aria-label="Delete ${escapeHTML(template.name)} template">Remove</button></article>`).join("")}</div><form id="whatsapp-template-form" class="wa-template-form"><input name="name" class="field-control" placeholder="Template label" aria-label="Template label" required maxlength="60"><input name="metaName" class="field-control" placeholder="approved_meta_template_name" aria-label="Meta template name" required pattern="[a-z0-9_]+" maxlength="100"><input name="language" class="field-control" placeholder="en" aria-label="Template language" value="en" required maxlength="10"><input name="variables" class="field-control" placeholder="first_name, expiry_date" aria-label="Template variables, comma separated"><textarea name="body" placeholder="Hi {{1}}, your membership expires on {{2}}..." aria-label="Template body" required maxlength="1024"></textarea><button class="button button-secondary" type="submit">＋ Add template</button></form></section>
         <div class="helper-text wa-footer-note">Live messages and webhook events are held in backend memory in this prototype and clear when the server restarts. Add owner authentication, per-gym access control, durable storage, consent/opt-out tracking and an audit trail before production use.</div>`;
 }
@@ -126,30 +131,19 @@ function apiUrl(data, path) {
     return `${base}/api/whatsapp${path}`;
 }
 
-function backendToken(data) {
-    const origin = data.apiBaseUrl || window.location.origin;
-    return sessionStorage.getItem(`gympulse.whatsapp.apiToken:${origin}`) || "";
-}
-
 async function request(data, path, options = {}) {
-    let response;
     try {
-        const token = backendToken(data);
-        response = await fetch(apiUrl(data, path), {
-            ...options,
-            headers: {
-                ...(options.body instanceof Blob ? {} : { "Content-Type": "application/json" }),
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                ...(options.headers || {})
-            }
+        return await apiClient.request(apiUrl(data, path), {
+            method: options.method || "GET",
+            body: options.body,
+            headers: options.headers || {}
         });
-    } catch {
-        throw new Error("Could not reach the WhatsApp backend. Check the backend URL and that server is running.");
+    } catch (error) {
+        if (error instanceof TypeError) {
+            throw new Error("Could not reach the WhatsApp backend. Check the backend URL and that server is running.");
+        }
+        throw error;
     }
-    let result;
-    try { result = await response.json(); } catch { result = {}; }
-    if (!response.ok) throw new Error(result.error || `WhatsApp backend returned HTTP ${response.status}.`);
-    return result;
 }
 
 export async function handleWhatsAppChange(target, render) {
@@ -217,11 +211,6 @@ export async function handleWhatsAppAction(action, element, render) {
         try {
             const parsed = new URL(input.value);
             if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Use an http or https backend URL.");
-            const apiToken = document.querySelector("#whatsapp-api-token").value.trim();
-            data.apiBaseUrl = parsed.origin;
-            const tokenKey = `gympulse.whatsapp.apiToken:${parsed.origin}`;
-            if (apiToken) sessionStorage.setItem(tokenKey, apiToken);
-            else sessionStorage.removeItem(tokenKey);
             if (persistWhatsApp()) { render(); toast("WhatsApp backend URL saved."); }
         } catch (error) {
             toast(error.message || "Enter a valid backend URL.", "error");
@@ -347,8 +336,8 @@ function templateValues(template, member) {
     return template.variables.map((key) => {
         if (key === "first_name") return member.name.split(/\s+/)[0];
         if (key === "expiry_date") return formatDate(member.expiryDate);
-        if (key === "balance") return formatCurrency(memberBalance(member));
-        if (key === "amount") return formatCurrency(state.payments.find((payment) => payment.memberId === member.id)?.amount || 0);
+        if (key === "balance") return formatINR(memberBalance(member));
+        if (key === "amount") return formatINR(state.payments.find((payment) => payment.memberId === member.id)?.amount || 0);
         if (key === "plan") return getPlan(member.planId)?.name || "membership";
         return key;
     });
@@ -356,6 +345,20 @@ function templateValues(template, member) {
 
 export async function handleWhatsAppSubmit(form, render) {
     const data = ensureWhatsAppState();
+    if (form.id === "whatsapp-click-template-form") {
+        const body = String(new FormData(form).get("body") || "").trim();
+        if (!body) return toast("Enter a reminder message.", "error");
+        const unknownPlaceholder = [...body.matchAll(/\{([^}]+)\}/g)]
+            .map((match) => match[1])
+            .find((placeholder) => !["name", "plan", "expiry_date"].includes(placeholder));
+        if (unknownPlaceholder) return toast(`Unsupported reminder placeholder: {${unknownPlaceholder}}.`, "error");
+        data.expiryReminderTemplate = body;
+        if (persistWhatsApp()) {
+            render();
+            toast("WhatsApp expiry reminder message saved.");
+        }
+        return;
+    }
     if (form.id === "whatsapp-template-form") {
         const values = new FormData(form);
         const name = String(values.get("name") || "").trim();

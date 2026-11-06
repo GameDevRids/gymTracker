@@ -40,6 +40,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 ::selection { color: var(--forest); background: var(--lime); }
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+[hidden] { display: none !important; }
+.auth-screen { display: grid; min-height: 100vh; padding: 24px; place-items: center; background: radial-gradient(circle at 50% 0, #eaf3e7, var(--canvas) 55%); }
+.auth-card { width: min(100%, 430px); padding: 32px; border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: 0 16px 48px rgba(24,50,37,.08); }
+.auth-brand { padding: 0 0 28px; color: var(--forest); }
+.auth-brand .brand-light { color: #43805b; }
+.auth-card h1 { margin: 0 0 5px; font: 700 25px Manrope, sans-serif; }
+.auth-card > p { margin: 0 0 22px; color: var(--text-secondary); }
+.auth-form { display: grid; gap: 10px; }
+.auth-form label { margin-top: 6px; font-weight: 600; }
+.auth-form input { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #dfe6df; border-radius: 8px; background: #fff; }
+.auth-form .button { min-height: 48px; margin-top: 8px; }
+.auth-error { margin: 2px 0; color: var(--danger); }
 .icon { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .app-shell { min-height: 100vh; }
 .sidebar {
@@ -214,8 +226,6 @@ tbody tr:hover { background: #fbfcfa; }
 .wa-mode-controls .field-control { min-width: 115px; }
 .wa-mode-controls .wa-api-url-label { margin-left: 8px; }
 .wa-mode-controls #whatsapp-api-url { width: 215px; }
-.wa-mode-controls #whatsapp-api-token { width: 175px; }
-.wa-token-help { flex-basis: 100%; color: #5f6d63; font-size: 10px; text-align: right; }
 .wa-mode-badge { padding: 7px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .3px; }
 .wa-mode-demo, .wa-demo-label { color: #806325; background: #fff3d4; }
 .wa-mode-live { color: #27623d; background: #e8f5e8; }
@@ -304,8 +314,6 @@ body.whatsapp-fullscreen { overflow: hidden; }
     .wa-template-list, .wa-template-form { grid-template-columns: 1fr; }
     .wa-template-form textarea, .wa-template-form .button { grid-column: auto; }
     .wa-mode-controls #whatsapp-api-url { width: min(215px, 100%); }
-    .wa-mode-controls #whatsapp-api-token { width: min(175px, 100%); }
-    .wa-token-help { text-align: left; }
     .dashboard-secondary-grid, .dashboard-watch-card { margin-top: 12px; }
     .button, .icon-button, .nav-link, .text-button { min-height: 44px; }
     .field input:not([type="checkbox"]):not([type="radio"]), .field select, .search-field, .field-control { min-height: 44px; }

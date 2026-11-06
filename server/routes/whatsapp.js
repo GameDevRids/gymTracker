@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import express from "express";
+import { supabaseClient } from "../config/database.js";
 import { graphEndpoint, isCloudApiConfigured, whatsappConfig } from "../config/whatsappConfig.js";
 
 const router = express.Router();
@@ -35,6 +36,21 @@ function validateRecipient(value) {
         throw error;
     }
     return recipient;
+}
+
+async function findUniqueGymForPhone(phone) {
+    if (!supabaseClient) return null;
+    const digits = digitsOnly(phone);
+    const localNumber = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits;
+    if (!/^[6-9]\d{9}$/.test(localNumber)) return null;
+    const { data, error } = await supabaseClient
+        .from("members")
+        .select("gym_id")
+        .eq("phone", localNumber)
+        .is("archived_at", null);
+    if (error) throw error;
+    const gymIds = [...new Set((data || []).map((member) => member.gym_id).filter(Boolean))];
+    return gymIds.length === 1 ? gymIds[0] : null;
 }
 
 async function graphRequest(endpoint, payload) {
@@ -85,8 +101,8 @@ router.get("/status", (_request, response) => {
     });
 });
 
-router.get("/messages", (_request, response) => {
-    response.json({ messages: messageLog.slice(-MESSAGE_LOG_LIMIT) });
+router.get("/messages", (request, response) => {
+    response.json({ messages: messageLog.filter((message) => message.gym_id === request.gymId).slice(-MESSAGE_LOG_LIMIT) });
 });
 
 router.post("/send", ensureConfigured, async (request, response, next) => {
@@ -116,7 +132,7 @@ router.post("/send", ensureConfigured, async (request, response, next) => {
         if (!wamid) {
             return response.status(502).json({ error: "Meta accepted no message ID; delivery cannot be confirmed." });
         }
-        recordMessage({ id: wamid, direction: "outbound", recipient: to, text: preview, status: "accepted", timestamp: new Date().toISOString() });
+        recordMessage({ id: wamid, gym_id: request.gymId, direction: "outbound", recipient: to, text: preview, status: "accepted", timestamp: new Date().toISOString() });
         response.status(202).json({ id: wamid, recipient: to, status: "accepted", timestamp: new Date().toISOString() });
     } catch (error) {
         next(error);
@@ -172,7 +188,7 @@ router.post("/send-card", ensureConfigured, express.raw({ type: "image/png", lim
         });
         const wamid = result.messages?.[0]?.id;
         if (!wamid) return response.status(502).json({ error: "Meta accepted no message ID; delivery cannot be confirmed." });
-        recordMessage({ id: wamid, direction: "outbound", recipient: to, text: caption || "Membership ID card", status: "accepted", timestamp: new Date().toISOString() });
+        recordMessage({ id: wamid, gym_id: request.gymId, direction: "outbound", recipient: to, text: caption || "Membership ID card", status: "accepted", timestamp: new Date().toISOString() });
         response.status(202).json({ id: wamid, recipient: to, status: "accepted", timestamp: new Date().toISOString() });
     } catch (error) {
         next(error);
@@ -190,7 +206,7 @@ router.get("/webhook", (request, response) => {
     response.sendStatus(403);
 });
 
-router.post("/webhook", (request, response) => {
+router.post("/webhook", async (request, response, next) => {
     const body = request.body;
     if (!whatsappConfig.appSecret) return response.status(503).json({ error: "Webhook signature verification is not configured." });
     if (!Buffer.isBuffer(body)) return response.status(400).json({ error: "Expected a raw JSON webhook body." });
@@ -213,7 +229,12 @@ router.post("/webhook", (request, response) => {
         for (const change of entry.changes || []) {
             for (const message of change.value?.messages || []) {
                 const text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || "message"} received]`;
-                recordMessage({ id: message.id, direction: "inbound", from: message.from, to: change.value?.metadata?.display_phone_number || "", text, type: message.type, status: "received", timestamp: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : new Date().toISOString() });
+                try {
+                    const gymId = await findUniqueGymForPhone(message.from);
+                    recordMessage({ id: message.id, gym_id: gymId, direction: "inbound", from: message.from, to: change.value?.metadata?.display_phone_number || "", text, type: message.type, status: "received", timestamp: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : new Date().toISOString() });
+                } catch (error) {
+                    return next(error);
+                }
             }
             for (const status of change.value?.statuses || []) {
                 recordMessage({ id: status.id, direction: "outbound", recipient: status.recipient_id, status: status.status || "unknown", timestamp: status.timestamp ? new Date(Number(status.timestamp) * 1000).toISOString() : new Date().toISOString(), error: status.errors?.[0]?.title || "" });

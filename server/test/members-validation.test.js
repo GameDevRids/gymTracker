@@ -46,16 +46,20 @@ test("member creation requires full name and phone only", () => {
     }
 });
 
-test("phone number must contain exactly 10 numeric digits", () => {
+test("phone number must be a valid Indian mobile number and is normalized", () => {
     const accepted = invoke(validateMemberPayload("create"), { body: { ...validMember, phone: "9876543210" } });
     assert.equal(accepted.nextCalled, true);
     assert.equal(accepted.request.validatedMember.phone, "9876543210");
 
-    for (const phone of ["987654321", "98765432101", "98765abc10", "98765 43210", "+9876543210"]) {
+    const withCountryCode = invoke(validateMemberPayload("create"), { body: { ...validMember, phone: "+919876543210" } });
+    assert.equal(withCountryCode.nextCalled, true);
+    assert.equal(withCountryCode.request.validatedMember.phone, "9876543210");
+
+    for (const phone of ["987654321", "98765432101", "98765abc10", "98765 43210", "+9876543210", "5876543210", "+915876543210"]) {
         const rejected = invoke(validateMemberPayload("create"), { body: { ...validMember, phone } });
         assert.equal(rejected.nextCalled, false, `${phone} should be rejected`);
         assert.equal(rejected.response.statusCode, 400);
-        assert.equal(rejected.response.body.message, "Phone number must contain exactly 10 digits.");
+        assert.match(rejected.response.body.message, /valid Indian phone number/);
     }
 });
 
@@ -85,6 +89,8 @@ test("membership dates are rejected by normal member create and update requests"
 test("status is restricted to the database-supported values", () => {
     const result = invoke(validateMemberPayload("create"), { body: { ...validMember, status: "expired" } });
     assert.equal(result.response.statusCode, 400);
+    const trimmed = invoke(validateMemberPayload("create"), { body: { ...validMember, status: " active " } });
+    assert.equal(trimmed.nextCalled, true);
 });
 
 test("protected and unsupported fields are rejected", () => {
@@ -113,5 +119,24 @@ test("member list pagination and status are validated", () => {
     assert.equal(invalidLimit.response.statusCode, 400);
     assert.equal(invalidStatus.response.statusCode, 400);
     assert.equal(valid.nextCalled, true);
-    assert.deepEqual(valid.request.memberListQuery, { page: 2, limit: 10, status: "active", search: "Taylor" });
+    assert.deepEqual(valid.request.memberListQuery, {
+        page: 2,
+        limit: 10,
+        status: "active",
+        search: "Taylor",
+        includeArchived: false
+    });
+});
+
+test("member list pagination defaults to 25 and parses include_archived", () => {
+    const defaults = invoke(validateMemberListQuery, { query: {} });
+    const includeArchived = invoke(validateMemberListQuery, { query: { include_archived: "true" } });
+    assert.deepEqual(defaults.request.memberListQuery, {
+        page: 1,
+        limit: 25,
+        status: undefined,
+        search: "",
+        includeArchived: false
+    });
+    assert.equal(includeArchived.request.memberListQuery.includeArchived, true);
 });

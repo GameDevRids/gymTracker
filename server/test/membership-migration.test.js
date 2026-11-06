@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const migration = readFileSync(new URL("../migrations/004_create_member_memberships.sql", import.meta.url), "utf8");
+const archiveMigration = readFileSync(new URL("../migrations/005_add_members_archived_at.sql", import.meta.url), "utf8");
 const assignmentFunction = migration.slice(migration.indexOf("CREATE OR REPLACE FUNCTION public.gympulse_assign_member_plan"));
+
+test("archive migration adds a nullable timestamp without deleting member records", () => {
+    assert.match(archiveMigration, /ADD COLUMN IF NOT EXISTS archived_at timestamptz/i);
+    assert.doesNotMatch(archiveMigration, /\bDELETE\b|\bDROP\b/i);
+});
 
 test("assignment SQL retains the member lock and overlap guard and locks the plan for share", () => {
     assert.match(assignmentFunction, /WHERE id = p_member_id\s+FOR UPDATE/);

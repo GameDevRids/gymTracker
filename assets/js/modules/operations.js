@@ -1,6 +1,7 @@
-import { escapeHTML, formatCurrency, formatDate, localISODate, daysBetween, memberStatus, statusPill, monthKey } from "../utils.js";
+import { escapeHTML, formatINR, formatDate, localISODate, daysBetween, memberStatus, statusPill, monthKey } from "../utils.js";
 import { state, memberBalance, getPlan, getMember } from "../state.js";
 import { emptyRow, memberTableRow } from "../components/tables.js";
+import { getLanguage, t } from "../i18n.js";
 
 const pageHeading = (title, description, actions = "") =>
     `<div class="page-heading"><div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`;
@@ -42,9 +43,9 @@ function renderPayments() {
     const actions = `<button class="button button-secondary" data-action="export-payments">↓ Export CSV</button><button class="button button-primary" data-action="record-payment">＋ Record payment</button>`;
     const payments = [...state.payments].sort((a, b) => b.date.localeCompare(a.date));
     return `${pageHeading("Payments", "Record collections and keep track of outstanding balances.", actions)}
-        <div class="summary-row"><span class="summary-chip"><strong>${formatCurrency(revenue)}</strong> collected this month</span><span class="summary-chip"><strong>${formatCurrency(pending)}</strong> outstanding</span><span class="summary-chip"><strong>${payments.length}</strong> transactions</span></div>
+        <div class="summary-row"><span class="summary-chip"><strong>${formatINR(revenue)}</strong> collected this month <span class="sample-data-badge">Sample data</span></span><span class="summary-chip"><strong>${formatINR(pending)}</strong> outstanding</span><span class="summary-chip"><strong>${payments.length}</strong> transactions</span></div>
         <div class="toolbar"><input class="search-field" id="payment-search" type="search" placeholder="Search transactions or members…" aria-label="Search payments"><select class="field-control" id="payment-method-filter" aria-label="Filter by payment method"><option value="all">All methods</option>${["UPI", "Cash", "Card", "Bank transfer", "Other"].map((method) => `<option>${method}</option>`).join("")}</select><input class="field-control" id="payment-date-filter" type="date" aria-label="Filter payments by date"></div>
-        <section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Transaction</th><th>Member</th><th>Date</th><th>Method</th><th>Amount</th><th>Status</th><th>Receipt</th></tr></thead><tbody>${payments.length ? payments.map((payment) => `<tr data-payment-row data-method="${escapeHTML(payment.method)}" data-date="${escapeHTML(payment.date)}"><td>${escapeHTML(payment.id)}</td><td>${escapeHTML(getMember(payment.memberId)?.name || "Removed member")}</td><td>${formatDate(payment.date)}</td><td>${escapeHTML(payment.method)}</td><td>${formatCurrency(payment.amount)}</td><td>${statusPill(payment.status)}</td><td><button class="text-button" data-action="receipt" data-id="${escapeHTML(payment.id)}">Preview</button></td></tr>`).join("") : emptyRow(7)}</tbody></table></div></section>
+        <section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Transaction</th><th>Member</th><th>Date</th><th>Method</th><th>Amount</th><th>Status</th><th>Receipt</th></tr></thead><tbody>${payments.length ? payments.map((payment) => `<tr data-payment-row data-method="${escapeHTML(payment.method)}" data-date="${escapeHTML(payment.date)}"><td>${escapeHTML(payment.id)}</td><td>${escapeHTML(getMember(payment.memberId)?.name || "Removed member")}</td><td>${formatDate(payment.date)}</td><td>${escapeHTML(payment.method)}</td><td>${formatINR(payment.amount)}</td><td>${statusPill(payment.status)}</td><td><button class="text-button" data-action="receipt" data-id="${escapeHTML(payment.id)}">Preview</button></td></tr>`).join("") : emptyRow(7)}</tbody></table></div></section>
         <div class="note-box" style="margin-top:13px">GymPulse records manual payments only. No payment gateway is connected. Outstanding balances are calculated from membership fees less successful recorded payments.</div>`;
 }
 
@@ -62,7 +63,7 @@ function renderRenewals() {
     return `${pageHeading("Renewals", "Stay ahead of upcoming expiries and keep memberships active.", `<button class="button button-secondary" data-action="export-renewals">↓ Export list</button>`)}
         <div class="summary-row"><span class="summary-chip"><strong>${buckets.expired}</strong> expired</span><span class="summary-chip"><strong>${buckets.today}</strong> expire today</span><span class="summary-chip"><strong>${buckets.three}</strong> within 3 days</span><span class="summary-chip"><strong>${buckets.seven}</strong> within 7 days</span><span class="summary-chip"><strong>${buckets.thirty}</strong> within 30 days</span></div>
         <div class="toolbar"><select class="field-control" id="renewal-filter"><option value="all">All due</option><option value="expired">Expired</option><option value="today">Today</option><option value="3">Within 3 days</option><option value="7">Within 7 days</option><option value="30">Within 30 days</option></select></div>
-        <section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expiry</th><th>Days</th><th>Balance</th><th>Action</th></tr></thead><tbody>${members.length ? members.map(({ member, days }) => `<tr data-renewal-row data-days="${days}"><td>${escapeHTML(member.name)}</td><td>${escapeHTML(member.phone)}</td><td>${escapeHTML(getPlan(member.planId)?.name || "—")}</td><td>${formatDate(member.expiryDate)}</td><td>${days < 0 ? `${Math.abs(days)} days ago` : days === 0 ? "Today" : `${days} days`}</td><td>${formatCurrency(memberBalance(member))}</td><td><button class="button button-secondary button-small" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew</button></td></tr>`).join("") : emptyRow(7, "No memberships due in this window.")}</tbody></table></div></section>`;
+        <section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expiry</th><th>Days</th><th>Balance</th><th>Action</th></tr></thead><tbody>${members.length ? members.map(({ member, days }) => `<tr data-renewal-row data-days="${days}"><td>${escapeHTML(member.name)}</td><td>${escapeHTML(member.phone)}</td><td>${escapeHTML(getPlan(member.planId)?.name || "—")}</td><td>${formatDate(member.expiryDate)}</td><td>${days < 0 ? `${Math.abs(days)} days ago` : days === 0 ? "Today" : `${days} days`}</td><td>${formatINR(memberBalance(member))}</td><td><button class="button button-secondary button-small" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew</button></td></tr>`).join("") : emptyRow(7, "No memberships due in this window.")}</tbody></table></div></section>`;
 }
 
 function retentionRows() {
@@ -125,8 +126,8 @@ function renderAnalytics() {
             ${metric("New memberships", newMembers, "Joined this month")}
             ${metric("Renewals", renewalsThisMonth, "Recorded this month")}
             ${metric("Renewal rate", `${renewalRate}%`, "Renewed / due members · last 30 days")}
-            ${metric("Avg. revenue per member", formatCurrency(avgRevenue), "All-time collected / members")}
-            ${metric("Outstanding balance", formatCurrency(outstanding), "Current billed fees less collections")}
+            ${metric("Avg. revenue per member", formatINR(avgRevenue), "All-time collected / members")}
+            ${metric("Outstanding balance", formatINR(outstanding), "Current billed fees less collections")}
             ${metric("Attendance frequency", `${recentAttendance} visits`, "Recorded during last 30 days")}
         </div>
         <div class="grid content-grid">
@@ -208,7 +209,7 @@ export function drawAnalyticsCharts() {
     if (outstandingNode) charts.push(new window.Chart(outstandingNode, {
         type: "line",
         data: { labels: outstandingMonths.map((item) => item.label), datasets: [{ data: outstandingMonths.map((item) => item.value), borderColor: "#c58255", backgroundColor: "rgba(197,130,85,.12)", fill: true, tension: .35 }] },
-        options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatCurrency(context.raw) } } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#eef1ed" } } } }
+        options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatINR(context.raw) } } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#eef1ed" }, ticks: { callback: (value) => formatINR(value) } } } }
     }));
     window.gymPulseCharts = charts;
 }
@@ -235,7 +236,7 @@ function notifications() {
         const inactiveDays = attendance ? daysBetween(attendance.checkedInAt.slice(0, 10)) : null;
         const preferences = state.gym.preferences || {};
         if (preferences.expiryReminderDays !== 0 && days >= 0 && days <= (preferences.expiryReminderDays || 7)) list.push({ type: "Membership expiry", member, message: `Hi ${member.name.split(" ")[0]}, your ${getPlan(member.planId)?.name || "gym"} membership is due to expire on ${formatDate(member.expiryDate)}. Reply to learn about renewal options.` });
-        if (preferences.paymentReminders !== false && due > 0) list.push({ type: "Payment due", member, message: `Hi ${member.name.split(" ")[0]}, a balance of ${formatCurrency(due)} remains on your membership. Please contact the gym if you have any questions.` });
+        if (preferences.paymentReminders !== false && due > 0) list.push({ type: "Payment due", member, message: `Hi ${member.name.split(" ")[0]}, a balance of ${formatINR(due)} remains on your membership. Please contact the gym if you have any questions.` });
         if (preferences.inactivityReminders !== false && (inactiveDays === null || inactiveDays >= 14)) list.push({ type: "Inactive member", member, message: `Hi ${member.name.split(" ")[0]}, we haven't seen you at the gym recently. We hope you are doing well and would love to see you back.` });
     });
     state.members.filter((member) => daysBetween(member.joinedAt) >= 0 && daysBetween(member.joinedAt) <= 7).forEach((member) => {
@@ -245,7 +246,7 @@ function notifications() {
         list.push({ type: "Attendance alert", member: getMember(record.memberId), message: `Attendance was recorded on ${formatDate(record.checkedInAt)}. This local alert is a preview and has not been delivered.` });
     });
     [...state.payments].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4).forEach((payment) => {
-        list.push({ type: "Successful payment", member: getMember(payment.memberId), message: `Payment of ${formatCurrency(payment.amount)} was recorded on ${formatDate(payment.date)}. Transaction reference: ${payment.id}.` });
+        list.push({ type: "Successful payment", member: getMember(payment.memberId), message: `Payment of ${formatINR(payment.amount)} was recorded on ${formatDate(payment.date)}. Transaction reference: ${payment.id}.` });
     });
     return list.slice(0, 18);
 }
@@ -281,6 +282,7 @@ function renderSettings() {
             ${field("Address", "address", gym.address, "text", false, true)}
             <div class="field"><label for="currency">Currency</label><select name="currency" id="currency"><option value="INR" ${gym.currency === "INR" ? "selected" : ""}>INR · Indian Rupee (₹)</option><option value="USD" ${gym.currency === "USD" ? "selected" : ""}>USD · US Dollar ($)</option></select></div>
             <div class="field"><label for="dateFormat">Date format</label><select name="dateFormat" id="dateFormat"><option ${gym.dateFormat === "DD MMM YYYY" ? "selected" : ""}>DD MMM YYYY</option><option ${gym.dateFormat === "DD/MM/YYYY" ? "selected" : ""}>DD/MM/YYYY</option></select></div>
+            <div class="field"><label for="setting-language">${t("language")}</label><select id="setting-language" name="language"><option value="en" ${getLanguage() === "en" ? "selected" : ""}>${t("english")}</option><option value="hi" ${getLanguage() === "hi" ? "selected" : ""}>${t("hindi")}</option><option value="mr" ${getLanguage() === "mr" ? "selected" : ""}>${t("marathi")}</option></select></div>
             <div class="field full"><span class="helper-text">Logo placeholder · Upload support can be connected when a backend is added.</span></div>
             <div class="field"><label for="expiryReminderDays">Expiry reminder window (days)</label><input id="expiryReminderDays" name="expiryReminderDays" type="number" min="0" max="90" value="${Number(preferences.expiryReminderDays)}"></div>
             <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="paymentReminders" ${preferences.paymentReminders !== false ? "checked" : ""}> Preview payment-due reminders</label></div>

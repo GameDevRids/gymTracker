@@ -1,10 +1,14 @@
 import { createDemoState } from "../../data/demo-data.js";
 
-const STORAGE_KEY = "gympulse.prototype.v1";
+let storageKey = "gympulse.prototype.v1";
+
+export function setStorageUser(userId) {
+    storageKey = userId ? `gympulse.owner.${encodeURIComponent(userId)}.v1` : "gympulse.prototype.v1";
+}
 
 export function loadState() {
     try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved = localStorage.getItem(storageKey);
         if (!saved) {
             const initial = createDemoState();
             saveState(initial);
@@ -22,7 +26,7 @@ export function loadState() {
 
 export function saveState(state) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(storageKey, JSON.stringify(state));
     } catch (error) {
         if (error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "SecurityError")) {
             throw new Error("GymPulse could not save to browser storage. Check browser storage permissions and available space.");

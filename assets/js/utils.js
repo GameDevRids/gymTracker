@@ -22,6 +22,15 @@ export function localISODate(date = new Date()) {
     return value.toISOString().slice(0, 10);
 }
 
+export function indiaISODate(date = new Date()) {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).format(date);
+}
+
 export function addDays(dateString, days) {
     const date = new Date(`${dateString}T12:00:00`);
     date.setDate(date.getDate() + Number(days));
@@ -47,6 +56,23 @@ export function formatCurrency(amount, currency = configuredCurrency) {
     return new Intl.NumberFormat("en-IN", {
         style: "currency", currency, maximumFractionDigits: 0
     }).format(Number(amount) || 0);
+}
+
+export function formatINR(amount) {
+    return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0
+    }).format(Number(amount) || 0);
+}
+
+export function isValidIndianPhone(value) {
+    return /^(?:\+91)?[6-9]\d{9}$/.test(String(value || "").trim());
+}
+
+export function normalizeIndianPhone(value) {
+    const phone = String(value || "").trim();
+    return phone.startsWith("+91") ? phone.slice(3) : phone;
 }
 
 export function memberStatus(member) {

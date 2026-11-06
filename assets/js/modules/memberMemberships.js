@@ -1,22 +1,15 @@
-import { apiClient } from "../api/apiClient.js";
+import { createMemberPlanAssignment, fetchMemberMembershipHistory, fetchMemberships } from "../api/membershipsApi.js";
+import { fetchActivePlans } from "../api/plansApi.js";
 import { closeModal, openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { state, getMember } from "../state.js";
-import { escapeHTML, formatDate, localISODate, statusPill } from "../utils.js";
+import { escapeHTML, formatDate, formatINR, localISODate, statusPill } from "../utils.js";
 
 const membershipsByMember = new Map();
 let allMemberships = [];
 let allMembershipsLoaded = false;
 let assigning = false;
 let assignmentModalRequest = 0;
-
-function formatINR(amount) {
-    return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency: "INR",
-        maximumFractionDigits: 2
-    }).format(Number(amount) || 0);
-}
 
 export function getAllMemberships() {
     return allMemberships;
@@ -27,21 +20,59 @@ export function areAllMembershipsLoaded() {
 }
 
 export function getCurrentMembership(memberId) {
-    const memberships = membershipsByMember.get(memberId)
-        || allMemberships.filter((membership) => membership.member_id === memberId);
+    if (membershipsByMember.has(memberId)) {
+        return selectCurrentMembership(membershipsByMember.get(memberId));
+    }
+    const member = getMember(memberId);
+    if (member?.currentMembership) return member.currentMembership;
+    if (allMembershipsLoaded) {
+        return selectCurrentMembership(allMemberships.filter((membership) => membership.member_id === memberId));
+    }
+    return null;
+}
+
+function selectCurrentMembership(memberships) {
     return memberships.find((membership) => membership.effective_status === "active")
-        || memberships.find((membership) => membership.effective_status === "upcoming")
-        || memberships[0]
+        || memberships
+            .filter((membership) => membership.effective_status === "upcoming")
+            .sort((a, b) => a.start_date.localeCompare(b.start_date)
+                || String(b.created_at || "").localeCompare(String(a.created_at || "")))[0]
+        || memberships
+            .slice()
+            .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))
+                || b.start_date.localeCompare(a.start_date))[0]
         || null;
+}
+
+export function setMemberCurrentMembership(memberId, membership) {
+    const history = membershipsByMember.get(memberId) || [];
+    const updatedHistory = membership
+        ? [...history.filter((entry) => entry.id !== membership.id), membership]
+        : history;
+    membershipsByMember.set(memberId, updatedHistory);
+    allMemberships = [
+        ...allMemberships.filter((entry) => entry.member_id !== memberId),
+        ...updatedHistory
+    ];
+    const member = getMember(memberId);
+    if (member) {
+        const currentMembership = selectCurrentMembership(updatedHistory);
+        member.currentMembership = currentMembership;
+        member.membershipStatus = currentMembership?.effective_status || "unassigned";
+        member.planId = currentMembership?.plan_id || "";
+        member.startDate = currentMembership?.start_date || "";
+        member.expiryDate = currentMembership?.end_date || "";
+    }
 }
 
 export async function loadAllMemberships(onLoaded = () => {}) {
     try {
-        const firstPage = await apiClient.get("/api/memberships", { params: { page: 1, limit: 100 } });
-        const pagination = firstPage?.data?.pagination;
+        const firstPage = await fetchMemberships({ page: 1, limit: 100 });
+        const total = firstPage?.total ?? firstPage?.data?.pagination?.total ?? 0;
+        const totalPages = firstPage?.data?.pagination?.totalPages ?? Math.ceil(total / 100);
         const entries = Array.isArray(firstPage?.data?.memberships) ? [...firstPage.data.memberships] : [];
-        for (let page = 2; page <= (pagination?.totalPages || 1); page += 1) {
-            const response = await apiClient.get("/api/memberships", { params: { page, limit: 100 } });
+        for (let page = 2; page <= (totalPages || 1); page += 1) {
+            const response = await fetchMemberships({ page, limit: 100 });
             if (Array.isArray(response?.data?.memberships)) entries.push(...response.data.memberships);
         }
         allMemberships = entries;
@@ -61,8 +92,7 @@ export async function loadMemberMembershipHistory(memberId) {
     if (target) target.innerHTML = `<div class="empty-state">Loading membership history…</div>`;
     if (currentTarget) currentTarget.innerHTML = `<div class="empty-state">Loading membership details…</div>`;
     try {
-        const response = await apiClient.get(`/api/members/${memberId}/memberships`);
-        const memberships = Array.isArray(response?.data) ? response.data : [];
+        const memberships = await fetchMemberMembershipHistory(memberId);
         membershipsByMember.set(memberId, memberships);
         if (target?.isConnected && target.dataset.memberId === memberId) {
             target.innerHTML = renderMembershipHistory(memberId, memberships);
@@ -80,9 +110,7 @@ export async function loadMemberMembershipHistory(memberId) {
 }
 
 function renderCurrentMembership(memberships) {
-    const current = memberships.find((membership) => membership.effective_status === "active")
-        || memberships.find((membership) => membership.effective_status === "upcoming")
-        || memberships[0];
+    const current = selectCurrentMembership(memberships);
     if (!current) return `<div class="empty-state">No plan has been assigned to this member yet.</div>`;
     return `<div class="profile-fields membership-fields">
         <div><label>Plan</label><strong>${escapeHTML(current.plan_name)}</strong></div>
@@ -174,18 +202,11 @@ export async function openAssignmentModal(memberId) {
     });
     document.querySelector("#modal-root .modal").dataset.assignmentRequest = String(requestId);
     try {
-        const [planResponse, membershipResponse] = await Promise.all([
-            apiClient.get("/api/plans", { params: { page: 1, limit: 100, status: "active" } }),
-            apiClient.get(`/api/members/${memberId}/memberships`)
+        const [plans, memberships] = await Promise.all([
+            fetchActivePlans(),
+            fetchMemberMembershipHistory(memberId)
         ]);
         if (!isCurrentAssignmentModal(requestId)) return;
-        const plans = Array.isArray(planResponse?.data?.plans) ? [...planResponse.data.plans] : [];
-        for (let page = 2; page <= (planResponse?.data?.pagination?.totalPages || 1); page += 1) {
-            const response = await apiClient.get("/api/plans", { params: { page, limit: 100, status: "active" } });
-            if (!isCurrentAssignmentModal(requestId)) return;
-            if (Array.isArray(response?.data?.plans)) plans.push(...response.data.plans);
-        }
-        const memberships = Array.isArray(membershipResponse?.data) ? membershipResponse.data : [];
         membershipsByMember.set(memberId, memberships);
         const form = renderAssignmentForm(memberId, plans);
         const modal = document.querySelector("#modal-root .modal");
@@ -257,14 +278,12 @@ export async function submitMembershipAssignment(form, onUpdated) {
     const submitButton = document.querySelector('[type="submit"][form="membership-assignment-form"]');
     if (submitButton) submitButton.disabled = true;
     try {
-        await apiClient.post(`/api/members/${memberId}/memberships`, { plan_id: planId, start_date: startDate });
-        const member = getMember(memberId);
-        if (member) {
-            member.startDate = startDate;
-            member.expiryDate = endDate;
-        }
+        const assignment = await createMemberPlanAssignment(memberId, planId, startDate);
+        if (!assignment) throw new Error("The assignment API did not return the saved membership.");
+        setMemberCurrentMembership(memberId, assignment);
         closeModal();
         toast(`${selected.dataset.name} assigned through ${formatDate(endDate)}.`);
+        onUpdated();
         await Promise.all([loadMemberMembershipHistory(memberId), loadAllMemberships()]);
         onUpdated();
         await loadMemberMembershipHistory(memberId);

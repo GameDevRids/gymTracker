@@ -1,8 +1,10 @@
 import { loadState, saveState, resetState } from "./storage.js";
 import { createDemoState } from "../../data/demo-data.js";
 import { apiClient } from "./api/apiClient.js";
+import { fetchMembers } from "./api/membersApi.js";
 
 export let initializationWarning = "";
+export let memberListPagination = { page: 1, limit: 25, total: 0 };
 export const state = (() => {
     try {
         return loadState();
@@ -12,6 +14,7 @@ export const state = (() => {
     }
 })();
 if (!state.whatsapp) state.whatsapp = {};
+if (!state.apiMemberPayments) state.apiMemberPayments = {};
 
 export function persist() { saveState(state); }
 
@@ -23,6 +26,7 @@ export function resetDemo() {
 
 export function memberFromApiRow(member) {
     if (!member) return null;
+    const currentMembership = member.current_membership || null;
     return {
         id: member.id,
         memberCode: member.member_code || "",
@@ -32,9 +36,11 @@ export function memberFromApiRow(member) {
         dob: member.date_of_birth || "",
         gender: member.gender || "",
         joinedAt: member.created_at ? member.created_at.slice(0, 10) : "",
-        planId: "",
-        startDate: member.membership_start_date || "",
-        expiryDate: member.membership_end_date || "",
+        planId: currentMembership?.plan_id || "",
+        currentMembership,
+        membershipStatus: member.membership_status || currentMembership?.effective_status || "unassigned",
+        startDate: currentMembership?.start_date || "",
+        expiryDate: currentMembership?.end_date || "",
         status: member.status === "suspended" ? "suspended" : "active",
         totalFees: 0,
         charges: [],
@@ -67,12 +73,17 @@ export async function loadMembersFromApi(options = {}) {
     const status = options.status && ["active", "suspended"].includes(options.status) ? options.status : undefined;
     const params = {
         page: options.page ?? 1,
-        limit: options.limit ?? 100,
+        limit: options.limit ?? 25,
         ...(status ? { status } : {}),
         ...(options.search ? { search: options.search } : {})
     };
-    const response = await apiClient.get("/api/members", { params });
+    const response = await fetchMembers(params);
     const members = Array.isArray(response?.data?.members) ? response.data.members : [];
+    memberListPagination = {
+        page: response?.page ?? response?.data?.pagination?.page ?? params.page,
+        limit: response?.limit ?? response?.data?.pagination?.limit ?? params.limit,
+        total: response?.total ?? response?.data?.pagination?.total ?? members.length
+    };
     state.members = members.map((member) => memberFromApiRow(member));
     return state.members;
 }
@@ -104,11 +115,19 @@ export async function updateMemberOnApi(id, member) {
 export async function deleteMemberOnApi(id) {
     await apiClient.delete(`/api/members/${id}`);
     state.members = state.members.filter((member) => member.id !== id);
+    memberListPagination = {
+        ...memberListPagination,
+        total: Math.max(0, memberListPagination.total - 1)
+    };
 }
 
 export function getPlan(planId) { return state.plans.find((plan) => plan.id === planId); }
 export function getMember(memberId) { return state.members.find((member) => member.id === memberId); }
-export function getMemberPayments(memberId) { return state.payments.filter((payment) => payment.memberId === memberId); }
+export function getMemberPayments(memberId) {
+    const stored = state.payments.filter((payment) => payment.memberId === memberId);
+    const apiPayments = state.apiMemberPayments[memberId] || [];
+    return [...apiPayments, ...stored];
+}
 export function memberBalance(member) {
     return Math.max(0, Number(member.totalFees || 0) - state.payments.filter((payment) => payment.memberId === member.id && payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
 }

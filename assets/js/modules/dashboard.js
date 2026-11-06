@@ -1,7 +1,7 @@
-import { escapeHTML, formatCurrency, formatDate, localISODate, monthKey, daysBetween, statusPill } from "../utils.js";
+import { escapeHTML, formatINR, formatDate, indiaISODate, localISODate, monthKey, daysBetween, statusPill } from "../utils.js";
 import { state, memberBalance, getPlan } from "../state.js";
 import { emptyRow } from "../components/tables.js";
-import { areAllMembershipsLoaded, getAllMemberships } from "./memberMemberships.js";
+import { areAllMembershipsLoaded, getCurrentMembership } from "./memberMemberships.js";
 
 const sameMonth = (date, month) => String(date || "").slice(0, 7) === month;
 
@@ -19,10 +19,11 @@ function monthSeries(count = 6) {
 }
 
 export function renderDashboard() {
-    const today = localISODate();
+    const today = indiaISODate();
     const currentMonth = monthKey();
-    const memberships = areAllMembershipsLoaded() ? getAllMemberships() : [];
-    const activeMemberships = memberships.filter((membership) => membership.effective_status === "active");
+    const activeMemberships = state.members
+        .map((member) => getCurrentMembership(member.id))
+        .filter((membership) => membership?.effective_status === "active");
     const active = new Set(activeMemberships.map((membership) => membership.member_id)).size;
     const newMembers = state.members.filter((member) => sameMonth(member.joinedAt, currentMonth)).length;
     const attendanceToday = state.attendance.filter((record) => record.checkedInAt.slice(0, 10) === today).length;
@@ -53,34 +54,34 @@ export function renderDashboard() {
     });
     const recentActivity = [
         ...state.attendance.map((record) => ({ kind: "checked in", memberId: record.memberId, date: record.checkedInAt, value: "" })),
-        ...state.payments.map((payment) => ({ kind: "made a payment", memberId: payment.memberId, date: `${payment.date}T12:00:00`, value: formatCurrency(payment.amount) })),
+        ...state.payments.map((payment) => ({ kind: "made a payment", memberId: payment.memberId, date: `${payment.date}T12:00:00`, value: formatINR(payment.amount) })),
         ...state.members.map((member) => ({ kind: "joined the gym", memberId: member.id, date: `${member.joinedAt}T12:00:00`, value: "" })),
         ...state.members.flatMap((member) => (member.renewals || []).map((renewal) => ({ kind: "renewed membership", memberId: member.id, date: `${renewal.date}T12:00:00`, value: getPlan(renewal.planId)?.name || "" })))
     ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
     const alerts = [
         expiring ? { title: `${expiring} memberships expiring soon`, detail: "Review renewals due in the next 30 days.", view: "renewals" } : null,
-        outstanding ? { title: `${formatCurrency(outstanding)} in outstanding fees`, detail: "Follow up on pending and partial payments.", view: "payments" } : null,
+        outstanding ? { title: `${formatINR(outstanding)} in outstanding fees`, detail: "Follow up on pending and partial payments.", view: "payments" } : null,
         inactive ? { title: `${inactive} members may need a check-in`, detail: "Based on attendance activity, not a churn prediction.", view: "retention" } : null
     ].filter(Boolean);
 
     return `
-        <div class="page-heading"><div><h1>Good ${new Date().getHours() < 12 ? "morning" : "afternoon"}, Alex <span aria-hidden="true">✦</span></h1><p>Here’s what’s happening at ${escapeHTML(state.gym.name)} today.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="export-members">↓ Export members</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>
+        <div class="page-heading"><div><h1>Good ${new Date().getHours() < 12 ? "morning" : "afternoon"}, Alex <span aria-hidden="true">✦</span></h1><p>Here’s what’s happening at ${escapeHTML(state.gym.name)} today.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="export-members">↓ Export members</button><button class="button button-secondary" data-action="quick-add-member">Quick add</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>
         <div class="grid kpi-grid">
             ${kpi("Total members", state.members.length, `${active} currently active`, "♙")}
             ${kpi("New members", newMembers, "Joined this month", "✚")}
-            ${kpi("Today's attendance", attendanceToday, "Check-ins recorded today", "◷")}
-            ${kpi("Revenue collected", formatCurrency(revenue), "Payments received this month", "₹")}
-            ${kpi("Pending payments", formatCurrency(outstanding), "Outstanding member balances", "◌")}
+            ${kpi("Today's attendance", attendanceToday, "Check-ins recorded today", "◷", true)}
+            ${kpi("Revenue collected", formatINR(revenue), "Payments received this month", "₹", true)}
+            ${kpi("Pending payments", formatINR(outstanding), "Outstanding member balances", "◌")}
             ${kpi("Expiring soon", expiring, "Memberships due within 30 days", "⟳")}
             ${kpi("Inactive members", inactive, "No visit recorded in 14+ days", "♡")}
             ${kpi("Active members", active, "Valid membership today", "✓")}
         </div>
         <div class="grid content-grid">
-            <section class="card"><div class="card-header"><div><h2>Revenue overview</h2><p>Collected payments · last 6 months</p></div><span class="badge-soft">INR</span></div><div class="chart-area"><canvas id="revenue-chart" aria-label="Revenue for last six months"></canvas><div class="chart-fallback" hidden>Chart library unavailable. Metrics remain available below.</div></div></section>
+            <section class="card"><div class="card-header"><div><h2>Revenue overview</h2><p>Collected payments · last 6 months <span class="sample-data-badge">Sample data</span></p></div><span class="badge-soft">INR</span></div><div class="chart-area"><canvas id="revenue-chart" aria-label="Revenue for last six months"></canvas><div class="chart-fallback" hidden>Chart library unavailable. Metrics remain available below.</div></div></section>
             <section class="card"><div class="card-header"><div><h2>Actionable alerts</h2><p>Things that may need your attention</p></div></div><div class="card-body"><div class="alert-list">${alerts.length ? alerts.map((alert) => `<button class="alert-item" data-view="${alert.view}"><span class="alert-symbol">!</span><span><strong>${escapeHTML(alert.title)}</strong><p>${escapeHTML(alert.detail)}</p></span></button>`).join("") : `<div class="empty-state">You're all caught up. Nice work!</div>`}</div></div></section>
         </div>
         <div class="grid bottom-grid">
-            <section class="card"><div class="card-header"><div><h2>Weekly attendance</h2><p>Recorded visits over the last 7 days</p></div></div><div class="chart-area"><canvas id="attendance-chart" aria-label="Weekly attendance"></canvas><div class="chart-fallback" hidden>Chart library unavailable.</div></div></section>
+            <section class="card"><div class="card-header"><div><h2>Weekly attendance</h2><p>Recorded visits over the last 7 days <span class="sample-data-badge">Sample data</span></p></div></div><div class="chart-area"><canvas id="attendance-chart" aria-label="Weekly attendance"></canvas><div class="chart-fallback" hidden>Chart library unavailable.</div></div></section>
             <section class="card"><div class="card-header"><div><h2>Member growth</h2><p>Total members by month</p></div></div><div class="chart-area"><canvas id="growth-chart" aria-label="Member growth"></canvas><div class="chart-fallback" hidden>Chart library unavailable.</div></div></section>
         </div>
         <div class="grid bottom-grid dashboard-secondary-grid">
@@ -98,8 +99,8 @@ export function renderDashboard() {
         }).join("") || emptyRow(6, areAllMembershipsLoaded() ? "No memberships expiring this week." : "Membership assignments are loading.")}</tbody></table></div></section>`;
 }
 
-function kpi(label, value, note, icon) {
-    return `<article class="card kpi-card"><div class="kpi-top"><span>${label}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${note}</div></article>`;
+function kpi(label, value, note, icon, sampleData = false) {
+    return `<article class="card kpi-card"><div class="kpi-top"><span>${label}${sampleData ? ' <span class="sample-data-badge">Sample data</span>' : ""}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${note}</div></article>`;
 }
 
 export function drawDashboardCharts() {
@@ -107,9 +108,9 @@ export function drawDashboardCharts() {
         document.querySelectorAll(".chart-fallback").forEach((item) => { item.hidden = false; });
         return;
     }
-    const activeMemberships = areAllMembershipsLoaded()
-        ? getAllMemberships().filter((membership) => membership.effective_status === "active")
-        : [];
+    const activeMemberships = state.members
+        .map((member) => getCurrentMembership(member.id))
+        .filter((membership) => membership?.effective_status === "active");
     const months = monthSeries();
     const dates = Array.from({ length: 7 }, (_, index) => {
         const date = new Date();
@@ -135,7 +136,7 @@ export function drawDashboardCharts() {
         new window.Chart(document.querySelector("#revenue-chart"), {
             type: "line",
             data: { labels: months.map((month) => month.label), datasets: [{ data: months.map((month) => month.revenue), borderColor: "#4b8b59", backgroundColor: "rgba(110,166,100,.12)", fill: true, tension: .38, pointRadius: 3, pointBackgroundColor: "#4b8b59" }] },
-            options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatCurrency(context.raw) } } }, scales: { x: { grid: { display: false }, ticks: { color: "#536057", font: { size: 11 } } }, y: { beginAtZero: true, grid: { color: "#eef1ed" }, ticks: { color: "#536057", font: { size: 11 }, callback: (value) => Number(value) >= 1000 ? `₹${Number(value) / 1000}k` : `₹${value}` } } } }
+            options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatINR(context.raw) } } }, scales: { x: { grid: { display: false }, ticks: { color: "#536057", font: { size: 11 } } }, y: { beginAtZero: true, grid: { color: "#eef1ed" }, ticks: { color: "#536057", font: { size: 11 }, callback: (value) => formatINR(value) } } } }
         }),
         new window.Chart(document.querySelector("#attendance-chart"), {
             type: "bar",

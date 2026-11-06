@@ -9,6 +9,8 @@
 .modal-close { width: 40px; height: 40px; flex: 0 0 auto; border: 0; border-radius: 7px; color: #35443a; background: #f2f5f1; font-size: 22px; }
 .modal-body { padding: 17px 21px; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 21px 18px; border-top: 1px solid #edf0ed; }
+.quick-add-form { display: grid; gap: 18px; }
+.quick-add-form .field input:not([type="checkbox"]):not([type="radio"]), .quick-add-form .field select { min-height: 56px; padding: 12px 14px; font-size: 16px; }
 .toast-region { position: fixed; z-index: 70; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; }
 .toast { display: flex; align-items: center; gap: 9px; min-width: 230px; max-width: min(390px, calc(100vw - 32px)); padding: 12px 15px; border: 1px solid #dce9dc; border-radius: 9px; color: #294b34; background: white; box-shadow: 0 5px 20px rgba(16, 43, 24, .12); font-size: 13px; animation: toast-in .18s ease-out; }
 .toast-error { border-color: #efd9d5; color: #853b34; }
@@ -17,6 +19,15 @@
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .confirm-copy { color: #48584d; font-size: 14px; line-height: 1.6; }
 .badge-soft { padding: 5px 8px; border-radius: 20px; color: #395c40; background: #eef5ea; font-size: 11px; font-weight: 600; }
+.sample-data-badge { display: inline-block; margin-left: 5px; padding: 2px 6px; border-radius: 10px; color: #66745f; background: #eef1e8; font-size: 9px; font-weight: 700; line-height: 1.4; white-space: nowrap; vertical-align: middle; }
+.expiring-list { display: grid; gap: 10px; }
+.expiring-card { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(110px, .8fr) minmax(120px, .8fr) auto minmax(180px, auto); align-items: center; gap: 14px; padding: 15px; }
+.expiring-member { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.expiring-member > div, .expiring-detail { display: grid; min-width: 0; gap: 4px; }
+.expiring-member strong, .expiring-detail strong { overflow-wrap: anywhere; }
+.expiring-member small, .expiring-detail small { color: #68766d; font-size: 12px; }
+.expiring-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.expiry-overdue { color: #8a433a; background: #fff0ed; }
 .chart-legend { display: flex; gap: 15px; align-items: center; color: #536057; font-size: 11px; }
 .chart-legend span { display: flex; gap: 5px; align-items: center; }
 .chart-legend i { width: 7px; height: 7px; border-radius: 50%; background: #78aa69; }

@@ -1,95 +1,97 @@
-const editableFields = new Set(["name", "description", "duration_days", "price", "is_active"]);
-const allowedStatuses = new Set(["active", "inactive"]);
+import { z } from "zod";
+
+const uuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+const planValueSchemas = {
+    name: z.string().trim().min(1).max(120),
+    description: z.string().max(2000).nullable().transform((value) => value?.trim() || null),
+    duration_days: z.number().int().positive(),
+    price: z.number().finite().nonnegative(),
+    is_active: z.boolean()
+};
+const editableFields = new Set(Object.keys(planValueSchemas));
+const planObjectSchema = z.record(z.string(), z.unknown());
+
+function sendValidationError(response, message) {
+    return response.status(400).json({ status: "error", message });
+}
+
+function planFieldError(field) {
+    if (field === "name") return "Plan name must be between 1 and 120 characters.";
+    if (field === "description") return "Plan description must be 2000 characters or fewer.";
+    if (field === "duration_days") return "Duration must be a positive whole number of days.";
+    if (field === "price") return "Price must be a valid non-negative number.";
+    return "Plan status must be active or inactive.";
+}
+
+const planListQuerySchema = z.object({
+    page: z.string().regex(/^\d+$/).optional().default("1"),
+    limit: z.string().regex(/^\d+$/).optional().default("25"),
+    status: z.enum(["active", "inactive"]).optional(),
+    search: z.string().max(100).optional()
+});
 
 export function validatePlanId(request, response, next) {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.params.id || "")) {
-        return response.status(400).json({ status: "error", message: "Plan ID must be a valid UUID." });
+    if (!uuidSchema.safeParse(request.params.id || "").success) {
+        return sendValidationError(response, "Plan ID must be a valid UUID.");
     }
     next();
 }
 
 export function validatePlanListQuery(request, response, next) {
-    const { page = "1", limit = "20", status, search } = request.query;
-    const pageNumber = Number(page);
-    const limitNumber = Number(limit);
-    if (!/^\d+$/.test(String(page)) || !Number.isSafeInteger(pageNumber) || pageNumber < 1) {
-        return response.status(400).json({ status: "error", message: "Page must be a positive integer." });
+    const parsed = planListQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        const message = issue.path[0] === "status"
+            ? "Status must be active or inactive."
+            : issue.path[0] === "search"
+                ? "Search must be 100 characters or fewer."
+                : issue.path[0] === "limit"
+                    ? "Limit must be an integer between 1 and 100."
+                    : "Page must be a positive integer.";
+        return sendValidationError(response, message);
     }
-    if (!/^\d+$/.test(String(limit)) || !Number.isSafeInteger(limitNumber) || limitNumber < 1 || limitNumber > 100) {
-        return response.status(400).json({ status: "error", message: "Limit must be an integer between 1 and 100." });
+
+    const page = Number(parsed.data.page);
+    const limit = Number(parsed.data.limit);
+    if (!Number.isSafeInteger(page) || page < 1) return sendValidationError(response, "Page must be a positive integer.");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        return sendValidationError(response, "Limit must be an integer between 1 and 100.");
     }
-    if (!Number.isSafeInteger((pageNumber - 1) * limitNumber)) {
-        return response.status(400).json({ status: "error", message: "Page and limit exceed the supported range." });
+    if (!Number.isSafeInteger((page - 1) * limit)) {
+        return sendValidationError(response, "Page and limit exceed the supported range.");
     }
-    if (status !== undefined && !allowedStatuses.has(status)) {
-        return response.status(400).json({ status: "error", message: "Status must be active or inactive." });
-    }
-    if (search !== undefined && (typeof search !== "string" || search.length > 100)) {
-        return response.status(400).json({ status: "error", message: "Search must be 100 characters or fewer." });
-    }
-    request.planListQuery = {
-        page: pageNumber,
-        limit: limitNumber,
-        status,
-        search: typeof search === "string" ? search.trim() : ""
-    };
+    request.planListQuery = { page, limit, status: parsed.data.status, search: parsed.data.search?.trim() || "" };
     next();
 }
 
 export function validatePlanPayload(mode) {
     return (request, response, next) => {
-        const body = request.body;
-        if (!body || typeof body !== "object" || Array.isArray(body)) {
-            return response.status(400).json({ status: "error", message: "Request body must be a JSON object." });
+        const parsedObject = planObjectSchema.safeParse(request.body);
+        if (!parsedObject.success || Array.isArray(request.body)) {
+            return sendValidationError(response, "Request body must be a JSON object.");
         }
 
+        const body = parsedObject.data;
         const keys = Object.keys(body);
         const unknownField = keys.find((key) => !editableFields.has(key));
         if (unknownField) {
-            return response.status(400).json({ status: "error", message: `Unsupported or protected field: ${unknownField}.` });
+            return sendValidationError(response, `Unsupported or protected field: ${unknownField}.`);
         }
         if (mode === "update" && keys.length === 0) {
-            return response.status(400).json({ status: "error", message: "Provide at least one field to update." });
+            return sendValidationError(response, "Provide at least one field to update.");
         }
 
         const plan = {};
         for (const [field, value] of Object.entries(body)) {
-            if (field === "name") {
-                if (typeof value !== "string" || !value.trim() || value.trim().length > 120) {
-                    return response.status(400).json({ status: "error", message: "Plan name must be between 1 and 120 characters." });
-                }
-                plan.name = value.trim();
-            } else if (field === "description") {
-                if (value !== null && (typeof value !== "string" || value.length > 2000)) {
-                    return response.status(400).json({ status: "error", message: "Plan description must be 2000 characters or fewer." });
-                }
-                plan.description = typeof value === "string" ? (value.trim() || null) : null;
-            } else if (field === "duration_days") {
-                if (!Number.isInteger(value) || value <= 0) {
-                    return response.status(400).json({ status: "error", message: "Duration must be a positive whole number of days." });
-                }
-                plan.duration_days = value;
-            } else if (field === "price") {
-                if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-                    return response.status(400).json({ status: "error", message: "Price must be a valid non-negative number." });
-                }
-                plan.price = value;
-            } else if (field === "is_active") {
-                if (typeof value !== "boolean") {
-                    return response.status(400).json({ status: "error", message: "Plan status must be active or inactive." });
-                }
-                plan.is_active = value;
-            }
+            const result = planValueSchemas[field].safeParse(value);
+            if (!result.success) return sendValidationError(response, planFieldError(field));
+            plan[field] = result.data;
         }
-
         if (mode === "create") {
             for (const field of ["name", "duration_days", "price"]) {
-                if (plan[field] === undefined) {
-                    return response.status(400).json({ status: "error", message: `${field} is required.` });
-                }
+                if (plan[field] === undefined) return sendValidationError(response, `${field} is required.`);
             }
         }
-
         request.validatedPlan = plan;
         next();
     };

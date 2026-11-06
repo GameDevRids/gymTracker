@@ -5,12 +5,12 @@ import {
     getPlan,
     getMember,
     memberBalance,
+    memberListPagination,
     initializationWarning,
     loadMembersFromApi,
     createMemberOnApi,
     updateMemberOnApi,
-    deleteMemberOnApi,
-    memberFromApiRow
+    deleteMemberOnApi
 } from "./state.js";
 import { renderDashboard, drawDashboardCharts } from "./modules/dashboard.js";
 import { renderMembers, renderProfile } from "./modules/members.js";
@@ -19,41 +19,160 @@ import {
     handleMembershipAction,
     loadAllMemberships,
     loadMemberMembershipHistory,
+    getCurrentMembership,
+    setMemberCurrentMembership,
     submitMembershipAssignment,
     updateAssignmentForm
 } from "./modules/memberMemberships.js";
+import { fetchActivePlans } from "./api/plansApi.js";
+import { createMemberPlanAssignment, fetchMemberMembershipHistory } from "./api/membershipsApi.js";
+import { createPayment, fetchMemberPayments } from "./api/paymentsApi.js";
+import { apiClient, clearAuthSession, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
+import { renderExpiring } from "./modules/expiring.js";
 import { renderOperationsPage, drawAnalyticsCharts } from "./modules/operations.js";
 import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
 import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleWhatsAppChange } from "./modules/whatsapp.js";
-import { escapeHTML, uid, localISODate, addDays, formatCurrency, formatDate, memberStatus, parseCSV, downloadCSV, daysBetween, setDateFormat, setCurrency } from "./utils.js";
+import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
+import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, setDateFormat, setCurrency } from "./utils.js";
+import { loadState, setStorageUser } from "./storage.js";
 
 const page = document.querySelector("#page-content");
 const viewTitles = {
-    overview: "Overview", members: "Members", plans: "Membership plans", attendance: "Attendance", payments: "Payments",
+    expiring: "Expiring soon", overview: "Overview", members: "Members", plans: "Membership plans", attendance: "Attendance", payments: "Payments",
     renewals: "Renewals", retention: "Retention", analytics: "Analytics", reports: "Reports",
     notifications: "Notifications", whatsapp: "WhatsApp inbox", integrations: "Integrations", settings: "Settings", profile: "Member profile"
 };
-let currentView = "overview";
+let currentView = "expiring";
 let profileId = "";
-let memberFilters = { search: "", filter: "all", sort: "name" };
+let memberFilters = { search: "", filter: "all", sort: "name", page: 1 };
+let memberSearchTimer;
+let memberRequestVersion = 0;
 let importedRows = [];
 let currentFileName = "members.csv";
+let memberPlanRequest = 0;
+let memberSaving = false;
+let expiringDays = 7;
+let expiringMemberships = [];
+let expiringStatus = "loading";
+let expiringRequestVersion = 0;
+let activeSession;
+
+function showAuthScreen(onboarding = false, message = "") {
+    document.querySelector("#auth-screen").hidden = false;
+    document.querySelector("#app-shell").hidden = true;
+    document.querySelector(".mobile-bottom-nav").hidden = true;
+    document.querySelector("#login-form").hidden = onboarding;
+    document.querySelector("#create-gym-form").hidden = !onboarding;
+    document.querySelector("#auth-title").textContent = onboarding ? "Create your gym" : "Sign in to GymPulse";
+    document.querySelector("#auth-description").textContent = onboarding
+        ? "Your account is ready. Set up a gym workspace to continue."
+        : "Use your owner account to manage your gym.";
+    const error = document.querySelector(onboarding ? "#gym-error" : "#auth-error");
+    error.textContent = message;
+    error.hidden = !message;
+}
+
+function saveAuthNotice(message) {
+    try {
+        sessionStorage.setItem("gympulse.auth.notice", message);
+    } catch (error) {
+        console.error("GymPulse could not save the sign-in notice.", error);
+    }
+}
+
+function takeAuthNotice() {
+    try {
+        const message = sessionStorage.getItem("gympulse.auth.notice") || "";
+        sessionStorage.removeItem("gympulse.auth.notice");
+        return message;
+    } catch (error) {
+        console.error("GymPulse could not read the sign-in notice.", error);
+        return "";
+    }
+}
+
+function loadUserWorkspace(userId) {
+    setStorageUser(userId);
+    const savedState = loadState();
+    Object.keys(state).forEach((key) => delete state[key]);
+    Object.assign(state, savedState);
+    if (!state.whatsapp) state.whatsapp = {};
+    if (!state.apiMemberPayments) state.apiMemberPayments = {};
+}
+
+function startAuthenticatedApp(session) {
+    activeSession = session;
+    document.querySelector("#auth-screen").hidden = true;
+    document.querySelector("#app-shell").hidden = false;
+    document.querySelector(".mobile-bottom-nav").hidden = false;
+    document.querySelector("#gym-name-label").textContent = session.gym.name;
+    const ownerName = session.user.email || "Gym owner";
+    document.querySelector(".sidebar-profile strong").textContent = ownerName;
+    document.querySelector(".top-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
+    document.querySelector(".profile-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
+    state.gym.name = session.gym.name;
+    render();
+    refreshMembersFromApi();
+    loadExpiringMemberships();
+    loadAllMemberships(() => {
+        if (currentView === "overview") render();
+    });
+}
+
+function acceptSession(session) {
+    loadUserWorkspace(session.user.id);
+    setAuthSession(session);
+    activeSession = session;
+    if (!session.gym) {
+        showAuthScreen(true);
+        return;
+    }
+    startAuthenticatedApp(session);
+}
+
+function expiryReminderTemplate() {
+    return state.whatsapp.expiryReminderTemplate || "Hi {name}, your {plan} membership expires on {expiry_date}. We would love to see you again!";
+}
+
+function mapPayment(payment) {
+    return {
+        id: payment.id,
+        memberId: payment.member_id,
+        membershipId: payment.membership_id,
+        amount: Number(payment.amount),
+        date: payment.paid_on,
+        method: payment.method.charAt(0).toUpperCase() + payment.method.slice(1),
+        status: "paid",
+        notes: payment.note || ""
+    };
+}
 
 function render() {
     setDateFormat(state.gym.dateFormat || "DD MMM YYYY");
     setCurrency(state.gym.currency || "INR");
+    applyNavigationTranslations();
     document.querySelectorAll(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === currentView));
-    document.querySelector("#current-page").textContent = viewTitles[currentView] || "Overview";
+    const mobilePrimaryViews = ["expiring", "members", "plans", "attendance"];
+    document.querySelectorAll(".mobile-nav-link[data-view]").forEach((link) => {
+        const active = link.dataset.view === currentView;
+        link.classList.toggle("active", active);
+        link.setAttribute("aria-current", active ? "page" : "false");
+    });
+    document.querySelector('[data-action="mobile-more"]')?.classList.toggle("active", !mobilePrimaryViews.includes(currentView));
+    const translatedViews = ["expiring", "overview", "members", "plans", "attendance", "payments", "renewals", "retention", "analytics", "reports", "notifications", "whatsapp", "integrations", "settings"];
+    document.querySelector("#current-page").textContent = translatedViews.includes(currentView) ? t(currentView) : viewTitles[currentView] || "Overview";
     document.querySelector("#member-count").textContent = state.members.length;
     document.querySelector("#gym-name-label").textContent = state.gym.name;
     const now = new Date();
     document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(now);
-    if (currentView === "overview") {
+    if (currentView === "expiring") {
+        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiringDays, expiryReminderTemplate());
+    } else if (currentView === "overview") {
         page.innerHTML = renderDashboard();
         drawDashboardCharts();
     } else if (currentView === "members") {
-        page.innerHTML = renderMembers(memberFilters);
+        page.innerHTML = renderMembers({ ...memberFilters, pagination: memberListPagination });
     } else if (currentView === "plans") {
         page.innerHTML = renderPlansPage();
     } else if (currentView === "whatsapp") {
@@ -66,19 +185,21 @@ function render() {
     }
 }
 
-async function refreshMembersFromApi({ silent = false } = {}) {
+async function refreshMembersFromApi({ silent = false, page: requestedPage = memberFilters.page } = {}) {
+    const requestVersion = ++memberRequestVersion;
+    memberFilters.page = requestedPage;
     try {
-        const nextFilter = memberFilters.filter === "expired" ? "all" : memberFilters.filter;
         const members = await loadMembersFromApi({
-            page: 1,
+            page: requestedPage,
             limit: 100,
-            status: nextFilter === "all" ? undefined : nextFilter,
+            status: memberFilters.filter === "suspended" ? "suspended" : undefined,
             search: memberFilters.search
         });
+        if (requestVersion !== memberRequestVersion) return;
         state.members = members;
-        if (!silent) render();
+        if (!silent && currentView === "members") render();
     } catch (error) {
-        if (!silent) toast(error.message || "Unable to load members from the backend.", "error");
+        if (requestVersion === memberRequestVersion && !silent) toast(error.message || "Unable to load members from the backend.", "error");
     }
 }
 
@@ -87,12 +208,44 @@ function navigate(view) {
     currentView = view;
     if (view !== "profile") profileId = "";
     render();
+    if (view === "expiring") loadExpiringMemberships();
     if (view === "plans") loadPlans(renderPlansIfCurrent);
-    if (view === "profile" && profileId) loadMemberMembershipHistory(profileId);
+    if (view === "profile" && profileId) {
+        loadMemberMembershipHistory(profileId);
+        loadMemberPaymentsFromApi(profileId);
+    }
     if (initializationWarning) toast(initializationWarning, "error");
     page.focus({ preventScroll: true });
     closeMobileMenu();
     window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function loadExpiringMemberships() {
+    const requestVersion = ++expiringRequestVersion;
+    expiringStatus = "loading";
+    if (currentView === "expiring") render();
+    try {
+        const response = await apiClient.get("/api/memberships/expiring", { params: { days: expiringDays } });
+        if (requestVersion !== expiringRequestVersion) return;
+        expiringMemberships = Array.isArray(response.data) ? response.data : [];
+        expiringStatus = "ready";
+    } catch (error) {
+        if (requestVersion !== expiringRequestVersion) return;
+        expiringMemberships = [];
+        expiringStatus = { message: error.message || "Unable to load expiring memberships." };
+    }
+    if (currentView === "expiring") render();
+}
+
+async function loadMemberPaymentsFromApi(memberId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(memberId)) return;
+    try {
+        const payments = await fetchMemberPayments(memberId);
+        state.apiMemberPayments[memberId] = payments.map(mapPayment);
+        if (currentView === "profile" && profileId === memberId) render();
+    } catch (error) {
+        toast(error.message || "Could not load member payment history.", "error");
+    }
 }
 
 function renderPlansIfCurrent() {
@@ -119,61 +272,225 @@ function setField(name, label, value = "", type = "text", required = false, extr
     return `<div class="field"><label for="form-${name}">${label}${required ? " *" : ""}</label><input id="form-${name}" name="${name}" type="${type}" value="${escapeHTML(value)}" ${required ? "required" : ""} ${extra}></div>`;
 }
 
-function planOptions(selected = "") {
-    const activePlans = state.plans.filter((plan) => plan.active);
-    return activePlans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-price="${plan.price}" data-days="${plan.durationDays}" ${plan.id === selected ? "selected" : ""}>${escapeHTML(plan.name)} · ${formatCurrency(plan.price)}</option>`).join("");
+function memberPlanOptions(plans, selected = "") {
+    return plans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-price="${Number(plan.price)}" data-days="${Number(plan.duration_days)}" ${plan.id === selected ? "selected" : ""}>${escapeHTML(plan.name)} — ${plan.duration_days} days — ${formatINR(plan.price)}</option>`).join("");
+}
+
+function demoRenewalPlanOptions(selected = "") {
+    return state.plans
+        .filter((plan) => plan.active)
+        .map((plan) => `<option value="${escapeHTML(plan.id)}" data-price="${plan.price}" data-days="${plan.durationDays}" ${plan.id === selected ? "selected" : ""}>${escapeHTML(plan.name)} · ${formatINR(plan.price)}</option>`)
+        .join("");
+}
+
+function renderMemberPlanField(status, plans = []) {
+    if (status === "loading") {
+        return `<div class="field full"><label for="form-planId">Membership plan *</label><select id="form-planId" disabled><option>Loading membership plans...</option></select><span class="helper-text" role="status">Loading membership plans...</span></div>`;
+    }
+    if (status === "error") {
+        return `<div class="field full"><label>Membership plan *</label><p class="helper-text" role="alert">Unable to load membership plans. Please try again.</p><button class="button button-secondary" type="button" data-action="retry-member-plans">Try again</button></div>`;
+    }
+    if (status === "empty") {
+        return `<div class="field full"><label>Membership plan *</label><p class="helper-text" role="status">No active membership plans available. Create a plan first.</p></div>`;
+    }
+    return `<div class="field full"><label for="form-planId">Membership plan *</label><select id="form-planId" name="planId" required><option value="">Select a plan</option>${memberPlanOptions(plans)}</select></div>`;
+}
+
+function renderMemberFormBody(member, planStatus = "loading", plans = []) {
+    const isEdit = Boolean(member);
+    const body = `<form id="member-form" data-mode="${isEdit ? "update" : "create"}" data-id="${escapeHTML(member?.id || "")}" data-plans-state="${isEdit ? "not-needed" : planStatus}" class="form-grid" novalidate>
+            ${setField("name", "Full name", member?.name || "", "text", true)}
+            <div class="field"><label for="form-phone">Phone number *</label><input id="form-phone" name="phone" type="tel" value="${escapeHTML(member?.phone || "")}" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="form-phone-error"><span id="form-phone-error" class="helper-text phone-error" role="alert" hidden>Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.</span></div>
+            ${setField("email", "Email address", member?.email || "", "email")}
+            ${setField("dob", "Date of birth", member?.dob || "", "date")}
+            <div class="field"><label for="form-gender">Gender</label><select id="form-gender" name="gender"><option value="">Not specified</option>${["Female", "Male", "Prefer not to say"].map((item) => `<option ${member?.gender === item ? "selected" : ""}>${item}</option>`).join("")}</select></div>
+            <div id="member-plan-field">${isEdit ? `<div class="field full"><label>Membership plan</label><p class="helper-text">Manage membership plans and dates using Assign plan.</p></div>` : renderMemberPlanField(planStatus, plans)}</div>
+            <div class="field"><label for="form-status">Membership status</label><select id="form-status" name="status"><option value="active" ${member?.status !== "suspended" ? "selected" : ""}>Active</option><option value="suspended" ${member?.status === "suspended" ? "selected" : ""}>Suspended</option></select><span class="helper-text">Expired status is calculated from the expiry date.</span></div>
+            ${isEdit
+                ? `${setField("startDate", "Membership start date", member.startDate || "", "date", false, 'readonly aria-readonly="true"')}${setField("expiryDate", "Membership expiry date", member.expiryDate || "", "date", false, 'readonly aria-readonly="true"')}`
+                : `${setField("assignmentStartDate", "Membership start date", localISODate(), "date", true)}${setField("assignmentEndDate", "Calculated membership expiry", "", "date", false, 'readonly aria-readonly="true"')}<p class="helper-text field full">The assignment service calculates and saves the membership expiry date.</p>`}
+            ${setField("totalFees", "Total billed fees (₹)", member?.totalFees ?? "", "number", true, 'min="0" step="1"')}
+            ${!isEdit ? setField("initialPayment", "Amount collected now (₹)", 0, "number", false, 'min="0" step="1"') : ""}
+            ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
+            <p class="helper-text field full" id="member-assignment-error" role="alert" hidden></p>
+            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member has opted in to WhatsApp messages</label><span class="helper-text">Record consent before sending live WhatsApp messages. Keep proof of consent in your gym records.</span></div>
+            <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes">${escapeHTML(member?.notes || "")}</textarea></div>
+            <p class="helper-text field full">Phone numbers must be unique. For imports, use columns: name, phone, email, plan, joinedAt, startDate, expiryDate.</p>
+        </form>`;
+    return body;
+}
+
+async function loadMemberFormPlans(form) {
+    const requestId = ++memberPlanRequest;
+    form.dataset.planRequest = String(requestId);
+    form.dataset.plansState = "loading";
+    const container = form.querySelector("#member-plan-field");
+    const submit = document.querySelector('[type="submit"][form="member-form"]');
+    if (container) container.innerHTML = renderMemberPlanField("loading");
+    if (submit) submit.disabled = true;
+
+    try {
+        const plans = await fetchActivePlans();
+        if (!form.isConnected || form.dataset.planRequest !== String(requestId)) return;
+        const status = plans.length ? "ready" : "empty";
+        form.dataset.plansState = status;
+        if (container) container.innerHTML = renderMemberPlanField(status, plans);
+        form.elements.totalFees.value = "";
+        if (submit) submit.disabled = status !== "ready";
+        updateMemberAssignmentPreview(form);
+    } catch {
+        if (!form.isConnected || form.dataset.planRequest !== String(requestId)) return;
+        form.dataset.plansState = "error";
+        if (container) container.innerHTML = renderMemberPlanField("error");
+        form.elements.totalFees.value = "";
+        if (submit) submit.disabled = true;
+    }
 }
 
 function openMemberForm(memberId = "") {
     const member = memberId ? getMember(memberId) : null;
     if (memberId && !member) return toast("Member was not found.", "error");
     const isEdit = Boolean(member);
-    const defaultPlan = state.plans.find((plan) => plan.active);
-    const planId = member?.planId || defaultPlan?.id || "";
-    const plan = getPlan(planId);
     openModal({
         title: isEdit ? "Edit member" : "Add a member",
         subtitle: isEdit ? `Update ${member.name}'s profile and membership.` : "Add someone new to your gym community.",
         wide: true,
-        body: `<form id="member-form" data-id="${escapeHTML(member?.id || "")}" class="form-grid" novalidate>
-            ${setField("name", "Full name", member?.name || "", "text", true)}
-            <div class="field"><label for="form-phone">Phone number *</label><input id="form-phone" name="phone" type="text" value="${escapeHTML(member?.phone || "")}" inputmode="numeric" maxlength="10" pattern="[0-9]{10}" placeholder="9876543210" required aria-describedby="form-phone-error"><span id="form-phone-error" class="helper-text phone-error" role="alert" hidden>Phone number must contain exactly 10 digits.</span></div>
-            ${setField("email", "Email address", member?.email || "", "email")}
-            ${setField("dob", "Date of birth", member?.dob || "", "date")}
-            <div class="field"><label for="form-gender">Gender</label><select id="form-gender" name="gender"><option value="">Not specified</option>${["Female", "Male", "Prefer not to say"].map((item) => `<option ${member?.gender === item ? "selected" : ""}>${item}</option>`).join("")}</select></div>
-            <div class="field"><label for="form-planId">Membership plan *</label><select id="form-planId" name="planId" required>${planOptions(planId)}</select></div>
-            <div class="field"><label for="form-status">Membership status</label><select id="form-status" name="status"><option value="active" ${member?.status !== "suspended" ? "selected" : ""}>Active</option><option value="suspended" ${member?.status === "suspended" ? "selected" : ""}>Suspended</option></select><span class="helper-text">Expired status is calculated from the expiry date.</span></div>
-            ${setField("startDate", "Membership start date", member?.startDate || "", "date", false, 'readonly aria-readonly="true"')}
-            ${setField("expiryDate", "Membership expiry date", member?.expiryDate || "", "date", false, 'readonly aria-readonly="true"')}
-            <p class="helper-text field full">Membership dates are read-only here. Create or change them using Assign plan.</p>
-            ${setField("totalFees", "Total billed fees (₹)", member?.totalFees ?? plan?.price ?? 0, "number", true, 'min="0" step="1"')}
-            ${!isEdit ? setField("initialPayment", "Amount collected now (₹)", 0, "number", false, 'min="0" step="1"') : ""}
-            ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
-            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member has opted in to WhatsApp messages</label><span class="helper-text">Record consent before sending live WhatsApp messages. Keep proof of consent in your gym records.</span></div>
-            <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes">${escapeHTML(member?.notes || "")}</textarea></div>
-            <p class="helper-text field full">Phone numbers must be unique. For imports, use columns: name, phone, email, plan, joinedAt, startDate, expiryDate.</p>
-        </form>`,
-        footer: `<button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit" form="member-form">${isEdit ? "Save changes" : "Add member"}</button>`
+        body: renderMemberFormBody(member, isEdit ? "not-needed" : "loading"),
+        footer: `<button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit" form="member-form" ${isEdit ? "" : "disabled"}>${isEdit ? "Save changes" : "Add member"}</button>`
     });
+    const form = document.querySelector("#member-form");
+    if (!isEdit) loadMemberFormPlans(form);
 }
 
-function openPaymentForm(memberId = "") {
-    const member = memberId ? getMember(memberId) : null;
-    if (memberId && !member) return toast("Member was not found.", "error");
-    const choices = state.members.map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)} · ${escapeHTML(item.id)}</option>`).join("");
-    const max = member ? memberBalance(member) : "";
+function renderQuickAddPlanField(status, plans = []) {
+    if (status === "loading") {
+        return `<div class="field"><label for="quick-planId">${t("plan")} *</label><select id="quick-planId" disabled><option>Loading plans…</option></select></div>`;
+    }
+    if (status === "error") {
+        return `<div class="field"><label for="quick-planId">${t("plan")} *</label><p class="helper-text" role="alert">Plans could not be loaded.</p><button class="button button-secondary" type="button" data-action="retry-quick-add-plans">Try again</button></div>`;
+    }
+    if (!plans.length) {
+        return `<div class="field"><label for="quick-planId">${t("plan")} *</label><p class="helper-text" role="status">No active plans available. Create a plan first.</p></div>`;
+    }
+    return `<div class="field"><label for="quick-planId">${t("plan")} *</label><select id="quick-planId" name="planId" required><option value="">Select a plan</option>${memberPlanOptions(plans)}</select></div>`;
+}
+
+async function loadQuickAddPlans(form) {
+    const submit = document.querySelector('[type="submit"][form="quick-member-form"]');
+    form.dataset.plansState = "loading";
+    if (submit) submit.disabled = true;
+    form.querySelector("#quick-plan-field").innerHTML = renderQuickAddPlanField("loading");
+    try {
+        const plans = await fetchActivePlans();
+        if (!form.isConnected) return;
+        form.dataset.plansState = plans.length ? "ready" : "empty";
+        form.querySelector("#quick-plan-field").innerHTML = renderQuickAddPlanField(form.dataset.plansState, plans);
+        if (submit) submit.disabled = !plans.length;
+    } catch (error) {
+        if (!form.isConnected) return;
+        form.dataset.plansState = "error";
+        form.querySelector("#quick-plan-field").innerHTML = renderQuickAddPlanField("error");
+        if (submit) submit.disabled = true;
+        console.error("Unable to load plans for quick add.", error);
+    }
+}
+
+function openQuickAddMemberForm() {
     openModal({
-        title: "Record a payment",
-        subtitle: "Manual entry only. No payment gateway is connected.",
-        body: `<form id="payment-form" class="form-grid">
-            <div class="field full"><label for="form-memberId">Member *</label><select id="form-memberId" name="memberId" required><option value="">Select a member</option>${choices}</select></div>
-            ${setField("amount", "Amount collected (₹)", "", "number", true, 'min="1" step="1"')}
-            <div class="field"><label for="form-method">Payment method</label><select id="form-method" name="method">${["UPI", "Cash", "Card", "Bank transfer", "Other"].map((method) => `<option>${method}</option>`).join("")}</select></div>
-            ${setField("date", "Payment date", localISODate(), "date", true)}
-            <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes" placeholder="Optional reference or payment note"></textarea></div>
-            <div class="field full helper-text" id="payment-balance-note">${member ? `Outstanding balance: ${formatCurrency(max)}. A payment cannot exceed this balance.` : "Choose a member to check their balance."}</div>
+        title: t("quickAdd"),
+        subtitle: t("quickAddSubtitle"),
+        body: `<form id="quick-member-form" class="quick-add-form" data-plans-state="loading" novalidate>
+            <div class="field"><label for="quick-name">${t("name")} *</label><input id="quick-name" name="name" autocomplete="name" required maxlength="200" placeholder="Member name"></div>
+            <div class="field"><label for="quick-phone">${t("phone")} *</label><input id="quick-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="quick-phone-error"><span id="quick-phone-error" class="helper-text phone-error" role="alert" hidden>${t("phoneHelp")}</span></div>
+            <div id="quick-plan-field">${renderQuickAddPlanField("loading")}</div>
+            <p class="helper-text" id="quick-assignment-error" role="alert" hidden></p>
         </form>`,
-        footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-primary" type="submit" form="payment-form">Save payment</button>`
+        footer: `<button class="button button-secondary" type="button" data-action="close-modal">${t("cancel")}</button><button class="button button-primary" type="submit" form="quick-member-form" disabled>${t("addAssign")}</button>`
+    });
+    loadQuickAddPlans(document.querySelector("#quick-member-form"));
+}
+
+async function saveQuickMember(form) {
+    const name = String(form.elements.name.value || "").trim();
+    const enteredPhone = String(form.elements.phone.value || "").trim();
+    const phone = normalizeIndianPhone(enteredPhone);
+    if (!name) throw new Error("Enter the member's name.");
+    if (!isValidIndianPhone(enteredPhone)) throw new Error("Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.");
+    if (form.dataset.plansState !== "ready") throw new Error("An active membership plan is required.");
+    const planId = form.dataset.createdPlanId || form.elements.planId.value;
+    if (!planId) throw new Error("Select an active membership plan.");
+    const startDate = form.dataset.createdStartDate || localISODate();
+    let member;
+    if (form.dataset.createdMemberId) {
+        member = getMember(form.dataset.createdMemberId);
+        if (!member) throw new Error("The member was saved, but could not be reloaded. Refresh the member list before retrying.");
+    } else {
+        const duplicate = state.members.find((item) => normalizeIndianPhone(item.phone) === phone);
+        if (duplicate) throw new Error(`This phone number already belongs to ${duplicate.name}.`);
+        member = await createMemberOnApi({ name, phone });
+        if (!member?.id) throw new Error("The member was not returned by the backend.");
+        form.dataset.createdMemberId = member.id;
+        form.dataset.createdPlanId = planId;
+        form.dataset.createdStartDate = startDate;
+        form.elements.name.readOnly = true;
+        form.elements.phone.readOnly = true;
+        form.elements.planId.disabled = true;
+    }
+    const priorAssignments = await fetchMemberMembershipHistory(member.id);
+    const assignment = priorAssignments.find((item) => item.plan_id === planId && item.start_date === startDate)
+        || await createMemberPlanAssignment(member.id, planId, startDate);
+    if (!assignment) throw new Error("The assignment API did not return the saved membership.");
+    setMemberCurrentMembership(member.id, assignment);
+    const updatedMember = {
+        ...member,
+        planId: assignment.plan_id,
+        currentMembership: assignment,
+        membershipStatus: assignment.effective_status || "active",
+        startDate: assignment.start_date,
+        expiryDate: assignment.end_date
+    };
+    const index = state.members.findIndex((item) => item.id === member.id);
+    if (index >= 0) state.members[index] = updatedMember;
+    const error = form.querySelector("#quick-assignment-error");
+    if (error) error.hidden = true;
+    closeModal();
+    safePersist("Member added and plan assigned.");
+}
+
+function openPaymentForm(memberId = "", membershipId = "", suggestedAmount = "") {
+    let member = memberId ? getMember(memberId) : null;
+    if (!member && memberId) {
+        const expiring = expiringMemberships.find((item) => item.member.id === memberId);
+        if (expiring) {
+            member = {
+                id: memberId,
+                name: expiring.member.full_name,
+                phone: expiring.member.phone,
+                planId: expiring.plan_id,
+                currentMembership: expiring,
+                membershipStatus: expiring.effective_status,
+                startDate: expiring.start_date,
+                expiryDate: expiring.end_date,
+                totalFees: Number(expiring.price),
+                status: "active"
+            };
+            state.members.unshift(member);
+        }
+    }
+    if (memberId && !member) return toast("Member was not found.", "error");
+    const membership = member ? getCurrentMembership(member.id) || member.currentMembership : null;
+    const choices = state.members.map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)} · ${escapeHTML(item.id)}</option>`).join("");
+    openModal({
+        title: t("recordPayment"),
+        subtitle: t("paymentSubtitle"),
+        body: `<form id="payment-form" class="form-grid" data-membership-id="${escapeHTML(membershipId || membership?.id || "")}">
+            <div class="field full"><label for="form-memberId">${t("member")} *</label><select id="form-memberId" name="memberId" required><option value="">${t("selectMember")}</option>${choices}</select></div>
+            ${setField("amount", t("amountCollected"), suggestedAmount || membership?.price || "", "number", true, 'min="1" step="0.01"')}
+            <div class="field"><label for="form-method">${t("paymentMethod")}</label><select id="form-method" name="method">${[["upi", "UPI"], ["cash", "Cash"], ["card", "Card"], ["other", "Other"]].map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></div>
+            ${setField("date", t("paidOn"), localISODate(), "date", true)}
+            <div class="field full"><label for="form-notes">${t("note")}</label><textarea id="form-notes" name="notes" placeholder="Optional reference or payment note"></textarea></div>
+        </form>`,
+        footer: `<button class="button button-secondary" data-action="close-modal" type="button">${t("cancel")}</button><button class="button button-primary" type="submit" form="payment-form">${t("save")}</button>`
     });
 }
 
@@ -199,7 +516,7 @@ function openRenewForm(memberId) {
         title: `Renew ${escapeHTML(member.name)}'s membership`,
         subtitle: "Previous membership activity will remain in the renewal history.",
         body: `<form id="renew-form" data-id="${escapeHTML(member.id)}" class="form-grid">
-            <div class="field full"><label for="form-planId">New plan *</label><select id="form-planId" name="planId" required>${planOptions(selectedPlan?.id)}</select></div>
+            <div class="field full"><label for="form-planId">New plan *</label><select id="form-planId" name="planId" required>${demoRenewalPlanOptions(selectedPlan?.id)}</select></div>
             ${setField("startDate", "New start date", start, "date", true)}
             ${setField("expiryDate", "New expiry date", addDays(start, selectedPlan?.durationDays || 30), "date", true)}
             ${setField("amount", "Payment collected now (₹)", selectedPlan?.price || 0, "number", true, 'min="0" step="1"')}
@@ -214,22 +531,50 @@ function askDeleteMember(memberId) {
     const member = getMember(memberId);
     if (!member) return toast("Member was not found.", "error");
     openModal({
-        title: "Delete member?",
-        body: `<p class="confirm-copy">Delete <strong>${escapeHTML(member.name)}</strong> and remove their linked payment and attendance records? This cannot be undone.</p>`,
-        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-delete-member" data-id="${escapeHTML(member.id)}">Delete member</button>`
+        title: "Archive member?",
+        body: `<p class="confirm-copy">Archive <strong>${escapeHTML(member.name)}</strong>? They will be hidden from the member list, while their linked payment and attendance records remain preserved.</p>`,
+        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-delete-member" data-id="${escapeHTML(member.id)}">Archive member</button>`
     });
 }
 
 function openReceipt(paymentId) {
-    const payment = state.payments.find((item) => item.id === paymentId);
+    const payment = state.payments.find((item) => item.id === paymentId)
+        || Object.values(state.apiMemberPayments).flat().find((item) => item.id === paymentId);
     if (!payment) return toast("Payment was not found.", "error");
     const member = getMember(payment.memberId);
+    const shareText = `Payment receipt for ${member?.name || "member"}: ${formatINR(payment.amount)} on ${formatDate(payment.date)}. Receipt ${payment.id}.`;
+    const sharePhone = normalizeIndianPhone(member?.phone || "").replace(/\D/g, "");
+    const shareUrl = member && /^[6-9]\d{9}$/.test(sharePhone)
+        ? `https://wa.me/91${sharePhone}?text=${encodeURIComponent(shareText)}`
+        : "";
     openModal({
         title: "Payment receipt preview",
         subtitle: "A local preview only; this is not a tax invoice.",
-        body: `<div class="card" style="padding:18px"><div style="font:800 17px Manrope,sans-serif;color:#173f32">${escapeHTML(state.gym.name)}</div><p class="helper-text">${escapeHTML(state.gym.address || "")}</p><hr style="border:0;border-top:1px solid #e8ede7"><div class="profile-fields">${receiptRow("Transaction ID", payment.id)}${receiptRow("Member", member?.name || "Removed member")}${receiptRow("Date", formatDate(payment.date))}${receiptRow("Method", payment.method)}${receiptRow("Status", payment.status)}${receiptRow("Amount", formatCurrency(payment.amount))}</div><p class="helper-text" style="margin-top:15px">Manually recorded payment · no gateway transaction</p></div>`,
-        footer: `<button class="button button-primary" data-action="close-modal">Done</button>`
+        body: `<div class="card" style="padding:18px"><div style="font:800 17px Manrope,sans-serif;color:#173f32">${escapeHTML(state.gym.name)}</div><p class="helper-text">${escapeHTML(state.gym.address || "")}</p><hr style="border:0;border-top:1px solid #e8ede7"><div class="profile-fields">${receiptRow("Transaction ID", payment.id)}${receiptRow("Member", member?.name || "Removed member")}${receiptRow("Date", formatDate(payment.date))}${receiptRow("Method", payment.method)}${receiptRow("Status", payment.status)}${receiptRow("Amount", formatINR(payment.amount))}</div><p class="helper-text" style="margin-top:15px">Manually recorded payment · no gateway transaction</p></div>`,
+        footer: `${shareUrl ? `<a class="button button-secondary" href="${escapeHTML(shareUrl)}" target="_blank" rel="noopener noreferrer">Share via WhatsApp</a>` : ""}<button class="button button-secondary" data-action="print-receipt" data-id="${escapeHTML(payment.id)}">Print receipt</button><button class="button button-primary" data-action="close-modal">Done</button>`
     });
+}
+
+function printReceipt(paymentId) {
+    const payment = state.payments.find((item) => item.id === paymentId)
+        || Object.values(state.apiMemberPayments).flat().find((item) => item.id === paymentId);
+    if (!payment) return toast("Payment was not found.", "error");
+    const member = getMember(payment.memberId);
+    const popup = window.open("", "_blank");
+    if (!popup) return toast("Allow pop-ups to print this receipt.", "error");
+    popup.opener = null;
+    const rows = [
+        ["Receipt", payment.id],
+        ["Member", member?.name || "Removed member"],
+        ["Phone", member?.phone || "—"],
+        ["Date", formatDate(payment.date)],
+        ["Method", payment.method],
+        ["Amount", formatINR(payment.amount)]
+    ];
+    popup.document.write(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Payment receipt</title><style>body{font:16px Arial,sans-serif;max-width:640px;margin:40px auto;padding:24px;color:#173f32}h1{font-size:24px}table{width:100%;border-collapse:collapse}td{padding:10px;border-bottom:1px solid #ddd}td:first-child{color:#536057}strong{font-size:22px}</style><h1>${escapeHTML(state.gym.name)} · Payment receipt</h1><p>${escapeHTML(state.gym.address || "")}</p><table>${rows.map(([label, value]) => `<tr><td>${escapeHTML(label)}</td><td>${escapeHTML(value)}</td></tr>`).join("")}</table><p>This is a manually recorded payment receipt, not a tax invoice.</p></html>`);
+    popup.document.close();
+    popup.focus();
+    popup.print();
 }
 
 function receiptRow(label, value) {
@@ -241,6 +586,8 @@ function handleAction(action, target) {
     switch (action) {
         case "close-modal": closeModal(); break;
         case "add-member": openMemberForm(); break;
+        case "quick-add-member": openQuickAddMemberForm(); break;
+        case "mobile-more": openMobileMenu(); break;
         case "edit-member": openMemberForm(id); break;
         case "profile": profileId = id; navigate("profile"); break;
         case "delete-member": askDeleteMember(id); break;
@@ -251,14 +598,14 @@ function handleAction(action, target) {
                     state.payments = state.payments.filter((payment) => payment.memberId !== id);
                     state.attendance = state.attendance.filter((record) => record.memberId !== id);
                     closeModal();
-                    safePersist("Member and linked records deleted.");
+                    safePersist("Member archived; linked records were preserved.");
                 } catch (error) {
                     toast(error.message || "Member could not be deleted.", "error");
                 }
             })();
             break;
         }
-        case "record-payment": openPaymentForm(id); break;
+        case "record-payment": openPaymentForm(id, target.dataset.membershipId || "", target.dataset.amount || ""); break;
         case "check-in": openCheckInForm(id); break;
         case "qr-check-in": openCheckInForm("", "qr"); break;
         case "fingerprint": openCheckInForm("", "fingerprint"); break;
@@ -274,6 +621,7 @@ function handleAction(action, target) {
         case "confirm-import": confirmImport(); break;
         case "copy-message": copyMessage(target.dataset.message || ""); break;
         case "receipt": openReceipt(id); break;
+        case "print-receipt": printReceipt(id); break;
         case "reset-demo": resetDemoData(); break;
         default: break;
     }
@@ -289,9 +637,10 @@ function checkOut(attendanceId) {
 function updateMemberFormDefaults(target) {
     const form = target.closest("form");
     if (!form) return;
-    if (form.id === "member-form" && target.name === "planId") {
+    if (form.id === "member-form" && form.dataset.mode === "create" && target.name === "planId") {
         const option = target.selectedOptions[0];
-        form.elements.totalFees.value = option?.dataset.price || "0";
+        form.elements.totalFees.value = option?.value ? option.dataset.price : "";
+        updateMemberAssignmentPreview(form);
     }
     if ((form.id === "renew-form" || form.id === "member-form") && target.name === "planId" && form.id === "renew-form") {
         const option = target.selectedOptions[0];
@@ -303,11 +652,14 @@ function updateMemberFormDefaults(target) {
         const option = form.elements.planId.selectedOptions[0];
         form.elements.expiryDate.value = addDays(target.value, Number(option?.dataset.days || 30));
     }
+    if (form.id === "member-form" && target.name === "assignmentStartDate") {
+        updateMemberAssignmentPreview(form);
+    }
     if (form.id === "payment-form" && target.name === "memberId") {
         const member = getMember(target.value);
         const balance = member ? memberBalance(member) : null;
         form.elements.amount.max = balance ?? "";
-        document.querySelector("#payment-balance-note").textContent = member ? `Outstanding balance: ${formatCurrency(balance)}. A payment cannot exceed this balance.` : "Choose a member to check their balance.";
+        document.querySelector("#payment-balance-note").textContent = member ? `Outstanding balance: ${formatINR(balance)}. A payment cannot exceed this balance.` : "Choose a member to check their balance.";
     }
     if (form.id === "checkin-form" && target.name === "memberId") {
         const member = getMember(target.value);
@@ -315,7 +667,19 @@ function updateMemberFormDefaults(target) {
     }
 }
 
+function updateMemberAssignmentPreview(form) {
+    const plan = form.elements.planId?.selectedOptions[0];
+    const startDate = form.elements.assignmentStartDate?.value;
+    const expiry = form.elements.assignmentEndDate;
+    if (!expiry) return;
+    const duration = Number(plan?.dataset.days || 0);
+    expiry.value = plan?.value && startDate && duration > 0
+        ? addDays(startDate, duration - 1)
+        : "";
+}
+
 function phoneDigits(phone) {
+    if (isValidIndianPhone(phone)) return normalizeIndianPhone(phone);
     const digits = String(phone || "").replace(/\D/g, "");
     if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
     if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
@@ -346,20 +710,39 @@ function adjustCharges(charges, totalFees, date) {
 
 async function saveMember(form) {
     const values = new FormData(form);
+    const isNewMember = form.dataset.mode === "create";
+    if (isNewMember && form.dataset.plansState !== "ready") {
+        throw new Error(form.dataset.plansState === "empty"
+            ? "No active membership plans available. Create a plan first."
+            : "Unable to load membership plans. Please try again.");
+    }
     const name = String(values.get("name") || "").trim();
-    const phone = String(values.get("phone") || "").trim();
-    if (!/^[0-9]{10}$/.test(phone)) throw new Error("Phone number must contain exactly 10 digits.");
-    const current = form.dataset.id ? getMember(form.dataset.id) : null;
+    const enteredPhone = String(values.get("phone") || "").trim();
+    if (!isValidIndianPhone(enteredPhone)) throw new Error("Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.");
+    const phone = normalizeIndianPhone(enteredPhone);
+    const currentId = form.dataset.createdMemberId || form.dataset.id || "";
+    const current = currentId ? getMember(currentId) : null;
     const duplicate = state.members.find((member) => member.phone === phone && member.id !== (current?.id || ""));
     if (duplicate) throw new Error(`This phone number already belongs to ${duplicate.name}.`);
-    const plan = getPlan(String(values.get("planId") || ""));
-    if (!plan) throw new Error("Select an available membership plan.");
+    const selectedOption = isNewMember ? form.elements.planId?.selectedOptions[0] : null;
+    const planId = isNewMember
+        ? form.dataset.pendingPlanId || selectedOption?.value || ""
+        : current?.planId || "";
+    if (isNewMember && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(planId)) {
+        throw new Error("Select an active membership plan.");
+    }
+    const plan = isNewMember
+        ? { id: planId, name: selectedOption?.dataset.name || "", price: Number(selectedOption?.dataset.price) }
+        : null;
     const totalFees = Number(values.get("totalFees"));
     if (!Number.isFinite(totalFees) || totalFees < 0) throw new Error("Membership fees must be zero or more.");
     const initialPayment = Number(values.get("initialPayment") || 0);
     if (!Number.isFinite(initialPayment) || initialPayment < 0 || initialPayment > totalFees) throw new Error("Initial payment must be between zero and the membership fee.");
-    const startDate = current?.startDate || "";
-    const expiryDate = current?.expiryDate || "";
+    const startDate = isNewMember
+        ? form.dataset.pendingStartDate || form.elements.assignmentStartDate.value
+        : current?.startDate || "";
+    if (isNewMember && !startDate) throw new Error("Choose a membership start date.");
+    const expiryDate = isNewMember ? form.elements.assignmentEndDate.value : current?.expiryDate || "";
 
     const record = {
         id: current?.id || uniqueMemberId(),
@@ -369,7 +752,7 @@ async function saveMember(form) {
         email: String(values.get("email") || "").trim(),
         dob: String(values.get("dob") || ""),
         gender: String(values.get("gender") || ""),
-        planId: plan.id,
+        planId: plan?.id || current?.planId || "",
         startDate,
         expiryDate,
         totalFees,
@@ -385,12 +768,57 @@ async function saveMember(form) {
     const saved = current
         ? await updateMemberOnApi(current.id, record)
         : await createMemberOnApi(record);
+    if (!saved?.id) throw new Error("The member was not returned by the backend.");
+    let createdAssignment = null;
+    if (isNewMember) {
+        form.dataset.createdMemberId = saved.id;
+        form.dataset.id = saved.id;
+        form.dataset.pendingPlanId = plan.id;
+        form.dataset.pendingStartDate = startDate;
+        form.dataset.assignmentPending = "true";
+        const planSelect = form.elements.planId;
+        const startDateInput = form.elements.assignmentStartDate;
+        if (planSelect) planSelect.disabled = true;
+        if (startDateInput) startDateInput.disabled = true;
+        const submitButton = document.querySelector('[type="submit"][form="member-form"]');
+        if (submitButton) submitButton.textContent = "Retry plan assignment";
+
+        let assignment;
+        const previousAssignments = await fetchMemberMembershipHistory(saved.id);
+        assignment = previousAssignments.find((item) => item.plan_id === plan.id && item.start_date === startDate);
+        if (!assignment) assignment = await createMemberPlanAssignment(saved.id, plan.id, startDate);
+        if (!assignment) throw new Error("The assignment API did not return the saved membership.");
+        createdAssignment = assignment;
+        const assignmentError = form.querySelector("#member-assignment-error");
+        if (assignmentError) {
+            assignmentError.hidden = true;
+            assignmentError.textContent = "";
+        }
+        form.dataset.assignmentPending = "false";
+        form.dataset.assignedStartDate = assignment.start_date;
+        form.dataset.assignedEndDate = assignment.end_date;
+    }
 
     if (saved) {
-        const normalized = memberFromApiRow(saved) || record;
+        const normalized = {
+            ...(current || record),
+            ...saved,
+            planId: createdAssignment?.plan_id || current?.planId || record.planId,
+            currentMembership: createdAssignment || current?.currentMembership || saved.currentMembership || null,
+            membershipStatus: createdAssignment?.effective_status || current?.membershipStatus || saved.membershipStatus || "unassigned",
+            startDate: createdAssignment?.start_date || current?.startDate || record.startDate,
+            expiryDate: createdAssignment?.end_date || current?.expiryDate || record.expiryDate,
+            totalFees,
+            emergencyContact: record.emergencyContact,
+            whatsappOptIn: record.whatsappOptIn,
+            charges: record.charges,
+            renewals: record.renewals,
+            followUpStatus: record.followUpStatus
+        };
         const targetIndex = state.members.findIndex((member) => member.id === normalized.id);
         if (targetIndex >= 0) state.members[targetIndex] = normalized;
         else state.members.unshift(normalized);
+        if (createdAssignment) setMemberCurrentMembership(normalized.id, createdAssignment);
     }
 
     if (initialPayment > 0) {
@@ -406,19 +834,29 @@ async function saveMember(form) {
     }
 
     closeModal();
-    safePersist(current ? "Member details updated." : "New member added.");
+    safePersist(isNewMember ? "New member added and plan assigned." : "Member details updated.");
 }
 
-function savePayment(form) {
+async function savePayment(form) {
     const values = new FormData(form);
     const member = getMember(String(values.get("memberId") || ""));
     if (!member) throw new Error("Select a valid member.");
     const amount = Number(values.get("amount"));
-    const balance = memberBalance(member);
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Payment amount must be greater than zero.");
-    if (amount > balance) throw new Error(`Payment cannot exceed the outstanding balance of ${formatCurrency(balance)}.`);
-    state.payments.unshift({ id: uid("TX"), memberId: member.id, amount, date: String(values.get("date")), method: String(values.get("method")), status: "paid", notes: String(values.get("notes") || "").trim() });
-    closeModal(); safePersist("Payment recorded successfully.");
+    const saved = await createPayment({
+        member_id: member.id,
+        membership_id: form.dataset.membershipId || null,
+        amount,
+        method: String(values.get("method")),
+        paid_on: String(values.get("date")),
+        note: String(values.get("notes") || "").trim() || null
+    });
+    if (!saved) throw new Error("The payments API did not return the saved record.");
+    const mapped = mapPayment(saved);
+    state.apiMemberPayments[member.id] = [mapped, ...(state.apiMemberPayments[member.id] || []).filter((item) => item.id !== mapped.id)];
+    closeModal();
+    safePersist("Payment recorded successfully.");
+    if (currentView === "profile" && profileId === member.id) render();
 }
 
 function saveRenewal(form) {
@@ -466,7 +904,7 @@ function openImportPreview() {
         const digits = phoneDigits(phone);
         const issues = [];
         if (!name.trim()) issues.push("name is required");
-        if (digits.length < 10 || digits.length > 15) issues.push("valid phone is required");
+        if (!isValidIndianPhone(phone)) issues.push("valid Indian mobile number is required");
         if (digits && seen.has(digits)) issues.push("duplicate phone number");
         if (digits) seen.add(digits);
         const planName = String(data.plan || "").trim();
@@ -612,26 +1050,60 @@ function saveSettings(form) {
     const values = new FormData(form);
     const phone = String(values.get("phone") || "").trim();
     if (phone && (phoneDigits(phone).length < 10 || phoneDigits(phone).length > 15)) throw new Error("Enter a valid gym phone number.");
+    const name = String(values.get("name") || "").trim();
+    if (!name) throw new Error("Gym name is required.");
+    const language = String(values.get("language") || "en");
+    setLanguage(language);
     state.gym = {
         ...state.gym,
-        name: String(values.get("name") || "").trim(),
+        name,
         phone,
         address: String(values.get("address") || "").trim(),
         currency: String(values.get("currency") || "INR"),
         dateFormat: String(values.get("dateFormat") || "DD MMM YYYY"),
+        language,
         preferences: {
             expiryReminderDays: Math.max(0, Math.min(90, Number(values.get("expiryReminderDays") || 0))),
             paymentReminders: values.has("paymentReminders"),
             inactivityReminders: values.has("inactivityReminders")
         }
     };
-    if (!state.gym.name) throw new Error("Gym name is required.");
     safePersist("Settings saved.");
 }
 
 async function handleSubmit(event) {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
+    if (form.id === "login-form") {
+        event.preventDefault();
+        const errorElement = document.querySelector("#auth-error");
+        errorElement.hidden = true;
+        try {
+            const result = await apiClient.post("/api/auth/login", {
+                email: form.elements.email.value.trim(),
+                password: form.elements.password.value
+            });
+            acceptSession(result.data);
+        } catch (error) {
+            errorElement.textContent = error.message || "Sign in failed.";
+            errorElement.hidden = false;
+        }
+        return;
+    }
+    if (form.id === "create-gym-form") {
+        event.preventDefault();
+        const errorElement = document.querySelector("#gym-error");
+        errorElement.hidden = true;
+        try {
+            const result = await apiClient.post("/api/auth/gym", { name: form.elements.name.value.trim() });
+            activeSession = { ...activeSession, gym: result.data.gym };
+            startAuthenticatedApp(activeSession);
+        } catch (error) {
+            errorElement.textContent = error.message || "The gym could not be created.";
+            errorElement.hidden = false;
+        }
+        return;
+    }
     if (form.id === "membership-assignment-form") {
         event.preventDefault();
         await submitMembershipAssignment(form, render);
@@ -642,7 +1114,7 @@ async function handleSubmit(event) {
         await handlePlanSubmit(form, renderPlansIfCurrent);
         return;
     }
-    if (form.id === "whatsapp-compose" || form.id === "whatsapp-template-form") {
+    if (form.id === "whatsapp-compose" || form.id === "whatsapp-template-form" || form.id === "whatsapp-click-template-form") {
         event.preventDefault();
         if (!form.reportValidity()) return;
         handleWhatsAppSubmit(form, render);
@@ -650,6 +1122,7 @@ async function handleSubmit(event) {
     }
     const handlers = {
         "member-form": saveMember,
+        "quick-member-form": saveQuickMember,
         "payment-form": savePayment,
         "renew-form": saveRenewal,
         "checkin-form": recordCheckIn,
@@ -658,8 +1131,46 @@ async function handleSubmit(event) {
     const handler = handlers[form.id];
     if (!handler) return;
     event.preventDefault();
-    if (form.id === "member-form" && !validateMemberPhone(form, true)) return;
+    if ((form.id === "member-form" || form.id === "quick-member-form") && !validateMemberPhone(form, true)) return;
     if (!form.reportValidity()) return;
+    if (form.id === "member-form" || form.id === "quick-member-form") {
+        if (memberSaving) return;
+        memberSaving = true;
+        form.dataset.submitting = "true";
+        const submitButton = document.querySelector(`[type="submit"][form="${form.id}"]`);
+        if (submitButton) submitButton.disabled = true;
+        try {
+            await handler(form);
+        } catch (error) {
+            if (form.id === "quick-member-form" && form.dataset.createdMemberId) {
+                const assignmentError = form.querySelector("#quick-assignment-error");
+                const message = `Member saved, but plan assignment failed: ${error.message || "Please retry."} Use the button to retry without creating another member.`;
+                if (assignmentError) {
+                    assignmentError.textContent = message;
+                    assignmentError.hidden = false;
+                }
+                if (submitButton) submitButton.textContent = "Retry plan assignment";
+                toast(message, "error");
+            } else if (form.id === "member-form" && form.dataset.createdMemberId && form.dataset.assignmentPending === "true") {
+                const assignmentError = form.querySelector("#member-assignment-error");
+                const message = `Member was saved, but plan assignment failed: ${error.message || "Please retry."} The form will retry assignment without creating another member.`;
+                if (assignmentError) {
+                    assignmentError.textContent = message;
+                    assignmentError.hidden = false;
+                }
+                toast(message, "error");
+            } else {
+                toast(error.message || "Please check the form and try again.", "error");
+            }
+        } finally {
+            memberSaving = false;
+            form.dataset.submitting = "false";
+            if (submitButton?.isConnected) {
+                submitButton.disabled = form.dataset.plansState !== "ready";
+            }
+        }
+        return;
+    }
     try {
         await handler(form);
     } catch (error) {
@@ -672,12 +1183,27 @@ document.addEventListener("click", (event) => {
     if (viewLink) { navigate(viewLink.dataset.view); return; }
     const action = event.target.closest("[data-action]");
     if (action) {
+        if (action.dataset.action === "retry-member-plans") {
+            const form = document.querySelector("#member-form");
+            if (form && form.dataset.mode === "create") loadMemberFormPlans(form);
+            return;
+        }
+        if (action.dataset.action === "retry-quick-add-plans") {
+            const form = document.querySelector("#quick-member-form");
+            if (form) loadQuickAddPlans(form);
+            return;
+        }
         if (action.dataset.action.startsWith("whatsapp-")) {
             handleWhatsAppAction(action.dataset.action, action, render);
             return;
         }
         if (action.dataset.action === "confirm-reset") { confirmReset(); return; }
         if (action.dataset.action === "confirm-import") { confirmImport(); return; }
+        if (action.dataset.action === "previous-members-page" || action.dataset.action === "next-members-page") {
+            const pageDelta = action.dataset.action === "next-members-page" ? 1 : -1;
+            refreshMembersFromApi({ page: Math.max(1, memberFilters.page + pageDelta) });
+            return;
+        }
         if (handleMembershipAction(action.dataset.action, action)) return;
         if (handlePlanAction(action.dataset.action, action, renderPlansIfCurrent)) return;
         handleAction(action.dataset.action, action);
@@ -685,6 +1211,30 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("submit", handleSubmit);
+document.querySelector("#logout-button").addEventListener("click", async () => {
+    try {
+        await apiClient.post("/api/auth/logout", {});
+    } catch (error) {
+        console.error("GymPulse could not revoke the current session.", error);
+        saveAuthNotice("You are signed out on this device, but the server could not revoke the session. Contact your administrator.");
+    } finally {
+        clearAuthSession();
+        activeSession = null;
+        window.location.reload();
+    }
+});
+document.querySelector("#sign-out-onboarding").addEventListener("click", async () => {
+    try {
+        await apiClient.post("/api/auth/logout", {});
+    } catch (error) {
+        console.error("GymPulse could not revoke the current session.", error);
+        saveAuthNotice("You are signed out on this device, but the server could not revoke the session. Contact your administrator.");
+    } finally {
+        clearAuthSession();
+        activeSession = null;
+        window.location.reload();
+    }
+});
 document.addEventListener("change", (event) => {
     const target = event.target;
     if (target.matches("[data-whatsapp-change]")) {
@@ -692,9 +1242,18 @@ document.addEventListener("change", (event) => {
         return;
     }
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
+    if (target.id === "expiry-days") {
+        expiringDays = Number(target.value);
+        loadExpiringMemberships();
+    }
     if (target.matches("#membership-assignment-form [name='plan_id'], #membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
     if (target.id === "plan-status-filter") { setPlanStatus(target.value, renderPlansIfCurrent); return; }
-    if (target.id === "member-filter") { memberFilters.filter = target.value; render(); }
+    if (target.id === "member-filter") {
+        memberFilters.filter = target.value;
+        memberFilters.page = 1;
+        render();
+        refreshMembersFromApi({ page: 1 });
+    }
     if (target.id === "member-sort") { memberFilters.sort = target.value; render(); }
     if (target.id === "renewal-filter") {
         document.querySelectorAll("[data-renewal-row]").forEach((row) => {
@@ -712,15 +1271,16 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("input", (event) => {
     const target = event.target;
-    if (target.matches('#member-form [name="phone"]')) {
-        target.value = target.value.replace(/[^0-9]/g, "").slice(0, 10);
+    if (target.matches('#member-form [name="phone"], #quick-member-form [name="phone"]')) {
+        target.value = target.value.replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "").slice(0, 13);
         validateMemberPhone(target.form, false);
     }
     if (target.matches("#membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
     if (target.id === "member-search") {
         memberFilters.search = target.value;
-        const query = target.value.toLowerCase();
-        document.querySelectorAll(".table-card tbody tr").forEach((row) => { row.hidden = !row.textContent.toLowerCase().includes(query); });
+        memberFilters.page = 1;
+        clearTimeout(memberSearchTimer);
+        memberSearchTimer = setTimeout(() => refreshMembersFromApi({ page: 1 }), 250);
     }
     if (target.id === "plan-search") setPlanSearch(target.value, renderPlansIfCurrent);
     if (target.id === "attendance-search") {
@@ -734,9 +1294,9 @@ document.addEventListener("input", (event) => {
 
 function validateMemberPhone(form, showError) {
     const input = form?.elements?.phone;
-    const error = document.querySelector("#form-phone-error");
+    const error = form?.querySelector(".phone-error");
     if (!input || !error) return true;
-    const valid = /^[0-9]{10}$/.test(input.value);
+    const valid = isValidIndianPhone(input.value);
     error.hidden = valid || !showError;
     input.setAttribute("aria-invalid", String(!valid && showError));
     return valid;
@@ -744,10 +1304,11 @@ function validateMemberPhone(form, showError) {
 
 document.addEventListener("keydown", (event) => {
     const target = event.target;
-    if (target.matches?.('#member-form [name="phone"]')
+    if (target.matches?.('#member-form [name="phone"], #quick-member-form [name="phone"]')
         && !event.ctrlKey && !event.metaKey && !event.altKey
         && event.key.length === 1
-        && !/[0-9]/.test(event.key)) {
+        && !/[0-9]/.test(event.key)
+        && !(event.key === "+" && target.value.length === 0)) {
         event.preventDefault();
     }
 });
@@ -763,11 +1324,13 @@ function filterPaymentRows() {
     });
 }
 
-document.querySelector("#mobile-menu").addEventListener("click", () => {
+function openMobileMenu() {
     document.querySelector("#sidebar").classList.add("open");
     document.querySelector("#mobile-scrim").classList.add("visible");
     document.querySelector("#mobile-menu").setAttribute("aria-expanded", "true");
-});
+}
+
+document.querySelector("#mobile-menu").addEventListener("click", openMobileMenu);
 document.querySelector("#mobile-scrim").addEventListener("click", closeMobileMenu);
 document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && document.querySelector("#sidebar").classList.contains("open")) {
@@ -789,8 +1352,21 @@ document.querySelector("#csv-file").addEventListener("change", async (event) => 
     }
 });
 
-render();
-refreshMembersFromApi();
-loadAllMemberships(() => {
-    if (currentView === "overview") render();
+async function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    try {
+        await navigator.serviceWorker.register("/sw.js");
+    } catch (error) {
+        console.error("GymPulse could not register its service worker.", error);
+        toast("Offline app setup failed. The app will still work while online.", "error");
+    }
+}
+
+registerServiceWorker();
+setUnauthorizedHandler(() => {
+    clearAuthSession();
+    activeSession = null;
+    saveAuthNotice("Your session expired. Please sign in again.");
+    window.location.reload();
 });
+showAuthScreen(false, takeAuthNotice());

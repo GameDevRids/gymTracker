@@ -1,13 +1,14 @@
 import express from "express";
-import { supabaseClient, supabaseConfigured } from "../config/database.js";
+import { supabaseClient, supabaseConfigured, supabaseConfigurationError } from "../config/database.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 const router = express.Router();
 
-router.get("/db-test", async (_request, response) => {
+router.get("/db-test", requireAuth(), async (request, response) => {
     if (!supabaseConfigured) {
         return response.status(503).json({
             status: "error",
-            message: "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in server/.env."
+            message: supabaseConfigurationError || "Supabase is not configured."
         });
     }
 
@@ -15,6 +16,7 @@ router.get("/db-test", async (_request, response) => {
         const { error } = await supabaseClient
             .from("members")
             .select("id,gym_id,member_code,full_name,phone,email,gender,date_of_birth,membership_start_date,membership_end_date,status,notes,created_at,updated_at")
+            .eq("gym_id", request.gymId)
             .limit(1);
 
         if (error) {

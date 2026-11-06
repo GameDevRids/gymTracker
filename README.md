@@ -1,6 +1,8 @@
 # GymPulse
 
-GymPulse is a responsive gym management prototype built with HTML, CSS, vanilla JavaScript modules, Chart.js, browser LocalStorage and an optional Node.js backend for WhatsApp Cloud API communication.
+Track gym members.
+
+GymPulse is a responsive gym management prototype built with HTML, CSS, vanilla JavaScript modules, Chart.js, Supabase-backed owner and gym data, and an optional WhatsApp Cloud API backend.
 
 ## Run locally
 
@@ -14,15 +16,31 @@ Run the WhatsApp backend and open the app at `http://localhost:3001`, or open `i
 4. Run the migrations in order in the Supabase SQL Editor: `server/migrations/001_create_members.sql` creates the initial members table.
    If `members` already existed before that migration, also run `server/migrations/002_align_members_table.sql` to add any missing columns without deleting records. Existing member dates are not fabricated; records missing dates need those dates supplied before they can be used as complete membership records.
    Run `server/migrations/003_create_membership_plans.sql` to create membership plans, then `server/migrations/004_create_member_memberships.sql` to create append-only assignment history and the atomic assignment function. Review each SQL file before pasting its contents into the Supabase SQL Editor and running it. Do not run migration 004 until migrations 001–003 are in place.
-5. Run `npm start` in `server/`. The backend serves the existing frontend at `http://localhost:3001`; check database connectivity at `http://localhost:3001/api/db-test`.
+   Run and review `server/migrations/005_add_members_archived_at.sql` to enable member archiving. Run `server/migrations/006_create_payments.sql` to enable persistent member payments and receipts. Then run `server/migrations/007_create_gyms_and_auth.sql`. If a Supabase Auth user already exists, legacy rows go to that account's default gym. If there are no Auth users yet, the migration creates an unowned default gym for legacy rows; the first owner who completes gym onboarding claims it atomically, preserving access to that data.
+5. Run `npm start` in `server/`. The backend serves the existing frontend at `http://localhost:3001`. Sign in with the Supabase Auth owner account and create a gym on first use.
 6. In Meta, configure the webhook callback as `https://<your-public-host>/api/whatsapp/webhook`, subscribe to the `messages` field, and use the same verify token and app secret configured on the backend. The backend binds to loopback by default; deploy behind HTTPS and set an appropriate `HOST` (commonly `0.0.0.0`) only when protected by a trusted reverse proxy and authentication.
 7. In GymPulse, leave messaging in Demo mode unless the backend reports that Meta credentials are configured. Switch to Live deliberately. If using Live Server, set the WhatsApp backend URL to `http://localhost:3001` and include the Live Server origin in `WHATSAPP_ALLOWED_ORIGINS`.
 
+The default home view lists expired memberships and memberships ending within seven days; choose a 3, 7, 15, or 30-day window. Click-to-chat reminders use the editable template in WhatsApp settings and open WhatsApp without sending through Meta. Payment recording, history, and receipts use the backend and require migration 006.
+
+To refill a disposable Supabase demo project, configure `DEMO_SUPABASE_URL`, `DEMO_SUPABASE_SERVICE_ROLE_KEY`, and `DEMO_GYM_ID` in the server environment and run `ALLOW_SEED=true npm run seed:demo` from `server/`. This deletes rows only from that gym before creating fictional replacements. Never point these demo-only variables at a production project.
+
 The backend sends text, approved-template and generated membership-card image messages through the official Meta Graph API. Incoming messages and delivery status updates are accepted only from webhook requests with a valid `X-Hub-Signature-256` signature. API acceptance is shown as **Accepted by Meta · awaiting status**; only webhook events update a message to sent, delivered, read or failed. API errors are shown as errors and are never replaced with simulated success.
 
-For any non-loopback or production deployment, set a strong random `WHATSAPP_API_TOKEN`; the server refuses to start without it. Enter that key in the inbox's API access key field when using Live mode. GymPulse keeps this backend access key in tab-scoped `sessionStorage` (not the source code or persistent app data). The key is separate from Meta's access token, which remains in the backend environment.
+Chart.js is served locally. If the chart library is unavailable, the rest of the app continues to work and displays a chart fallback.
 
-The Chart.js dashboard charts load from a CDN. If the CDN is unavailable, the rest of the app continues to work and displays a chart fallback.
+## Install on Android
+
+Serve GymPulse over HTTPS (or `localhost` for local development), then open it in Chrome on Android and choose **Install app** or **Add to Home screen**. The app uses a standalone display, app icons and a service worker to cache its frontend shell for offline opening. API requests are always sent to the network and are never cached; membership and other backend data therefore still require a connection. Chart.js is bundled locally with the app.
+
+## Deploy to Render
+
+Create a Web Service with **Root Directory** `server`, **Build Command** `npm install`, **Start Command** `npm start`, and **Health Check Path** `/health`. Render supplies `PORT`; set these environment variables:
+
+- Required: `HOST=0.0.0.0`, `NODE_ENV=production`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`.
+- Optional: `SENTRY_DSN` (enables error tracking), `LOG_LEVEL`, `META_GRAPH_API_VERSION` (defaults to `v22.0`), `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, and `WHATSAPP_ALLOWED_ORIGINS`.
+
+Use only fictional demo data. Keep the WhatsApp Cloud API credentials empty unless you intentionally enable live messaging. Keep the Supabase service-role key private and use a demo-only Supabase project.
 
 ## Included prototype workflows
 
@@ -30,9 +48,9 @@ The Chart.js dashboard charts load from a CDN. If the CDN is unavailable, the re
 - Member search, status filters, sorting, profiles, add/edit/delete, CSV export and CSV import preview.
 - Backend-backed membership plan management and member plan assignment history with immutable plan-detail snapshots, plus manual check-in/out and simulated QR/fingerprint attendance.
 - Follow-up recommendations, analytics, report exports, notification previews, integrations status cards and workspace settings.
-- A WhatsApp-style inbox with fictional Demo conversations, member ID card sends, editable message templates, manual live messaging and opt-in-gated inactive-member follow-ups.
+- A WhatsApp-style inbox with fictional Demo conversations, editable click-to-chat expiry reminders, member ID card sends, editable Meta templates, manual live messaging and opt-in-gated inactive-member follow-ups.
 - An optional Express backend with Meta Cloud API sends, media upload for member ID cards, webhook verification and in-memory message status tracking.
-- Browser LocalStorage persistence and reset-to-demo-data action.
+- Browser LocalStorage persistence, English/Hindi/Marathi navigation and form labels, and reset-to-demo-data action.
 
 The fictional CSV import example is in [`data/sample-members.csv`](./data/sample-members.csv). Imports accept `name` and `phone` as required columns, plus optional `email`, `plan`, `joinedAt`, `startDate`, and `expiryDate`. Header matching ignores spaces, underscores, and hyphens; aliases include `fullName`, `mobile`, `phoneNumber`, and `joiningDate`. Optional date columns should use `YYYY-MM-DD`; plan values must match an active plan name, or may be left blank to use the first active plan. Existing or repeated phone numbers and invalid dates/plans are reported and skipped rather than overwritten.
 
@@ -40,6 +58,8 @@ The fictional CSV import example is in [`data/sample-members.csv`](./data/sample
 
 Demo mode uses fictional data and never sends real messages. Every simulated WhatsApp message is labelled DEMO and is not marked delivered. Live mode requires server-side Meta credentials; never put access tokens or app secrets in frontend files or browser storage. Live messages require the member to be marked as opted in. Template messages must match templates approved by Meta, and free-form messages are subject to Meta's customer-service-window rules.
 
-This remains a prototype, not a production-secure SaaS. Member and conversation data is stored in browser LocalStorage and is not encrypted or backed up. The WhatsApp backend's webhook and message log are in memory and clear when its process restarts. There is no GymPulse owner login, per-user authorization, durable database, gym isolation, automated consent capture, opt-out processing or audit trail. A shared backend API token protects non-webhook routes in production, but the origin allowlist is not authentication and a shared token is not per-user authorization. Add authenticated owner access, rate limits, durable storage and gym-specific isolation before using live endpoints for a deployed service. Use real member data only after implementing those controls and reviewing applicable privacy and WhatsApp policies.
+Owner sign-in uses Supabase Auth through the backend. Access and refresh tokens exist only in page memory; reloading the page requires signing in again. Protected API routes verify the access token, resolve the owner's gym, and scope database operations to that gym. Row Level Security also restricts authenticated Supabase access to linked gyms; the service-role key remains server-only. Signed Meta webhook endpoints remain public and verify Meta's signature.
+
+This remains a prototype, not a production-secure SaaS. Browser-stored settings and demo data are namespaced per signed-in user but are not encrypted; anyone with access to that browser profile can read them. The WhatsApp backend message log is in memory and is lost on restart. Incoming messages are associated with a gym only when the sender phone uniquely matches one gym's member record. Use fictional data, deploy behind HTTPS and a trusted reverse proxy, and do not use it as the sole recordkeeping system for a real gym.
 
 Fingerprint and QR actions remain simulations, and payments remain manual records. Integrate hardware, payment gateways or other gym systems only through their official APIs/SDKs after confirming product-specific support.

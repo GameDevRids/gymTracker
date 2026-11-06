@@ -1,3 +1,5 @@
+.mobile-bottom-nav { display: none; }
+
 @media (max-width: 1150px) {
     .sidebar { width: 225px; }
     .main-area { margin-left: 225px; }
@@ -24,6 +26,81 @@
     .sidebar .nav-link { min-height: 46px; font-size: 14px; }
     .wa-inbox { grid-template-columns: minmax(210px, .75fr) minmax(0, 1.25fr); }
     .wa-thread-header .button { min-height: 40px; }
+}
+
+@media (max-width: 767px) {
+    html, body { max-width: 100%; overflow-x: clip; }
+    .main-area, .page-content, .card, .content-grid > *, .bottom-grid > * { min-width: 0; }
+    .page-content { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
+    .app-footer { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
+    .mobile-bottom-nav {
+        position: fixed;
+        z-index: 30;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        min-height: calc(64px + env(safe-area-inset-bottom));
+        padding: 5px 6px max(5px, env(safe-area-inset-bottom));
+        border-top: 1px solid #e3e9e2;
+        background: rgba(255,255,255,.97);
+        box-shadow: 0 -4px 16px rgba(24,50,37,.06);
+        backdrop-filter: blur(12px);
+    }
+    .mobile-nav-link {
+        display: flex;
+        min-width: 0;
+        min-height: 48px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        border: 0;
+        border-radius: 8px;
+        color: #68766d;
+        background: transparent;
+        font-size: 10px;
+        font-weight: 600;
+        touch-action: manipulation;
+    }
+    .mobile-nav-link svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .mobile-nav-link.active { color: var(--forest); background: #edf5e9; }
+    .mobile-nav-link:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+    button, .button, .icon-button, .nav-link, .text-button, .mobile-nav-link,
+    .toolbar > button, .heading-actions > button, .inline-actions > button,
+    .field input:not([type="checkbox"]):not([type="radio"]), .field select,
+    .search-field, .field-control { min-height: 44px; }
+    .icon-button { min-width: 44px; }
+    .text-button { padding: 8px 10px; }
+    .inline-actions { flex-wrap: wrap; }
+    .inline-actions > button { min-width: 44px; }
+    .field label:has(input[type="checkbox"]), .field label:has(input[type="radio"]) { min-height: 44px; padding-top: 8px; padding-bottom: 8px; }
+    .table-wrap { width: 100%; max-width: 100%; overflow-x: hidden; }
+    .table-wrap table { width: 100%; min-width: 0; table-layout: fixed; white-space: normal; }
+    .table-wrap th, .table-wrap td { padding: 9px 7px; overflow-wrap: anywhere; font-size: 11px; }
+    .members-table, .members-table tbody { display: block; }
+    .members-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; clip-path: inset(50%); }
+    .members-table tbody { display: grid; gap: 10px; }
+    .members-table tbody tr { display: block; padding: 7px 10px; border: 1px solid #e5ebe3; border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+    .members-table tbody tr:hover { background: #fff; }
+    .members-table tbody td { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 2px; border-bottom: 1px solid #f0f2ef; text-align: right; }
+    .members-table tbody td::before { flex: 0 0 auto; color: #68766d; content: attr(data-label); font-size: 10px; font-weight: 700; text-align: left; text-transform: uppercase; }
+    .members-table tbody td[data-label="Member"], .members-table tbody td[data-label="Actions"] { align-items: flex-start; }
+    .members-table tbody td[data-label="Member"] .member-cell { max-width: 72%; padding: 4px 0; text-align: left; }
+    .members-table tbody td[data-label="Actions"] { flex-wrap: wrap; justify-content: flex-start; }
+    .members-table tbody td[data-label="Actions"]::before { width: 100%; }
+    .members-table tbody td[data-label="Actions"] .inline-actions { justify-content: flex-start; }
+    .members-table tbody td:last-child { border-bottom: 0; }
+    .members-table tbody td[colspan] { display: block; border: 0; text-align: center; }
+    .members-table tbody td[colspan]::before { content: none; }
+    .members-table tbody tr:has(td[colspan]) { padding: 0; border: 0; box-shadow: none; }
+    .summary-chip { max-width: 100%; overflow-wrap: anywhere; }
+    .expiring-card { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+    .expiring-member { grid-column: 1 / -1; }
+    .expiring-actions { grid-column: 1 / -1; justify-content: stretch; }
+    .expiring-actions > * { flex: 1 1 140px; min-height: 44px; }
+    .mobile-nav-link { font-size: 9px; }
 }
 
 @media (max-width: 560px) {
@@ -56,13 +133,12 @@
     .profile-hero { flex-wrap: wrap; }
     .profile-hero .button { width: 100%; }
     .summary-chip { flex: 1 1 42%; }
-    .table-wrap { max-width: calc(100vw - 30px); }
-    .table-wrap table { min-width: 650px; }
+    .table-wrap { max-width: 100%; }
+    .table-wrap table { min-width: 0; }
     .wa-mode-settings { align-items: stretch; }
     .wa-mode-controls { display: grid; width: 100%; grid-template-columns: 1fr; justify-content: stretch; }
-    .wa-mode-controls .field-control, .wa-mode-controls #whatsapp-api-url, .wa-mode-controls #whatsapp-api-token { width: 100%; }
+    .wa-mode-controls .field-control, .wa-mode-controls #whatsapp-api-url { width: 100%; }
     .wa-mode-controls .wa-api-url-label { margin-left: 0; }
-    .wa-token-help { text-align: left; }
     .wa-inbox { display: block; min-height: 0; overflow: hidden; }
     .wa-inbox.show-thread { position: fixed; z-index: 40; inset: 0; border: 0; border-radius: 0; }
     .wa-sidebar { width: 100%; min-height: min(60dvh, 500px); max-height: 70dvh; }
