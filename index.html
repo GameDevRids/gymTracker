@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#12372a">
+    <title>GymPulse — Gym management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/styles.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <link rel="stylesheet" href="assets/css/responsive.css">
+</head>
+<body>
+    <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="icon-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></symbol>
+        <symbol id="icon-members" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M20 8v6m3-3h-6"/></symbol>
+        <symbol id="icon-plans" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8z"/><path d="M8 3v5h13M8 13h8m-8 4h8"/></symbol>
+        <symbol id="icon-attendance" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="icon-payments" viewBox="0 0 24 24"><path d="M16 8.5c-.7-.9-1.8-1.5-3.4-1.5-2 0-3.4 1-3.4 2.5s1.2 2.1 3.4 2.5 3.4 1 3.4 2.5-1.4 2.5-3.4 2.5c-1.6 0-2.8-.6-3.6-1.7M12.5 5v14M5 10h10"/></symbol>
+        <symbol id="icon-renewals" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.5 9A7 7 0 0 1 18 6l2 2M4 16l2 2a7 7 0 0 0 12.5-3"/></symbol>
+        <symbol id="icon-retention" viewBox="0 0 24 24"><path d="M20.8 8.8c0 5-8.8 11-8.8 11s-8.8-6-8.8-11A4.8 4.8 0 0 1 12 6.2a4.8 4.8 0 0 1 8.8 2.6Z"/></symbol>
+        <symbol id="icon-analytics" viewBox="0 0 24 24"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6" rx="1"/><rect x="13" y="7" width="3" height="10" rx="1"/><rect x="19" y="4" width="2" height="13" rx="1"/></symbol>
+        <symbol id="icon-reports" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8m-8 4h8"/></symbol>
+        <symbol id="icon-notifications" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 13h4"/></symbol>
+        <symbol id="icon-integrations" viewBox="0 0 24 24"><path d="M12 2v5m0 10v5M2 12h5m10 0h5"/><circle cx="12" cy="12" r="5"/><path d="m5 5 3 3m8 8 3 3m0-14-3 3m-8 8-3 3"/></symbol>
+        <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.8-.7a8 8 0 0 1-1.7 1l-.3 1.9h-2.8l-.3-1.9a8 8 0 0 1-1.7-1l-1.8.7-1.4-2.4 1.5-1.2a7 7 0 0 1 0-2l-1.5-1.2 1.4-2.4 1.8.7a8 8 0 0 1 1.7-1l.3-1.9h2.8l.3 1.9a8 8 0 0 1 1.7 1l1.8-.7 1.4 2.4-1.5 1.2a7 7 0 0 1 0 2Z" transform="translate(-1 -1) scale(1.08)"/></symbol>
+        <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+        <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 13h4"/></symbol>
+    </svg>
+    <div class="app-shell">
+        <aside class="sidebar" id="sidebar">
+            <a class="brand" href="#overview" aria-label="GymPulse overview">
+                <span class="brand-mark">G</span><span>Gym<span class="brand-light">Pulse</span></span>
+            </a>
+            <div class="gym-switcher">
+                <span class="gym-avatar">F</span>
+                <span class="gym-label"><strong id="gym-name-label">Forge Fitness</strong><small>Gym workspace</small></span>
+                <span class="switcher-caret">⌄</span>
+            </div>
+            <nav class="navigation" aria-label="Main navigation">
+                <span class="nav-caption">WORKSPACE</span>
+                <button class="nav-link active" data-view="overview"><span class="nav-icon"><svg><use href="#icon-overview"/></svg></span>Overview</button>
+                <button class="nav-link" data-view="members"><span class="nav-icon"><svg><use href="#icon-members"/></svg></span>Members<span class="nav-count" id="member-count">0</span></button>
+                <button class="nav-link" data-view="plans"><span class="nav-icon"><svg><use href="#icon-plans"/></svg></span>Membership plans</button>
+                <button class="nav-link" data-view="attendance"><span class="nav-icon"><svg><use href="#icon-attendance"/></svg></span>Attendance</button>
+                <button class="nav-link" data-view="payments"><span class="nav-icon"><svg><use href="#icon-payments"/></svg></span>Payments</button>
+                <button class="nav-link" data-view="renewals"><span class="nav-icon"><svg><use href="#icon-renewals"/></svg></span>Renewals</button>
+                <button class="nav-link" data-view="retention"><span class="nav-icon"><svg><use href="#icon-retention"/></svg></span>Retention</button>
+                <span class="nav-caption nav-caption-spaced">INSIGHTS</span>
+                <button class="nav-link" data-view="analytics"><span class="nav-icon"><svg><use href="#icon-analytics"/></svg></span>Analytics</button>
+                <button class="nav-link" data-view="reports"><span class="nav-icon"><svg><use href="#icon-reports"/></svg></span>Reports</button>
+                <button class="nav-link" data-view="notifications"><span class="nav-icon"><svg><use href="#icon-notifications"/></svg></span>Notifications</button>
+                <button class="nav-link" data-view="whatsapp"><span class="nav-icon"><svg><use href="#icon-notifications"/></svg></span>WhatsApp inbox</button>
+                <button class="nav-link" data-view="integrations"><span class="nav-icon"><svg><use href="#icon-integrations"/></svg></span>Integrations</button>
+            </nav>
+            <div class="sidebar-bottom">
+                <button class="nav-link" data-view="settings"><span class="nav-icon"><svg><use href="#icon-settings"/></svg></span>Settings</button>
+                <div class="sidebar-profile">
+                    <span class="profile-avatar">A</span>
+                    <span><strong>Alex Morgan</strong><small>Gym owner</small></span>
+                    <span class="profile-menu">···</span>
+                </div>
+            </div>
+        </aside>
+
+        <div class="mobile-scrim" id="mobile-scrim"></div>
+        <main class="main-area">
+            <header class="topbar">
+                <button class="icon-button mobile-menu" id="mobile-menu" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><svg class="icon"><use href="#icon-menu"/></svg></button>
+                <div class="breadcrumbs"><span>Workspace</span><b>/</b><strong id="current-page">Overview</strong></div>
+                <div class="topbar-actions">
+                    <span class="today-label" id="today-label"></span>
+                    <button class="icon-button notification-button" data-view="notifications" aria-label="Notifications"><svg class="icon"><use href="#icon-bell"/></svg><i></i></button>
+                    <span class="top-avatar">A</span>
+                </div>
+            </header>
+            <section class="page-content" id="page-content" tabindex="-1"></section>
+            <footer class="app-footer">GymPulse <span>·</span> A local demo workspace. Your data stays in this browser.</footer>
+        </main>
+    </div>
+    <div class="modal-root" id="modal-root" aria-live="polite"></div>
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script type="module" src="assets/js/main.js"></script>
+</body>
+</html>

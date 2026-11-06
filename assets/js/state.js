@@ -1,0 +1,120 @@
+import { loadState, saveState, resetState } from "./storage.js";
+import { createDemoState } from "../../data/demo-data.js";
+import { apiClient } from "./api/apiClient.js";
+
+export let initializationWarning = "";
+export const state = (() => {
+    try {
+        return loadState();
+    } catch (error) {
+        initializationWarning = error.message || "Browser storage is unavailable; changes may not persist.";
+        return createDemoState();
+    }
+})();
+if (!state.whatsapp) state.whatsapp = {};
+
+export function persist() { saveState(state); }
+
+export function resetDemo() {
+    const fresh = resetState();
+    Object.keys(state).forEach((key) => delete state[key]);
+    Object.assign(state, fresh);
+}
+
+export function memberFromApiRow(member) {
+    if (!member) return null;
+    return {
+        id: member.id,
+        memberCode: member.member_code || "",
+        name: member.full_name || "",
+        phone: member.phone || "",
+        email: member.email || "",
+        dob: member.date_of_birth || "",
+        gender: member.gender || "",
+        joinedAt: member.created_at ? member.created_at.slice(0, 10) : "",
+        planId: "",
+        startDate: member.membership_start_date || "",
+        expiryDate: member.membership_end_date || "",
+        status: member.status === "suspended" ? "suspended" : "active",
+        totalFees: 0,
+        charges: [],
+        amountPaid: 0,
+        emergencyContact: "",
+        whatsappOptIn: false,
+        notes: member.notes || "",
+        followUpStatus: "pending",
+        renewals: [],
+        createdAt: member.created_at || "",
+        updatedAt: member.updated_at || ""
+    };
+}
+
+export function memberToApiPayload(member) {
+    const payload = {
+        full_name: member.name || "",
+        phone: member.phone || "",
+        email: member.email || null,
+        gender: member.gender || null,
+        date_of_birth: member.dob || null,
+        status: member.status === "suspended" ? "suspended" : "active",
+        notes: member.notes || null,
+    };
+    if (member.memberCode) payload.member_code = member.memberCode;
+    return payload;
+}
+
+export async function loadMembersFromApi(options = {}) {
+    const status = options.status && ["active", "suspended"].includes(options.status) ? options.status : undefined;
+    const params = {
+        page: options.page ?? 1,
+        limit: options.limit ?? 100,
+        ...(status ? { status } : {}),
+        ...(options.search ? { search: options.search } : {})
+    };
+    const response = await apiClient.get("/api/members", { params });
+    const members = Array.isArray(response?.data?.members) ? response.data.members : [];
+    state.members = members.map((member) => memberFromApiRow(member));
+    return state.members;
+}
+
+export async function createMemberOnApi(member) {
+    const response = await apiClient.post("/api/members", memberToApiPayload(member));
+    const record = response?.data ?? null;
+    const mapped = memberFromApiRow(record);
+    if (mapped) {
+        const existingIndex = state.members.findIndex((entry) => entry.id === mapped.id);
+        if (existingIndex >= 0) state.members[existingIndex] = mapped;
+        else state.members.unshift(mapped);
+    }
+    return mapped;
+}
+
+export async function updateMemberOnApi(id, member) {
+    const response = await apiClient.put(`/api/members/${id}`, memberToApiPayload(member));
+    const record = response?.data ?? null;
+    const mapped = memberFromApiRow(record);
+    if (mapped) {
+        const existingIndex = state.members.findIndex((entry) => entry.id === mapped.id);
+        if (existingIndex >= 0) state.members[existingIndex] = mapped;
+        else state.members.unshift(mapped);
+    }
+    return mapped;
+}
+
+export async function deleteMemberOnApi(id) {
+    await apiClient.delete(`/api/members/${id}`);
+    state.members = state.members.filter((member) => member.id !== id);
+}
+
+export function getPlan(planId) { return state.plans.find((plan) => plan.id === planId); }
+export function getMember(memberId) { return state.members.find((member) => member.id === memberId); }
+export function getMemberPayments(memberId) { return state.payments.filter((payment) => payment.memberId === memberId); }
+export function memberBalance(member) {
+    return Math.max(0, Number(member.totalFees || 0) - state.payments.filter((payment) => payment.memberId === member.id && payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+}
+export function activeMembers() {
+    const date = new Date();
+    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    const today = date.toISOString().slice(0, 10);
+    return state.members.filter((member) => member.status !== "suspended" && member.expiryDate >= today);
+}

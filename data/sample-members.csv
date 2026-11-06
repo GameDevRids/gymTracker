@@ -1,0 +1,3 @@
+name,phone,email,plan,joinedAt,startDate,expiryDate
+Rohan Demo,+91 9876501234,rohan.demo@example.com,Monthly,2026-03-01,2026-03-01,2026-03-31
+Maya Example,+91 9876505678,maya.example@example.com,Quarterly,2026-03-10,2026-03-10,2026-06-08
