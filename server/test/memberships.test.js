@@ -31,6 +31,7 @@ const assignment = {
     plan_name: "Monthly",
     duration_days: 30,
     price: 999,
+    total_fees: 899,
     start_date: "2026-11-06",
     end_date: "2026-12-05",
     status: "assigned",
@@ -88,12 +89,16 @@ test("assignment request validates member and plan UUIDs and the date", () => {
     const accepted = invoke(validateAssignmentPayload, { body: validPayload });
     assert.equal(accepted.nextCalled, true);
     assert.deepEqual(accepted.request.validatedAssignment, validPayload);
+    const withTotalFees = invoke(validateAssignmentPayload, { body: { ...validPayload, total_fees: 1200 } });
+    assert.equal(withTotalFees.nextCalled, true);
+    assert.equal(withTotalFees.request.validatedAssignment.total_fees, 1200);
 
     for (const body of [
         { ...validPayload, plan_id: "bad-id" },
         { ...validPayload, start_date: "2026-02-30" },
         { ...validPayload, start_date: "06-11-2026" },
-        { ...validPayload, price: 1 }
+        { ...validPayload, price: 1 },
+        { ...validPayload, total_fees: -1 }
     ]) {
         const rejected = invoke(validateAssignmentPayload, { body });
         assert.equal(rejected.nextCalled, false);
@@ -149,7 +154,7 @@ test("assignment uses the database-created plan snapshot and returns effective s
     assert.equal(saved.effective_status, effectiveMembershipStatus(assignment));
     assert.deepEqual(mock.calls[0], {
         rpc: "gympulse_assign_member_plan",
-        params: { p_member_id: memberId, p_plan_id: planId, p_start_date: validPayload.start_date, p_gym_id: gymId }
+        params: { p_member_id: memberId, p_plan_id: planId, p_start_date: validPayload.start_date, p_gym_id: gymId, p_total_fees: null }
     });
 });
 
@@ -180,7 +185,8 @@ test("assignment returns not found when the supplied member UUID does not exist"
             p_member_id: exampleMemberId,
             p_plan_id: planId,
             p_start_date: validPayload.start_date,
-            p_gym_id: gymId
+            p_gym_id: gymId,
+            p_total_fees: null
         }
     });
 });
@@ -272,6 +278,9 @@ test("expiring list returns expired and in-window current memberships, sorted by
     assert.deepEqual(memberships.map((item) => item.days_left), [-1, 3]);
     assert.equal(memberships[1].member.full_name, "Riya Shah");
     assert.equal(memberships[1].effective_status, "active");
+    assert.ok(mock.calls.some((call) => call.table === "member_memberships"
+        && call.operations.some(([name, select]) => name === "select"
+            && select.includes("members!member_memberships_member_id_fkey!inner("))));
 });
 
 test("membership history is returned newest-first with effective statuses", async () => {

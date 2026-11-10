@@ -1,9 +1,11 @@
-const STATIC_FRONTEND_PORTS = new Set(["5500", "5501"]);
-
-export function resolveApiOrigin(location = globalThis.window?.location) {
+export function resolveApiOrigin(
+    location = globalThis.window?.location,
+    configuredBase = globalThis.window?.GYMPULSE_API_BASE || globalThis.document?.querySelector('meta[name="api-base"]')?.content
+) {
+    if (configuredBase?.trim()) {
+        return new URL(configuredBase.trim(), location?.origin || "http://localhost:3001").origin;
+    }
     if (!location?.origin) return "http://localhost:3001";
-    const isLocalHost = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-    if (isLocalHost && STATIC_FRONTEND_PORTS.has(location.port)) return "http://localhost:3001";
     return location.origin;
 }
 
@@ -14,6 +16,7 @@ let refreshToken = "";
 let refreshTimer;
 let refreshPromise;
 let unauthorizedHandler = () => {};
+const REFRESH_TOKEN_KEY = "gympulse.refresh-token";
 
 function isAuthEndpoint(path) {
     try {
@@ -39,7 +42,7 @@ async function refreshSession() {
             throw new Error(payload?.message || "Your session has expired. Sign in again.");
         }
         setAuthSession(payload.data);
-        return accessToken;
+        return payload.data;
     })();
     try {
         return await refreshPromise;
@@ -49,8 +52,14 @@ async function refreshSession() {
 }
 
 export function setAuthSession(session) {
-    accessToken = session?.access_token || "";
-    refreshToken = session?.refresh_token || "";
+    const newAccessToken = session?.access_token || "";
+    const newRefreshToken = session?.refresh_token || "";
+    if (typeof globalThis.sessionStorage !== "undefined") {
+        if (newRefreshToken) globalThis.sessionStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
+        else globalThis.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+    accessToken = newAccessToken;
+    refreshToken = newRefreshToken;
     clearTimeout(refreshTimer);
     if (accessToken && refreshToken && Number.isFinite(session?.expires_in)) {
         refreshTimer = setTimeout(() => {
@@ -63,6 +72,17 @@ export function clearAuthSession() {
     accessToken = "";
     refreshToken = "";
     clearTimeout(refreshTimer);
+    if (typeof globalThis.sessionStorage !== "undefined") {
+        globalThis.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
+}
+
+export async function restoreAuthSession() {
+    if (typeof globalThis.sessionStorage === "undefined") return null;
+    const storedRefreshToken = globalThis.sessionStorage.getItem(REFRESH_TOKEN_KEY);
+    if (!storedRefreshToken) return null;
+    refreshToken = storedRefreshToken;
+    return refreshSession();
 }
 
 export function setUnauthorizedHandler(handler) {

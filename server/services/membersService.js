@@ -68,7 +68,7 @@ function withoutMembershipDates(member) {
     return editableMember;
 }
 
-const currentMembershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,start_date,end_date,status,created_at,updated_at";
+const currentMembershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at,updated_at";
 
 async function addCurrentMemberships(members, gymId, client) {
     if (!members.length) return members;

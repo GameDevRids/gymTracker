@@ -27,7 +27,7 @@ import {
 import { fetchActivePlans } from "./api/plansApi.js";
 import { createMemberPlanAssignment, fetchMemberMembershipHistory } from "./api/membershipsApi.js";
 import { createPayment, fetchMemberPayments } from "./api/paymentsApi.js";
-import { apiClient, clearAuthSession, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
+import { apiClient, clearAuthSession, restoreAuthSession, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
 import { renderExpiring } from "./modules/expiring.js";
 import { renderOperationsPage, drawAnalyticsCharts } from "./modules/operations.js";
 import { openModal, closeModal } from "./components/modal.js";
@@ -36,6 +36,7 @@ import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleW
 import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
 import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
+import { createDemoState } from "../../data/demo-data.js";
 
 const page = document.querySelector("#page-content");
 const viewTitles = {
@@ -107,6 +108,7 @@ function startAuthenticatedApp(session) {
     document.querySelector("#app-shell").hidden = false;
     document.querySelector(".mobile-bottom-nav").hidden = false;
     document.querySelector("#gym-name-label").textContent = session.gym.name;
+    document.querySelector(".gym-avatar").textContent = session.gym.name.trim().slice(0, 1).toUpperCase() || "G";
     const ownerName = session.user.email || "Gym owner";
     document.querySelector(".sidebar-profile strong").textContent = ownerName;
     document.querySelector(".top-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
@@ -164,6 +166,7 @@ function render() {
     document.querySelector("#current-page").textContent = translatedViews.includes(currentView) ? t(currentView) : viewTitles[currentView] || "Overview";
     document.querySelector("#member-count").textContent = state.members.length;
     document.querySelector("#gym-name-label").textContent = state.gym.name;
+    document.querySelector(".gym-avatar").textContent = state.gym.name.trim().slice(0, 1).toUpperCase() || "G";
     const now = new Date();
     document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(now);
     if (currentView === "expiring") {
@@ -183,6 +186,9 @@ function render() {
         page.innerHTML = renderOperationsPage(currentView);
         if (currentView === "analytics") drawAnalyticsCharts();
     }
+    if (state.sampleDataLoaded) {
+        page.insertAdjacentHTML("afterbegin", `<div class="note-box" role="status"><strong>DEMO SAMPLE DATA</strong> — fictional browser-only records; not stored in your gym database.</div>`);
+    }
 }
 
 async function refreshMembersFromApi({ silent = false, page: requestedPage = memberFilters.page } = {}) {
@@ -197,7 +203,8 @@ async function refreshMembersFromApi({ silent = false, page: requestedPage = mem
         });
         if (requestVersion !== memberRequestVersion) return;
         state.members = members;
-        if (!silent && currentView === "members") render();
+        await Promise.all(members.map((member) => loadMemberPaymentsFromApi(member.id, { silent: true })));
+        if (!silent) render();
     } catch (error) {
         if (requestVersion === memberRequestVersion && !silent) toast(error.message || "Unable to load members from the backend.", "error");
     }
@@ -237,14 +244,15 @@ async function loadExpiringMemberships() {
     if (currentView === "expiring") render();
 }
 
-async function loadMemberPaymentsFromApi(memberId) {
+async function loadMemberPaymentsFromApi(memberId, { silent = false } = {}) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(memberId)) return;
     try {
         const payments = await fetchMemberPayments(memberId);
         state.apiMemberPayments[memberId] = payments.map(mapPayment);
         if (currentView === "profile" && profileId === memberId) render();
     } catch (error) {
-        toast(error.message || "Could not load member payment history.", "error");
+        if (silent) console.error(`GymPulse could not load payments for member ${memberId}.`, error);
+        else toast(error.message || "Could not load member payment history.", "error");
     }
 }
 
@@ -623,6 +631,7 @@ function handleAction(action, target) {
         case "receipt": openReceipt(id); break;
         case "print-receipt": printReceipt(id); break;
         case "reset-demo": resetDemoData(); break;
+        case "load-sample-data": loadSampleData(); break;
         default: break;
     }
 }
@@ -654,12 +663,6 @@ function updateMemberFormDefaults(target) {
     }
     if (form.id === "member-form" && target.name === "assignmentStartDate") {
         updateMemberAssignmentPreview(form);
-    }
-    if (form.id === "payment-form" && target.name === "memberId") {
-        const member = getMember(target.value);
-        const balance = member ? memberBalance(member) : null;
-        form.elements.amount.max = balance ?? "";
-        document.querySelector("#payment-balance-note").textContent = member ? `Outstanding balance: ${formatINR(balance)}. A payment cannot exceed this balance.` : "Choose a member to check their balance.";
     }
     if (form.id === "checkin-form" && target.name === "memberId") {
         const member = getMember(target.value);
@@ -786,7 +789,7 @@ async function saveMember(form) {
         let assignment;
         const previousAssignments = await fetchMemberMembershipHistory(saved.id);
         assignment = previousAssignments.find((item) => item.plan_id === plan.id && item.start_date === startDate);
-        if (!assignment) assignment = await createMemberPlanAssignment(saved.id, plan.id, startDate);
+        if (!assignment) assignment = await createMemberPlanAssignment(saved.id, plan.id, startDate, totalFees);
         if (!assignment) throw new Error("The assignment API did not return the saved membership.");
         createdAssignment = assignment;
         const assignmentError = form.querySelector("#member-assignment-error");
@@ -822,15 +825,20 @@ async function saveMember(form) {
     }
 
     if (initialPayment > 0) {
-        state.payments.unshift({
-            id: uid("TX"),
-            memberId: saved?.id || record.id,
+        const payment = await createPayment({
+            member_id: saved.id,
+            membership_id: createdAssignment?.id || null,
             amount: initialPayment,
-            date: localISODate(),
-            method: "UPI",
-            status: "paid",
-            notes: "Initial payment"
+            paid_on: localISODate(),
+            method: "upi",
+            note: "Initial payment"
         });
+        if (!payment) throw new Error("The payments API did not return the initial payment.");
+        const mappedPayment = mapPayment(payment);
+        state.apiMemberPayments[saved.id] = [
+            mappedPayment,
+            ...(state.apiMemberPayments[saved.id] || []).filter((item) => item.id !== mappedPayment.id)
+        ];
     }
 
     closeModal();
@@ -925,35 +933,67 @@ function openImportPreview() {
         subtitle: `${escapeHTML(currentFileName)} · ${valid.length} valid · ${invalid.length} invalid or duplicate`,
         wide: true,
         body: `<div class="note-box" style="margin-bottom:12px">Required columns: <strong>name</strong> and <strong>phone</strong>. Supported aliases include full name, mobile, phone number, joining date and membership plan. Rows with an existing or repeated phone are skipped.</div>
-            <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(row.phone)}</td><td>${escapeHTML(row.data.plan || "Default plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
+        <p id="import-progress" role="status" aria-live="polite"></p>
+        <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(row.phone)}</td><td>${escapeHTML(row.data.plan || "Default plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
         footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-primary" data-action="confirm-import" ${valid.length ? "" : "disabled"}>Import ${valid.length} members</button>`
     });
 }
 
-function confirmImport() {
+async function confirmImport() {
+    const rows = importedRows.filter((row) => !row.issues.length);
+    const errors = importedRows
+        .filter((row) => row.issues.length)
+        .map((row) => ({ rowNumber: row.rowNumber, message: row.issues.join(", ") }));
     let imported = 0;
-    const failed = importedRows.filter((row) => row.issues.length).length;
-    importedRows.filter((row) => !row.issues.length).forEach(({ data, name, phone }) => {
-        const planName = String(data.plan || "").trim();
-        const matchedPlan = planName
-            ? state.plans.find((plan) => plan.name.toLowerCase() === planName.toLowerCase() && plan.active)
-            : state.plans.find((plan) => plan.active);
-        if (!matchedPlan) return;
-        const joinedAt = data.joinedat || data.joiningdate || localISODate();
-        const startDate = data.startdate || joinedAt;
-        const member = {
-            id: uniqueMemberId(), name, phone, email: data.email || "", dob: data.dob || data.dateofbirth || "",
-            gender: data.gender || "", joinedAt, planId: matchedPlan.id, startDate,
-            expiryDate: data.expirydate || addDays(startDate, matchedPlan.durationDays),
-            status: "active", totalFees: matchedPlan.price, charges: [{ amount: matchedPlan.price, date: startDate }], amountPaid: 0,
-            emergencyContact: "", notes: "Imported from CSV", followUpStatus: "pending", renewals: []
-        };
-        state.members.push(member);
-        imported += 1;
-    });
+    const progress = document.querySelector("#import-progress");
+    const submit = document.querySelector('[data-action="confirm-import"]');
+    if (submit) submit.disabled = true;
+
+    try {
+        const plans = await fetchActivePlans();
+        for (const [index, row] of rows.entries()) {
+            if (progress) progress.textContent = `Importing row ${index + 1} of ${rows.length}…`;
+            try {
+                const planName = String(row.data.plan || "").trim();
+                const plan = planName
+                    ? plans.find((item) => item.name.toLowerCase() === planName.toLowerCase())
+                    : plans[0];
+                if (!plan) throw new Error(planName ? "Active membership plan not found." : "Create an active membership plan first.");
+
+                const joinedAt = row.data.joinedat || row.data.joiningdate || localISODate();
+                const startDate = row.data.startdate || joinedAt;
+                const member = await createMemberOnApi({
+                    name: row.name,
+                    phone: normalizeIndianPhone(row.phone),
+                    email: row.data.email || "",
+                    dob: row.data.dob || row.data.dateofbirth || "",
+                    gender: row.data.gender || "",
+                    status: "active",
+                    notes: "Imported from CSV"
+                });
+                if (!member?.id) throw new Error("The member was not returned by the API.");
+                await createMemberPlanAssignment(member.id, plan.id, startDate, Number(plan.price));
+                imported += 1;
+            } catch (error) {
+                errors.push({ rowNumber: row.rowNumber, message: error.message || "Import failed." });
+            }
+        }
+    } catch (error) {
+        errors.push(...rows.map((row) => ({
+            rowNumber: row.rowNumber,
+            message: error.message || "Active membership plans could not be loaded."
+        })));
+    }
+
     importedRows = [];
-    closeModal();
-    safePersist(`${imported} imported, ${failed} skipped. Existing data was not overwritten.`);
+    memberFilters.page = 1;
+    await refreshMembersFromApi({ page: 1 });
+    const failureRows = errors.map((error) => `<li>Row ${error.rowNumber}: ${escapeHTML(error.message)}</li>`).join("");
+    openModal({
+        title: "Member import complete",
+        body: `<p role="status">${imported} imported; ${errors.length} row${errors.length === 1 ? "" : "s"} need attention.</p>${failureRows ? `<ul class="helper-text" role="alert">${failureRows}</ul>` : ""}`,
+        footer: `<button class="button button-primary" type="button" data-action="close-modal">Done</button>`
+    });
 }
 
 function exportMembers() {
@@ -1029,9 +1069,9 @@ async function copyMessage(message) {
 
 function resetDemoData() {
     openModal({
-        title: "Reset demo data?",
-        body: `<p class="confirm-copy">This restores the original fictional GymPulse data and replaces changes saved in this browser. This cannot be undone.</p>`,
-        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-reset">Reset workspace</button>`
+        title: "Clear local sample data?",
+        body: `<p class="confirm-copy">This removes the fictional sample records from this browser. It does not delete members or payments in your gym database.</p>`,
+        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-reset">Clear sample data</button>`
     });
 }
 
@@ -1040,9 +1080,29 @@ function confirmReset() {
         resetDemo();
         memberFilters = { search: "", filter: "all", sort: "name" };
         currentView = "overview";
-        closeModal(); render(); toast("Demo data restored.");
+        closeModal(); render(); refreshMembersFromApi({ page: 1 }); toast("Local sample data cleared.");
     } catch (error) {
         toast(error.message || "Could not reset demo data.", "error");
+    }
+}
+
+function loadSampleData() {
+    try {
+        const sample = createDemoState();
+        const currentGym = state.gym;
+        Object.keys(state).forEach((key) => delete state[key]);
+        Object.assign(state, sample, {
+            gym: currentGym,
+            sampleDataLoaded: true,
+            apiMemberPayments: {},
+            whatsapp: {}
+        });
+        memberFilters = { search: "", filter: "all", sort: "name", page: 1 };
+        persist();
+        render();
+        toast("Fictional sample data loaded in this browser only.");
+    } catch (error) {
+        toast(error.message || "Could not load sample data.", "error");
     }
 }
 
@@ -1183,6 +1243,10 @@ document.addEventListener("click", (event) => {
     if (viewLink) { navigate(viewLink.dataset.view); return; }
     const action = event.target.closest("[data-action]");
     if (action) {
+        if (action.dataset.action === "retry-expiring") {
+            loadExpiringMemberships();
+            return;
+        }
         if (action.dataset.action === "retry-member-plans") {
             const form = document.querySelector("#member-form");
             if (form && form.dataset.mode === "create") loadMemberFormPlans(form);
@@ -1369,4 +1433,14 @@ setUnauthorizedHandler(() => {
     saveAuthNotice("Your session expired. Please sign in again.");
     window.location.reload();
 });
-showAuthScreen(false, takeAuthNotice());
+async function restoreSessionOnLoad() {
+    try {
+        const session = await restoreAuthSession();
+        if (session) acceptSession(session);
+        else showAuthScreen(false, takeAuthNotice());
+    } catch (error) {
+        showAuthScreen(false, error.message || "Your saved session could not be restored.");
+    }
+}
+
+restoreSessionOnLoad();

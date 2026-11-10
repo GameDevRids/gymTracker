@@ -1,4 +1,5 @@
 import { fetchPlans } from "../api/plansApi.js";
+import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { escapeHTML, formatINR } from "../utils.js";

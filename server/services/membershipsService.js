@@ -1,7 +1,7 @@
 import { supabaseClient, supabaseConfigurationError } from "../config/database.js";
 import { logger } from "../config/logger.js";
 
-const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,start_date,end_date,status,created_at,updated_at";
+const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at,updated_at";
 
 export class MembershipsServiceError extends Error {
     constructor(status, message) {
@@ -106,14 +106,15 @@ export async function listMemberMemberships(memberId, gymId, client = supabaseCl
     return (data || []).map(withEffectiveStatus);
 }
 
-export async function assignMemberPlan(memberId, { plan_id, start_date }, gymId, client = supabaseClient) {
+export async function assignMemberPlan(memberId, { plan_id, start_date, total_fees }, gymId, client = supabaseClient) {
     requireSupabaseClient(client);
     if (!gymId) throw new MembershipsServiceError(403, "Gym is required.");
     const { data, error } = await client.rpc("gympulse_assign_member_plan", {
         p_member_id: memberId,
         p_plan_id: plan_id,
         p_start_date: start_date,
-        p_gym_id: gymId
+        p_gym_id: gymId,
+        p_total_fees: total_fees ?? null
     });
     if (error) {
         if (isMissingRpc(error)) {
@@ -163,7 +164,7 @@ export async function listExpiringMemberships({ days, gymId }, client = supabase
     for (let offset = 0; ; offset += pageSize) {
         const { data, error } = await client
             .from("member_memberships")
-            .select(`${membershipColumns},members!inner(id,full_name,phone,archived_at,status)`)
+            .select(`${membershipColumns},members!member_memberships_member_id_fkey!inner(id,full_name,phone,archived_at,status)`)
             .eq("gym_id", gymId)
             .eq("members.gym_id", gymId)
             .is("members.archived_at", null)

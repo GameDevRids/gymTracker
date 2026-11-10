@@ -290,7 +290,7 @@ function renderSettings() {
             <div class="field full"><button class="button button-primary" type="submit">Save settings</button></div>
         </form></section>
         <section class="card settings-section"><h2>Membership preferences</h2><p class="helper-text">Membership expiry is evaluated by calendar date. Renewals default to start after the current expiry date when the membership is still valid.</p></section></div>
-        <aside><section class="card settings-section"><h2>Demo data</h2><p class="helper-text">Restore the original fictional members, payments and attendance. This replaces changes saved in this browser.</p><button class="button button-danger" data-action="reset-demo">Reset demo data</button></section>
+        <aside><section class="card settings-section"><h2>Sample data</h2><p class="helper-text">Load clearly labeled fictional members, payments and attendance into this browser for demonstration only. This data is not uploaded to your gym database.</p><button class="button button-secondary" data-action="load-sample-data">Load sample data</button><button class="button button-danger" data-action="reset-demo">Clear local sample data</button></section>
         <section class="card settings-section"><h2>Prototype limitations</h2><p class="helper-text">GymPulse is a frontend demo. It has no authentication, server-side authorization, backups, or gym account isolation. Do not enter sensitive or real customer information.</p></section></aside></div>`;
 }
 

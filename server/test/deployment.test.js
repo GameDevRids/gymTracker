@@ -87,7 +87,11 @@ test("frontend HTML and static assets load with the expected content security po
     assert.equal(manifest.display, "standalone");
     assert.equal((await fetch(`${baseUrl}/index.html`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/sw.js`)).headers.get("service-worker-allowed"), "/");
-    assert.equal((await fetch(`${baseUrl}/sw.js`)).status, 200);
+    const workerResponse = await fetch(`${baseUrl}/sw.js`);
+    assert.equal(workerResponse.status, 200);
+    const workerSource = await workerResponse.text();
+    assert.match(workerSource, /gympulse-shell-v3/);
+    assert.match(workerSource, /fetch\(new Request\(request, \{ cache: "no-cache" \}\)\)[\s\S]*?cache\.put\(url\.pathname, copy\)/);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-192.png`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-512.png`)).status, 200);
 });

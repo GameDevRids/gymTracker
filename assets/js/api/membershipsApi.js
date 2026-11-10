@@ -9,10 +9,11 @@ export function fetchMemberships(params = {}) {
     return apiClient.get("/api/memberships", { params });
 }
 
-export async function createMemberPlanAssignment(memberId, planId, startDate) {
+export async function createMemberPlanAssignment(memberId, planId, startDate, totalFees) {
     const response = await apiClient.post(`/api/members/${memberId}/memberships`, {
         plan_id: planId,
-        start_date: startDate
+        start_date: startDate,
+        ...(totalFees === undefined ? {} : { total_fees: totalFees })
     });
     return response?.data || null;
 }

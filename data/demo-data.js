@@ -107,3 +107,19 @@ export function createDemoState() {
         createdAt: new Date().toISOString()
     };
 }
+
+export function createEmptyState() {
+    return {
+        gym: {
+            name: "My Gym", address: "", phone: "",
+            currency: "INR", dateFormat: "DD MMM YYYY",
+            preferences: { expiryReminderDays: 7, paymentReminders: true, inactivityReminders: true }
+        },
+        plans: [],
+        members: [],
+        attendance: [],
+        payments: [],
+        notifications: [],
+        createdAt: new Date().toISOString()
+    };
+}

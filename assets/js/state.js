@@ -1,5 +1,5 @@
 import { loadState, saveState, resetState } from "./storage.js";
-import { createDemoState } from "../../data/demo-data.js";
+import { createEmptyState } from "../../data/demo-data.js";
 import { apiClient } from "./api/apiClient.js";
 import { fetchMembers } from "./api/membersApi.js";
 
@@ -10,7 +10,7 @@ export const state = (() => {
         return loadState();
     } catch (error) {
         initializationWarning = error.message || "Browser storage is unavailable; changes may not persist.";
-        return createDemoState();
+        return createEmptyState();
     }
 })();
 if (!state.whatsapp) state.whatsapp = {};
@@ -42,7 +42,7 @@ export function memberFromApiRow(member) {
         startDate: currentMembership?.start_date || "",
         expiryDate: currentMembership?.end_date || "",
         status: member.status === "suspended" ? "suspended" : "active",
-        totalFees: 0,
+        totalFees: Number(currentMembership?.total_fees ?? currentMembership?.price ?? 0),
         charges: [],
         amountPaid: 0,
         emergencyContact: "",
@@ -124,12 +124,15 @@ export async function deleteMemberOnApi(id) {
 export function getPlan(planId) { return state.plans.find((plan) => plan.id === planId); }
 export function getMember(memberId) { return state.members.find((member) => member.id === memberId); }
 export function getMemberPayments(memberId) {
-    const stored = state.payments.filter((payment) => payment.memberId === memberId);
-    const apiPayments = state.apiMemberPayments[memberId] || [];
-    return [...apiPayments, ...stored];
+    const member = getMember(memberId);
+    if (member?.memberCode) return state.apiMemberPayments[memberId] || [];
+    return state.payments.filter((payment) => payment.memberId === memberId);
 }
 export function memberBalance(member) {
-    return Math.max(0, Number(member.totalFees || 0) - state.payments.filter((payment) => payment.memberId === member.id && payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+    const payments = member.memberCode
+        ? state.apiMemberPayments[member.id] || []
+        : state.payments.filter((payment) => payment.memberId === member.id);
+    return Math.max(0, Number(member.totalFees || 0) - payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
 }
 export function activeMembers() {
     const date = new Date();

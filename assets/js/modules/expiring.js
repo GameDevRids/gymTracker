@@ -4,8 +4,8 @@ import { t } from "../i18n.js";
 export function renderExpiring(memberships = [], status = "loading", days = 7, reminderTemplate = "") {
     const content = status === "loading"
         ? `<div class="empty-state">${t("loading")}</div>`
-        : status === "error"
-            ? `<div class="empty-state" role="alert">${escapeHTML(status.message)}</div>`
+        : status && typeof status === "object"
+            ? `<div class="empty-state" role="alert"><p>${escapeHTML(status.message || "Unable to load expiring memberships.")}</p><button class="button button-secondary" data-action="retry-expiring">Try again</button></div>`
             : memberships.length
                 ? `<div class="expiring-list">${memberships.map((membership) => {
                     const member = membership.member;

@@ -15,6 +15,8 @@ import paymentsRouter from "./routes/payments.js";
 import whatsappRouter from "./routes/whatsapp.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
+import { requireDemoAuth } from "./middleware/demoAuth.js";
+import { createAuthRateLimit } from "./middleware/authRateLimit.js";
 import { supabaseClient, supabaseConfigured } from "./config/database.js";
 import { whatsappConfig } from "./config/whatsappConfig.js";
 
@@ -27,6 +29,7 @@ const projectDir = path.resolve(currentDir, "..");
 const allowedOrigins = new Set(whatsappConfig.allowedOrigins);
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+app.use(requireDemoAuth());
 app.use(httpLogger);
 app.use(helmet({
     contentSecurityPolicy: {
@@ -53,6 +56,8 @@ app.use("/api/whatsapp/send", rateLimit({
     standardHeaders: true,
     legacyHeaders: false
 }));
+app.use("/api/auth/login", createAuthRateLimit());
+app.use("/api/auth/refresh", createAuthRateLimit());
 app.use((request, response, next) => {
     const origin = request.get("Origin");
     if (origin && allowedOrigins.has(origin)) {

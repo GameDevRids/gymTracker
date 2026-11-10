@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v2";
+const CACHE_NAME = "gympulse-shell-v3";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -69,6 +69,18 @@ self.addEventListener("fetch", (event) => {
     }
 
     if (APP_SHELL.includes(url.pathname)) {
-        event.respondWith(caches.match(url.pathname).then((cached) => cached || fetch(request)));
+        event.respondWith(fetch(new Request(request, { cache: "no-cache" }))
+            .then((response) => {
+                if (response.ok) {
+                    const copy = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(url.pathname, copy));
+                }
+                return response;
+            })
+            .catch(async () => {
+                const cached = await caches.match(url.pathname);
+                if (cached) return cached;
+                throw new Error(`GymPulse app shell resource is unavailable offline: ${url.pathname}`);
+            }));
     }
 });

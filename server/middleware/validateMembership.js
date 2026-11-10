@@ -9,7 +9,8 @@ const dateSchema = z.string()
     });
 const assignmentSchema = z.object({
     plan_id: uuidSchema,
-    start_date: dateSchema
+    start_date: dateSchema,
+    total_fees: z.coerce.number().finite().min(0).max(9999999999.99).optional()
 }).strict();
 const membershipListQuerySchema = z.object({
     page: z.string().regex(/^\d+$/).optional().default("1"),
@@ -56,11 +57,15 @@ export function validateAssignmentPayload(request, response, next) {
         if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
             return sendValidationError(response, "Request body must be a JSON object.");
         }
-        if (Object.keys(request.body).some((field) => !["plan_id", "start_date"].includes(field))) {
-            return sendValidationError(response, "Only plan_id and start_date may be provided.");
+        if (Object.keys(request.body).some((field) => !["plan_id", "start_date", "total_fees"].includes(field))) {
+            return sendValidationError(response, "Only plan_id, start_date, and total_fees may be provided.");
         }
         if (!uuidSchema.safeParse(request.body.plan_id).success) {
             return sendValidationError(response, "Plan ID must be a valid UUID.");
+        }
+        if (request.body.total_fees !== undefined
+            && (!Number.isFinite(Number(request.body.total_fees)) || Number(request.body.total_fees) < 0)) {
+            return sendValidationError(response, "Membership fees must be a valid non-negative amount.");
         }
         return sendValidationError(response, "Start date must be a valid YYYY-MM-DD date.");
     }
