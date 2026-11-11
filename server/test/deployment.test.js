@@ -90,7 +90,7 @@ test("frontend HTML and static assets load with the expected content security po
     const workerResponse = await fetch(`${baseUrl}/sw.js`);
     assert.equal(workerResponse.status, 200);
     const workerSource = await workerResponse.text();
-    assert.match(workerSource, /gympulse-shell-v9/);
+    assert.match(workerSource, /gympulse-shell-v10/);
     assert.match(workerSource, /fetch\(new Request\(request, \{ cache: "no-cache" \}\)\)[\s\S]*?cache\.put\(url\.pathname, copy\)/);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-192.png`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-512.png`)).status, 200);

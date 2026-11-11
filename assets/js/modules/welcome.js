@@ -5,12 +5,14 @@
 import { state } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
 import { getLanguage } from "../i18n.js";
-import { formatDate } from "../utils.js";
+import { formatDate, formatINR } from "../utils.js";
 import {
     DEFAULT_WELCOME_TEMPLATES,
     WELCOME_LANGUAGES,
     buildWelcomeMessage,
+    paymentPlaceholderValues,
     welcomeLanguage,
+    welcomePayment,
     welcomePhone,
     welcomeWhatsAppUrl
 } from "../welcomeMessage.js";
@@ -81,17 +83,61 @@ function dateText(value) {
     return value ? formatDate(value) : "";
 }
 
+// ---------- Fee and payments, read from the database ----------
+
+// Per member id: { status: "loading" | "ready" | "error", memberships, payments, message }.
+export const welcomeFacts = {};
+
+/** Loads the member's memberships and payments from the API (not browser state). */
+export async function loadWelcomeFacts(memberId) {
+    welcomeFacts[memberId] = { status: "loading", memberships: [], payments: [] };
+    try {
+        const [memberships, payments] = await Promise.all([
+            apiClient.get(`/api/members/${memberId}/memberships`),
+            apiClient.get(`/api/payments/member/${memberId}`)
+        ]);
+        welcomeFacts[memberId] = {
+            status: "ready",
+            memberships: Array.isArray(memberships?.data) ? memberships.data : [],
+            payments: Array.isArray(payments?.data) ? payments.data : []
+        };
+    } catch (error) {
+        welcomeFacts[memberId] = { status: "error", memberships: [], payments: [], message: error.message || "Fee details could not be loaded." };
+    }
+    return welcomeFacts[memberId];
+}
+
+/**
+ * The membership as stored in the database (matched by id) and the payments to use.
+ * Explicit payments win; otherwise the loaded database rows; otherwise none, so fee lines are left out.
+ */
+function resolveFacts(member, membership, payments) {
+    const facts = welcomeFacts[member?.id];
+    if (facts?.status !== "ready") return { membership, payments };
+    const stored = facts.memberships.find((row) => row.id === membership?.id) || membership;
+    return { membership: stored, payments: payments ?? facts.payments };
+}
+
+/** Fee, paid and balance for the member's membership, or null when unknown. */
+export function welcomePaymentFor(member, { membership = member?.currentMembership, payments } = {}) {
+    const resolved = resolveFacts(member, membership, payments);
+    return resolved.payments ? welcomePayment(resolved.membership, resolved.payments) : null;
+}
+
 /** Placeholder values for one member. Missing values stay empty so their lines are left out. */
-export function welcomeValues(member, { membership = member?.currentMembership, gym = state.gym } = {}) {
+export function welcomeValues(member, { membership = member?.currentMembership, gym = state.gym, payments } = {}) {
+    const resolved = resolveFacts(member, membership, payments);
+    const payment = resolved.payments ? welcomePayment(resolved.membership, resolved.payments) : null;
     return {
         name: member?.name || "",
         gym_name: gym?.name || "",
-        plan: membership?.plan_name || "",
-        start_date: dateText(membership?.start_date || member?.startDate),
-        expiry_date: dateText(membership?.end_date || member?.expiryDate),
+        plan: resolved.membership?.plan_name || "",
+        start_date: dateText(resolved.membership?.start_date || member?.startDate),
+        expiry_date: dateText(resolved.membership?.end_date || member?.expiryDate),
         member_code: member?.memberCode || "",
         gym_phone: gym?.phone || "",
-        gym_address: gym?.address || ""
+        gym_address: gym?.address || "",
+        ...paymentPlaceholderValues(payment, formatINR)
     };
 }
 
@@ -101,8 +147,8 @@ export function welcomeBlocker(member) {
     return welcomePhone(member.phone) ? "" : "invalid-phone";
 }
 
-export function welcomeMessageFor(member, { membership, gym, language = welcomeMessageLanguage() } = {}) {
-    return buildWelcomeMessage(welcomeTemplate(language), welcomeValues(member, { membership, gym }));
+export function welcomeMessageFor(member, { membership, gym, payments, language = welcomeMessageLanguage() } = {}) {
+    return buildWelcomeMessage(welcomeTemplate(language), welcomeValues(member, { membership, gym, payments }));
 }
 
 // ---------- Sending and the send log ----------
@@ -146,11 +192,11 @@ function openInWhatsApp(url) {
  * directly from a click handler, before any await, or phones block the new window.
  * The returned promise settles when the send has been logged in whatsapp_messages.
  */
-export function sendWelcome(member, { membership, gym, language = welcomeMessageLanguage(), open = openInWhatsApp, record = recordWelcomeOnApi } = {}) {
+export function sendWelcome(member, { membership, gym, payments, language = welcomeMessageLanguage(), open = openInWhatsApp, record = recordWelcomeOnApi } = {}) {
     const blocker = welcomeBlocker(member);
     if (blocker === "no-consent") throw new Error("This member has not agreed to receive WhatsApp updates.");
     if (blocker) throw new Error("This member does not have a valid Indian mobile number.");
-    const message = welcomeMessageFor(member, { membership, gym, language });
+    const message = welcomeMessageFor(member, { membership, gym, payments, language });
     open(welcomeWhatsAppUrl(member.phone, message));
     return record(member.id, { reminder_type: "welcome", language: welcomeLanguage(language), body: message });
 }
@@ -158,52 +204,74 @@ export function sendWelcome(member, { membership, gym, language = welcomeMessage
 // ---------- The welcome card image ----------
 
 export const CARD_SIZE = 1080;
-const CARD_COLORS = { slate: "#1E2D3A", slate2: "#2A3F4F", marigold: "#F4A51C", white: "#FFFFFF", soft: "#C9D2D9" };
-const HEADING_FONT = '"Anek Latin", "Anek Devanagari", sans-serif';
-const BODY_FONT = '"Mukta", sans-serif';
+const CARD_COLORS = { slate: "#1E2D3A", slate2: "#2A3F4F", marigold: "#F4A51C", white: "#FFFFFF", soft: "#C9D2D9", brick: "#B83A26", leaf: "#1D7A4F" };
+const HEADING_FAMILIES = '"Anek Latin", "Anek Devanagari"';
+const BODY_FAMILIES = '"Mukta"';
+// System fonts that carry the rupee sign, used for that character only when the web font lacks it.
+const RUPEE_FALLBACK = '"Nirmala UI", "Noto Sans", "Noto Sans Devanagari", Roboto, "Segoe UI", "Helvetica Neue", Arial';
 const CARD_LABELS = {
-    en: { welcome: "Welcome,", plan: "Plan", start: "Starts", expiry: "Valid until", code: "MEMBER ID" },
-    hi: { welcome: "स्वागत है,", plan: "योजना", start: "शुरुआत", expiry: "वैध तिथि", code: "सदस्य आईडी" },
-    mr: { welcome: "स्वागत आहे,", plan: "योजना", start: "सुरुवात", expiry: "वैध तारीख", code: "सदस्य आयडी" }
+    en: { welcome: "Welcome,", plan: "Plan", start: "Starts", expiry: "Valid until", fee: "Fee", paid: "Paid", balance: "Balance due", paidInFull: "Paid in full", code: "MEMBER ID" },
+    hi: { welcome: "स्वागत है,", plan: "योजना", start: "शुरुआत", expiry: "वैध तिथि", fee: "शुल्क", paid: "भुगतान", balance: "बकाया", paidInFull: "पूरा भुगतान", code: "सदस्य आईडी" },
+    mr: { welcome: "स्वागत आहे,", plan: "योजना", start: "सुरुवात", expiry: "वैध तारीख", fee: "शुल्क", paid: "भरले", balance: "बाकी", paidInFull: "पूर्ण भरले", code: "सदस्य आयडी" }
 };
 
 function setFont(context, weight, size, family) {
     context.font = `${weight} ${size}px ${family}`;
 }
 
-// Largest size between max and min at which the text fits, then trimmed with … if it still does not.
-function fitText(context, text, { weight, family, max, min, width }) {
-    let size = max;
-    setFont(context, weight, size, family);
-    while (size > min && context.measureText(text).width > width) {
-        size -= 2;
-        setFont(context, weight, size, family);
-    }
-    let fitted = text;
-    while (fitted.length > 1 && context.measureText(fitted).width > width) fitted = `${fitted.slice(0, -2)}…`;
-    return { text: fitted, size };
+/**
+ * True when the font list itself draws the character. Measured against two different generic
+ * fallbacks: if the width follows the fallback, the character came from the fallback.
+ */
+export function fontHasGlyph(context, families, character, weight = 700) {
+    const width = (family) => { setFont(context, weight, 80, family); return context.measureText(character).width; };
+    const viaMono = width(`${families}, monospace`);
+    const viaSerif = width(`${families}, serif`);
+    return !(viaMono === width("monospace") && viaSerif === width("serif"));
 }
 
-// The member name on one line if it fits large, otherwise on two balanced lines.
-function nameLines(context, name, width) {
-    const single = fitText(context, name, { weight: 800, family: HEADING_FONT, max: 104, min: 80, width });
-    setFont(context, 800, single.size, HEADING_FONT);
-    if (context.measureText(name).width <= width || !name.includes(" ")) return { lines: [single.text], size: single.size };
-    const words = name.split(" ");
-    let best = [name, ""];
-    let bestWidth = Infinity;
-    for (let index = 1; index < words.length; index += 1) {
-        const pair = [words.slice(0, index).join(" "), words.slice(index).join(" ")];
-        const widest = Math.max(...pair.map((line) => context.measureText(line).width));
-        if (widest < bestWidth) { best = pair; bestWidth = widest; }
+/** Font lists for the card, with a system fallback added where a web font has no ₹ glyph. */
+export function cardFontFamilies(context) {
+    const withRupee = (families) => fontHasGlyph(context, families, "₹") ? `${families}, sans-serif` : `${families}, ${RUPEE_FALLBACK}, sans-serif`;
+    return { heading: withRupee(HEADING_FAMILIES), body: withRupee(BODY_FAMILIES), headingHasRupee: fontHasGlyph(context, HEADING_FAMILIES, "₹"), bodyHasRupee: fontHasGlyph(context, BODY_FAMILIES, "₹") };
+}
+
+function truncateToWidth(context, text, width) {
+    if (context.measureText(text).width <= width) return text;
+    let fitted = text;
+    while (fitted.length > 1 && context.measureText(`${fitted}…`).width > width) fitted = fitted.slice(0, -1);
+    return `${fitted.trimEnd()}…`;
+}
+
+function wrapWords(context, text, width) {
+    const lines = [];
+    for (const word of String(text).split(/\s+/).filter(Boolean)) {
+        const candidate = lines.length ? `${lines[lines.length - 1]} ${word}` : word;
+        if (lines.length && context.measureText(candidate).width <= width) lines[lines.length - 1] = candidate;
+        else lines.push(word);
     }
-    let size = 96;
-    setFont(context, 800, size, HEADING_FONT);
-    while (size > 56 && Math.max(...best.map((line) => context.measureText(line).width)) > width) {
-        size -= 2;
-        setFont(context, 800, size, HEADING_FONT);
+    return lines.length ? lines : [""];
+}
+
+/**
+ * Fits text into a box: the largest size from max down to min at which it fits on up to
+ * maxLines lines within width and maxHeight. Only if nothing fits at the minimum size is the
+ * last line shortened with "…".
+ */
+export function fitTextBlock(context, text, { weight, family, max, min, width, maxLines = 1, maxHeight = Infinity, lineHeight = 1.15 }) {
+    for (let size = max; size >= min; size -= 2) {
+        setFont(context, weight, size, family);
+        const lines = wrapWords(context, text, width);
+        if (lines.length <= maxLines && lines.every((line) => context.measureText(line).width <= width) && lines.length * size * lineHeight <= maxHeight) {
+            return { lines, size, lineHeight: Math.round(size * lineHeight) };
+        }
     }
-    return { lines: best.map((line) => fitText(context, line, { weight: 800, family: HEADING_FONT, max: size, min: size, width }).text), size };
+    const size = Math.max(min, Math.min(max, Math.floor(maxHeight / (maxLines * lineHeight))));
+    setFont(context, weight, size, family);
+    const words = wrapWords(context, text, width);
+    const lines = words.slice(0, maxLines);
+    if (words.length > maxLines) lines[maxLines - 1] = `${lines[maxLines - 1]} ${words.slice(maxLines).join(" ")}`;
+    return { lines: lines.map((line) => truncateToWidth(context, line, width)), size, lineHeight: Math.round(size * lineHeight) };
 }
 
 function roundedRect(context, x, y, width, height, radius) {
@@ -219,25 +287,47 @@ function roundedRect(context, x, y, width, height, radius) {
 async function cardFontsReady(sample) {
     if (!document.fonts) return;
     const faces = ['700 52px "Anek Latin"', '800 104px "Anek Latin"', '700 44px "Anek Latin"', '700 52px "Anek Devanagari"', '800 104px "Anek Devanagari"', '700 44px "Anek Devanagari"', '500 44px "Mukta"', '400 34px "Mukta"'];
-    // Fonts load per character range, so ask for the exact text the card will use.
+    // Fonts load per character range (the ₹ sign sits in its own range), so ask for the exact text.
     await Promise.all(faces.map((face) => document.fonts.load(face, sample).catch(() => [])));
     await document.fonts.ready;
 }
 
+/** The rows under the name: plan, dates, then fee, paid and balance when known. */
+function cardRows(labels, values, payment) {
+    const rows = [
+        { label: labels.plan, value: values.plan, maxLines: 2 },
+        { label: labels.start, value: values.start_date },
+        { label: labels.expiry, value: values.expiry_date }
+    ];
+    if (payment) {
+        rows.push({ label: labels.fee, value: formatINR(payment.fee), money: true });
+        if (payment.hasPayment) {
+            rows.push({ label: labels.paid, value: values.amount_paid, money: true });
+            rows.push(payment.balance > 0
+                ? { label: labels.balance, value: formatINR(payment.balance), money: true, pill: CARD_COLORS.brick }
+                : { label: "", value: labels.paidInFull, pill: CARD_COLORS.leaf });
+        }
+    }
+    return rows.filter((row) => row.value);
+}
+
 /** Draws the 1080x1080 welcome card and resolves to a PNG file. The gym phone is not shown. */
-export async function createWelcomeCard(member, { membership = member?.currentMembership, gym = state.gym, language = welcomeMessageLanguage() } = {}) {
+export async function createWelcomeCard(member, { membership = member?.currentMembership, gym = state.gym, payments, language = welcomeMessageLanguage() } = {}) {
     const labels = CARD_LABELS[welcomeLanguage(language)];
-    const values = welcomeValues(member, { membership, gym });
-    const rows = [[labels.plan, values.plan], [labels.start, values.start_date], [labels.expiry, values.expiry_date]].filter(([, value]) => value);
-    await cardFontsReady([values.gym_name, values.name, values.member_code, ...Object.values(labels), ...rows.flat()].join(" "));
+    const values = welcomeValues(member, { membership, gym, payments });
+    const payment = welcomePaymentFor(member, { membership, payments });
+    const rows = cardRows(labels, values, payment);
+    await cardFontsReady([values.gym_name, values.name, values.member_code, ...Object.values(labels), ...rows.map((row) => row.value), "₹0123456789,"].join(" "));
 
     const canvas = document.createElement("canvas");
     canvas.width = CARD_SIZE;
     canvas.height = CARD_SIZE;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("This browser cannot draw the welcome card.");
-    const pad = 96;
+    const fonts = cardFontFamilies(context);
+    const pad = 88;
     const width = CARD_SIZE - pad * 2;
+    const footerTop = 940;
     context.textBaseline = "alphabetic";
 
     context.fillStyle = CARD_COLORS.slate;
@@ -245,49 +335,84 @@ export async function createWelcomeCard(member, { membership = member?.currentMe
     context.fillStyle = CARD_COLORS.marigold;
     context.fillRect(0, 0, CARD_SIZE, 16);
 
-    const gymName = fitText(context, values.gym_name || "GymPulse", { weight: 700, family: HEADING_FONT, max: 52, min: 34, width });
+    // Rows first: their height decides how much room the name gets.
+    const rowGap = 14;
+    const panelPad = 26;
+    const laidOut = rows.map((row) => {
+        setFont(context, 400, 30, fonts.body);
+        const labelWidth = row.label ? Math.min(context.measureText(row.label).width, width * 0.45) : 0;
+        const valueWidth = width - labelWidth - (row.label ? 32 : 0) - (row.pill ? 40 : 0);
+        const value = fitTextBlock(context, row.value, { weight: 700, family: fonts.heading, max: 40, min: 26, width: valueWidth, maxLines: row.maxLines || 1 });
+        const height = Math.max(row.pill ? 54 : 44, value.lines.length * value.lineHeight);
+        return { ...row, labelWidth, value, height };
+    });
+    const panelHeight = laidOut.length ? panelPad * 2 + laidOut.reduce((sum, row) => sum + row.height, 0) + rowGap * (laidOut.length - 1) : 0;
+    const panelBottom = footerTop - 28;
+    const panelTop = panelBottom - panelHeight;
+
+    let y = 64;
+    const gymName = fitTextBlock(context, values.gym_name || "GymPulse", { weight: 700, family: fonts.heading, max: 52, min: 30, width, maxLines: 2, maxHeight: 130 });
     context.fillStyle = CARD_COLORS.marigold;
-    setFont(context, 700, gymName.size, HEADING_FONT);
-    context.fillText(gymName.text, pad, 168);
-    context.fillRect(pad, 200, 120, 8);
+    setFont(context, 700, gymName.size, fonts.heading);
+    gymName.lines.forEach((line) => { y += gymName.lineHeight; context.fillText(line, pad, y); });
+    context.fillRect(pad, y + 22, 120, 8);
+    y += 30 + 36;
 
     context.fillStyle = CARD_COLORS.soft;
-    setFont(context, 500, 44, BODY_FONT);
-    context.fillText(labels.welcome, pad, 322);
-    const name = nameLines(context, values.name, width);
-    context.fillStyle = CARD_COLORS.white;
-    setFont(context, 800, name.size, HEADING_FONT);
-    name.lines.forEach((line, index) => context.fillText(line, pad, 430 + index * Math.round(name.size * 1.05)));
+    setFont(context, 500, 40, fonts.body);
+    y += 40;
+    context.fillText(labels.welcome, pad, y);
+    y += 14;
 
-    const panelTop = 610;
-    context.fillStyle = CARD_COLORS.slate2;
-    roundedRect(context, pad - 32, panelTop, width + 64, 270, 24);
-    context.fill();
-    rows.forEach(([label, value], index) => {
-        const y = panelTop + 72 + index * 82;
-        context.fillStyle = CARD_COLORS.soft;
-        setFont(context, 400, 34, BODY_FONT);
+    const nameSpace = Math.max(60, panelTop - 36 - y);
+    const name = fitTextBlock(context, values.name, { weight: 800, family: fonts.heading, max: 104, min: 40, width, maxLines: 2, maxHeight: nameSpace, lineHeight: 1.08 });
+    context.fillStyle = CARD_COLORS.white;
+    setFont(context, 800, name.size, fonts.heading);
+    name.lines.forEach((line) => { y += name.lineHeight; context.fillText(line, pad, y); });
+
+    if (laidOut.length) {
+        context.fillStyle = CARD_COLORS.slate2;
+        roundedRect(context, pad - 28, panelTop, width + 56, panelHeight, 24);
+        context.fill();
+        let rowTop = panelTop + panelPad;
+        for (const row of laidOut) {
+            const middle = rowTop + row.height / 2;
+            if (row.label) {
+                context.fillStyle = CARD_COLORS.soft;
+                setFont(context, 400, 30, fonts.body);
+                context.textAlign = "left";
+                context.fillText(truncateToWidth(context, row.label, row.labelWidth), pad, middle + 10);
+            }
+            setFont(context, 700, row.value.size, fonts.heading);
+            context.textAlign = "right";
+            if (row.pill) {
+                const textWidth = context.measureText(row.value.lines[0]).width;
+                context.fillStyle = row.pill;
+                roundedRect(context, pad + width - textWidth - 40, middle - 27, textWidth + 40, 54, 27);
+                context.fill();
+                context.fillStyle = CARD_COLORS.white;
+                context.fillText(row.value.lines[0], pad + width - 20, middle + row.value.size * 0.34);
+            } else {
+                context.fillStyle = CARD_COLORS.white;
+                const first = middle - ((row.value.lines.length - 1) * row.value.lineHeight) / 2 + row.value.size * 0.34;
+                row.value.lines.forEach((line, index) => context.fillText(line, pad + width, first + index * row.value.lineHeight));
+            }
+            rowTop += row.height + rowGap;
+        }
         context.textAlign = "left";
-        context.fillText(label, pad, y);
-        const labelWidth = context.measureText(label).width + 32;
-        const fitted = fitText(context, value, { weight: 700, family: HEADING_FONT, max: 44, min: 30, width: width - labelWidth });
-        context.fillStyle = CARD_COLORS.white;
-        setFont(context, 700, fitted.size, HEADING_FONT);
-        context.textAlign = "right";
-        context.fillText(fitted.text, pad + width, y);
-    });
-    context.textAlign = "left";
+    }
 
     context.fillStyle = CARD_COLORS.marigold;
-    context.fillRect(0, 940, CARD_SIZE, 140);
+    context.fillRect(0, footerTop, CARD_SIZE, CARD_SIZE - footerTop);
     context.fillStyle = CARD_COLORS.slate;
-    setFont(context, 500, 32, BODY_FONT);
+    setFont(context, 500, 32, fonts.body);
     context.fillText(labels.code, pad, 1024);
     if (values.member_code) {
-        const code = fitText(context, values.member_code, { weight: 800, family: HEADING_FONT, max: 56, min: 32, width: width - context.measureText(labels.code).width - 32 });
-        setFont(context, 800, code.size, HEADING_FONT);
+        const codeWidth = width - context.measureText(labels.code).width - 32;
+        const code = fitTextBlock(context, values.member_code, { weight: 800, family: fonts.heading, max: 56, min: 28, width: codeWidth });
+        setFont(context, 800, code.size, fonts.heading);
         context.textAlign = "right";
-        context.fillText(code.text, pad + width, 1030);
+        context.fillText(code.lines[0], pad + width, 1030);
         context.textAlign = "left";
     }
 

@@ -4,16 +4,19 @@ import {
     DEFAULT_WELCOME_TEMPLATES,
     WELCOME_PLACEHOLDERS,
     buildWelcomeMessage,
+    paymentPlaceholderValues,
+    welcomePayment,
     welcomeTemplateProblem,
     welcomeWhatsAppUrl
 } from "../../assets/js/welcomeMessage.js";
+import { formatINR } from "../../assets/js/utils.js";
 import { listMemberMessages, listTemplates, recordMemberMessage, saveTemplate } from "../services/whatsappMessagesService.js";
 import { validateMessagePayload, validateTemplateBody, validateTemplateParams } from "../middleware/validateWhatsAppMessage.js";
 
 // welcome.js reads the saved language and browser state through localStorage.
 const storage = new Map();
 globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: (key) => storage.delete(key) };
-const { sendWelcome, welcomeBlocker, welcomeValues } = await import("../../assets/js/modules/welcome.js");
+const { sendWelcome, welcomeBlocker, welcomeFacts, welcomeValues } = await import("../../assets/js/modules/welcome.js");
 
 const gymA = "00000000-0000-4000-8000-0000000000a1";
 const gymB = "00000000-0000-4000-8000-0000000000b1";
@@ -27,26 +30,33 @@ const fullValues = {
     expiry_date: "10 Feb 2027",
     member_code: "GP-ABC123",
     gym_phone: "98230 12345",
-    gym_address: "FC Road, Pune"
+    gym_address: "FC Road, Pune",
+    fee: "₹1,100",
+    amount_paid: "₹500 (UPI)",
+    balance: "₹600"
 };
 
 // ---------- Template filling ----------
 
-test("the English default fills every placeholder", () => {
+test("the English default fills every placeholder, including fee, paid and balance", () => {
     assert.equal(buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.en, fullValues), [
         "Hi Riya Shah, welcome to Iron Temple! 💪",
         "Your Quarterly membership is active from 12 Nov 2026 to 10 Feb 2027.",
+        "Fee: ₹1,100.",
+        "Paid: ₹500 (UPI).",
+        "Balance due: ₹600.",
         "Member ID: GP-ABC123.",
         "For any help, call us at 98230 12345.",
         "See you at the gym!"
     ].join("\n"));
 });
 
-test("a custom template can use all eight placeholders, each more than once", () => {
-    const template = `${WELCOME_PLACEHOLDERS.map((key) => `{${key}}`).join(" | ")}\n{name} again`;
+test("a custom template can use all eleven placeholders, each more than once", () => {
+    assert.equal(WELCOME_PLACEHOLDERS.length, 11);
+    const template = `${WELCOME_PLACEHOLDERS.map((key) => `{${key}}`).join(" | ")}\n{name} owes {balance}`;
     assert.equal(
         buildWelcomeMessage(template, fullValues),
-        "Riya Shah | Iron Temple | Quarterly | 12 Nov 2026 | 10 Feb 2027 | GP-ABC123 | 98230 12345 | FC Road, Pune\nRiya Shah again"
+        "Riya Shah | Iron Temple | Quarterly | 12 Nov 2026 | 10 Feb 2027 | GP-ABC123 | 98230 12345 | FC Road, Pune | ₹1,100 | ₹500 (UPI) | ₹600\nRiya Shah owes ₹600"
     );
 });
 
@@ -54,7 +64,15 @@ test("lines whose placeholder has no value are left out, and blank lines do not 
     const noPhone = buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.en, { ...fullValues, gym_phone: "" });
     assert.doesNotMatch(noPhone, /call us/);
     assert.match(noPhone, /See you at the gym!$/);
-    assert.equal(noPhone.split("\n").length, 4);
+    assert.equal(noPhone.split("\n").length, 7);
+
+    // Fully paid: no balance line. Nothing paid yet: no paid or balance line. Fee unknown: none of the three.
+    const fullyPaid = buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.en, { ...fullValues, amount_paid: "₹1,100 (UPI)", balance: "" });
+    assert.match(fullyPaid, /Fee: ₹1,100\.\nPaid: ₹1,100 \(UPI\)\.\nMember ID/);
+    const unpaid = buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.en, { ...fullValues, amount_paid: "", balance: "" });
+    assert.match(unpaid, /Fee: ₹1,100\.\nMember ID/);
+    const noFee = buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.en, { ...fullValues, fee: "", amount_paid: "", balance: "" });
+    assert.doesNotMatch(noFee, /Fee|Paid|Balance/);
 
     // Whitespace-only and missing keys count as empty too.
     const sparse = buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.en, { name: "Dev", gym_name: "Iron Temple", gym_phone: "   " });
@@ -64,20 +82,28 @@ test("lines whose placeholder has no value are left out, and blank lines do not 
     assert.equal(buildWelcomeMessage(withAddress, { name: "Dev" }), "Hi Dev!\n\nThanks");
     assert.equal(buildWelcomeMessage("Call {gym_phone}", {}), "");
     assert.equal(buildWelcomeMessage("Hi {name}\r\nBye", { name: "Dev" }), "Hi Dev\nBye");
+    // The user's one-line style works too: the whole line goes when any of its values is empty.
+    assert.equal(buildWelcomeMessage("Fee: {fee}. Paid: {amount_paid}. Balance: {balance}.", fullValues), "Fee: ₹1,100. Paid: ₹500 (UPI). Balance: ₹600.");
+    assert.equal(buildWelcomeMessage("Fee: {fee}. Paid: {amount_paid}. Balance: {balance}.", { ...fullValues, balance: "" }), "");
 });
 
-test("the Hindi and Marathi defaults fill in Devanagari text", () => {
+test("the Hindi and Marathi defaults fill in Devanagari text, with fee lines", () => {
     const values = { ...fullValues, name: "प्रिया देशमुख", plan: "मासिक" };
     assert.equal(buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.hi, values), [
         "नमस्ते प्रिया देशमुख, Iron Temple में आपका स्वागत है! 💪",
         "आपकी मासिक सदस्यता 12 Nov 2026 से 10 Feb 2027 तक सक्रिय है।",
+        "शुल्क: ₹1,100",
+        "भुगतान: ₹500 (UPI)",
+        "बकाया राशि: ₹600",
         "सदस्य आईडी: GP-ABC123",
         "किसी भी मदद के लिए हमें 98230 12345 पर कॉल करें।",
         "जिम में मिलते हैं!"
     ].join("\n"));
-    assert.equal(buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.mr, { ...values, gym_phone: "" }), [
+    assert.equal(buildWelcomeMessage(DEFAULT_WELCOME_TEMPLATES.mr, { ...values, gym_phone: "", balance: "" }), [
         "नमस्कार प्रिया देशमुख, Iron Temple मध्ये आपले स्वागत आहे! 💪",
         "आपले मासिक सदस्यत्व 12 Nov 2026 पासून 10 Feb 2027 पर्यंत सक्रिय आहे.",
+        "शुल्क: ₹1,100",
+        "भरलेली रक्कम: ₹500 (UPI)",
         "सदस्य आयडी: GP-ABC123",
         "जिममध्ये भेटूया!"
     ].join("\n"));
@@ -85,6 +111,7 @@ test("the Hindi and Marathi defaults fill in Devanagari text", () => {
 
 test("templates are checked for unknown placeholders and length; the defaults pass", () => {
     for (const body of Object.values(DEFAULT_WELCOME_TEMPLATES)) assert.equal(welcomeTemplateProblem(body), "");
+    for (const key of ["fee", "amount_paid", "balance"]) assert.equal(welcomeTemplateProblem(`x {${key}}`), "");
     assert.match(welcomeTemplateProblem("Hi {first_name}"), /Unsupported placeholder: \{first_name\}/);
     assert.match(welcomeTemplateProblem("Hi {}"), /Unsupported placeholder/);
     assert.match(welcomeTemplateProblem("   "), /Enter a welcome message/);
@@ -97,6 +124,41 @@ test("the wa.me link uses the 10-digit number with 91 and encodes the message", 
     assert.equal(welcomeWhatsAppUrl("+919876543210", "Hi Riya & co\nLine 2 💪"), "https://wa.me/919876543210?text=Hi%20Riya%20%26%20co%0ALine%202%20%F0%9F%92%AA");
     assert.equal(welcomeWhatsAppUrl("9876543210", "x"), "https://wa.me/919876543210?text=x");
     assert.throws(() => welcomeWhatsAppUrl("12345", "x"), /valid Indian mobile/);
+});
+
+// ---------- Fee, paid and balance ----------
+
+const membershipRow = { id: "ms-1", plan_name: "Monthly", price: 1100, total_fees: 1100, start_date: "2026-11-12", end_date: "2026-12-11" };
+
+test("fee, paid and balance come from the membership and only its own payments", () => {
+    const payments = [
+        { membership_id: "ms-1", amount: "500.00", method: "upi" },
+        { membership_id: "ms-old", amount: 9999, method: "cash" },
+        { membership_id: null, amount: 50, method: "cash" }
+    ];
+    assert.deepEqual(welcomePayment(membershipRow, payments), { fee: 1100, paid: 500, balance: 600, methods: ["UPI"], hasPayment: true });
+    assert.deepEqual(paymentPlaceholderValues(welcomePayment(membershipRow, payments), formatINR), { fee: "₹1,100", amount_paid: "₹500 (UPI)", balance: "₹600" });
+
+    // Fully paid (split over two methods): no balance.
+    const full = welcomePayment(membershipRow, [{ membership_id: "ms-1", amount: 600, method: "upi" }, { membership_id: "ms-1", amount: 500, method: "cash" }]);
+    assert.deepEqual(paymentPlaceholderValues(full, formatINR), { fee: "₹1,100", amount_paid: "₹1,100 (UPI, Cash)", balance: "" });
+    // Nothing paid: fee only.
+    assert.deepEqual(paymentPlaceholderValues(welcomePayment(membershipRow, []), formatINR), { fee: "₹1,100", amount_paid: "", balance: "" });
+    // Overpaid never shows a negative balance.
+    assert.equal(welcomePayment(membershipRow, [{ membership_id: "ms-1", amount: 1500, method: "card" }]).balance, 0);
+    // The billed fee wins over the plan price; the plan price is the fallback.
+    assert.equal(welcomePayment({ ...membershipRow, total_fees: 900 }, []).fee, 900);
+    assert.equal(welcomePayment({ ...membershipRow, total_fees: null }, []).fee, 1100);
+    // No membership or no fee: nothing, so every fee line is left out.
+    assert.equal(welcomePayment(null, []), null);
+    assert.equal(welcomePayment({ id: "x" }, []), null);
+    assert.deepEqual(paymentPlaceholderValues(null, formatINR), { fee: "", amount_paid: "", balance: "" });
+});
+
+test("amounts use Indian digit grouping", () => {
+    assert.deepEqual(paymentPlaceholderValues(welcomePayment({ id: "big", total_fees: 125000 }, [{ membership_id: "big", amount: 25000, method: "card" }]), formatINR), {
+        fee: "₹1,25,000", amount_paid: "₹25,000 (Card)", balance: "₹1,00,000"
+    });
 });
 
 // ---------- sendWelcome: consent is required ----------
@@ -137,6 +199,7 @@ test("sendWelcome opens WhatsApp synchronously, then logs the welcome in the cho
     const text = url.searchParams.get("text");
     assert.match(text, /^नमस्कार Riya Shah, Iron Temple मध्ये आपले स्वागत आहे!/);
     assert.doesNotMatch(text, /कॉल करा/, "no gym phone, so the call line is left out");
+    assert.doesNotMatch(text, /शुल्क/, "fee not loaded, so the fee lines are left out");
     assert.deepEqual(await pending, { id: "log-1" });
     assert.deepEqual(calls[1], ["record", memberId, { reminder_type: "welcome", language: "mr", body: text }]);
 });
@@ -145,12 +208,28 @@ test("welcome values come from the member, their membership and the gym", () => 
     const values = welcomeValues(member, { gym: { name: "Iron Temple", phone: "98230 12345", address: "FC Road" } });
     assert.deepEqual(values, {
         name: "Riya Shah", gym_name: "Iron Temple", plan: "Quarterly", start_date: "12 Nov 2026", expiry_date: "10 Feb 2027",
-        member_code: "GP-ABC123", gym_phone: "98230 12345", gym_address: "FC Road"
+        member_code: "GP-ABC123", gym_phone: "98230 12345", gym_address: "FC Road", fee: "", amount_paid: "", balance: ""
     });
     // No membership yet: dates stay empty (not "—") so their line is left out.
     const bare = welcomeValues({ ...member, currentMembership: null }, { gym });
     assert.equal(bare.start_date, "");
     assert.equal(bare.plan, "");
+});
+
+test("fee values use the database membership and payments, not the browser's copy", () => {
+    const stale = { ...membershipRow, total_fees: 1, price: 1 };
+    welcomeFacts[memberId] = { status: "ready", memberships: [membershipRow], payments: [{ membership_id: "ms-1", amount: 1100, method: "upi" }] };
+    try {
+        const values = welcomeValues({ ...member, currentMembership: stale }, { gym });
+        assert.deepEqual([values.fee, values.amount_paid, values.balance], ["₹1,100", "₹1,100 (UPI)", ""]);
+        const opened = [];
+        sendWelcome({ ...member, currentMembership: stale }, { gym, language: "en", open: (url) => opened.push(url), record: async () => ({}) });
+        const text = new URL(opened[0]).searchParams.get("text");
+        assert.match(text, /Fee: ₹1,100\.\nPaid: ₹1,100 \(UPI\)\.\nMember ID/);
+        assert.doesNotMatch(text, /Balance/);
+    } finally {
+        delete welcomeFacts[memberId];
+    }
 });
 
 // ---------- Service: consent and gym isolation of the welcome log ----------

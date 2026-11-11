@@ -4,15 +4,19 @@
 
 export const WELCOME_LANGUAGES = ["en", "hi", "mr"];
 
-export const WELCOME_PLACEHOLDERS = ["name", "gym_name", "plan", "start_date", "expiry_date", "member_code", "gym_phone", "gym_address"];
+export const WELCOME_PLACEHOLDERS = ["name", "gym_name", "plan", "start_date", "expiry_date", "member_code", "gym_phone", "gym_address", "fee", "amount_paid", "balance"];
 
 export const WELCOME_TEMPLATE_MAX_LENGTH = 1000;
 
-// One sentence per line, so a line whose placeholder has no value can be left out on its own.
+// One sentence per line, so a line whose placeholder has no value can be left out on its own:
+// no payment yet drops "Paid", and a fully paid membership drops "Balance".
 export const DEFAULT_WELCOME_TEMPLATES = {
     en: [
         "Hi {name}, welcome to {gym_name}! 💪",
         "Your {plan} membership is active from {start_date} to {expiry_date}.",
+        "Fee: {fee}.",
+        "Paid: {amount_paid}.",
+        "Balance due: {balance}.",
         "Member ID: {member_code}.",
         "For any help, call us at {gym_phone}.",
         "See you at the gym!"
@@ -20,6 +24,9 @@ export const DEFAULT_WELCOME_TEMPLATES = {
     hi: [
         "नमस्ते {name}, {gym_name} में आपका स्वागत है! 💪",
         "आपकी {plan} सदस्यता {start_date} से {expiry_date} तक सक्रिय है।",
+        "शुल्क: {fee}",
+        "भुगतान: {amount_paid}",
+        "बकाया राशि: {balance}",
         "सदस्य आईडी: {member_code}",
         "किसी भी मदद के लिए हमें {gym_phone} पर कॉल करें।",
         "जिम में मिलते हैं!"
@@ -27,11 +34,45 @@ export const DEFAULT_WELCOME_TEMPLATES = {
     mr: [
         "नमस्कार {name}, {gym_name} मध्ये आपले स्वागत आहे! 💪",
         "आपले {plan} सदस्यत्व {start_date} पासून {expiry_date} पर्यंत सक्रिय आहे.",
+        "शुल्क: {fee}",
+        "भरलेली रक्कम: {amount_paid}",
+        "बाकी रक्कम: {balance}",
         "सदस्य आयडी: {member_code}",
         "कोणत्याही मदतीसाठी आम्हाला {gym_phone} वर कॉल करा.",
         "जिममध्ये भेटूया!"
     ].join("\n")
 };
+
+const PAYMENT_METHOD_LABELS = { upi: "UPI", cash: "Cash", card: "Card", other: "Other" };
+
+function money(value) {
+    return Math.round(Number(value || 0) * 100) / 100;
+}
+
+/**
+ * Fee, paid and balance for one membership, from database rows: the membership's billed fee
+ * (total_fees, else the plan price) and the payments recorded against that membership.
+ * Returns null when there is no membership or no fee.
+ */
+export function welcomePayment(membership, payments = []) {
+    const rawFee = membership?.total_fees ?? membership?.price;
+    if (!membership || rawFee === null || rawFee === undefined || rawFee === "" || !Number.isFinite(Number(rawFee))) return null;
+    const fee = money(rawFee);
+    const linked = (Array.isArray(payments) ? payments : []).filter((payment) => payment.membership_id && payment.membership_id === membership.id);
+    const paid = money(linked.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+    const methods = [...new Set(linked.map((payment) => PAYMENT_METHOD_LABELS[payment.method] || String(payment.method || "")).filter(Boolean))];
+    return { fee, paid, balance: Math.max(0, money(fee - paid)), methods, hasPayment: paid > 0 };
+}
+
+/** {fee}, {amount_paid} and {balance}. Empty when not applicable, so their lines are left out. */
+export function paymentPlaceholderValues(payment, formatMoney) {
+    if (!payment) return { fee: "", amount_paid: "", balance: "" };
+    return {
+        fee: formatMoney(payment.fee),
+        amount_paid: payment.hasPayment ? `${formatMoney(payment.paid)}${payment.methods.length ? ` (${payment.methods.join(", ")})` : ""}` : "",
+        balance: payment.hasPayment && payment.balance > 0 ? formatMoney(payment.balance) : ""
+    };
+}
 
 const PLACEHOLDER_PATTERN = /\{([a-z_]+)\}/g;
 

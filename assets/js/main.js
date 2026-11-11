@@ -40,7 +40,7 @@ import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
 import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleWhatsAppChange } from "./modules/whatsapp.js";
 import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
-import { loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
+import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
 import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
 import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
@@ -314,9 +314,11 @@ function loadProfileConsent(memberId) {
 
 function loadProfileWelcome(memberId) {
     if (welcomeBlocker(getMember(memberId))) return;
-    loadWelcomeLog(memberId, () => {
+    const rerenderProfile = () => {
         if (currentView === "profile" && profileId === memberId) render();
-    });
+    };
+    loadWelcomeLog(memberId, rerenderProfile);
+    loadWelcomeFacts(memberId).then(rerenderProfile);
 }
 
 function rerenderAfterWelcome() {

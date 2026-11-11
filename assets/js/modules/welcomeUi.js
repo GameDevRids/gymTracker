@@ -10,6 +10,7 @@ import {
     createWelcomeCard,
     isDefaultWelcomeTemplate,
     lastWelcome,
+    loadWelcomeFacts,
     loadWelcomeLog,
     loadWelcomeTemplates,
     resetWelcomeTemplate,
@@ -17,7 +18,9 @@ import {
     sendWelcome,
     shareWelcomeCard,
     welcomeBlocker,
+    welcomeFacts,
     welcomeLog,
+    welcomePaymentFor,
     welcomeMessageFor,
     welcomeTemplate,
     welcomeTemplates,
@@ -36,7 +39,7 @@ function sentDate(value) {
 const preparedCards = new Map();
 
 function cardKey(member, membership) {
-    return [member.id, member.name, member.memberCode, membership?.plan_name, membership?.start_date, membership?.end_date, state.gym.name, getLanguage()].join("|");
+    return [member.id, member.name, member.memberCode, membership?.plan_name, membership?.start_date, membership?.end_date, state.gym.name, getLanguage(), JSON.stringify(welcomePaymentFor(member, { membership }))].join("|");
 }
 
 function prepareCard(member) {
@@ -139,13 +142,15 @@ function markDialogSent(button) {
 /** Shows the confirmation after a member is saved. Welcome actions only appear with consent. */
 export async function openMemberAddedDialog(member) {
     if (!member || welcomeBlocker(member)) return false;
-    if (welcomeTemplates.status !== "ready") await loadWelcomeTemplates();
+    // Fee and payments come fresh from the database, including any payment made at registration.
+    await Promise.all([welcomeTemplates.status !== "ready" ? loadWelcomeTemplates() : null, loadWelcomeFacts(member.id)]);
     const membership = getCurrentMembership(member.id);
     const message = welcomeMessageFor(member, { membership });
     prepareCard(member);
-    const fallbackNote = welcomeTemplates.status === "error"
-        ? `<p class="helper-text" role="status">Your saved welcome message could not be loaded, so the default is shown.</p>`
-        : "";
+    const fallbackNote = [
+        welcomeTemplates.status === "error" ? "Your saved welcome message could not be loaded, so the default is shown." : "",
+        welcomeFacts[member.id]?.status === "error" ? "Fee and payment details could not be loaded, so they are left out." : ""
+    ].filter(Boolean).map((note) => `<p class="helper-text" role="status">${note}</p>`).join("");
     openModal({
         title: "Member added",
         subtitle: `${escapeHTML(member.name)} is saved and their plan is assigned.`,
@@ -177,7 +182,8 @@ export function renderWelcomeSection(member) {
         const log = welcomeLog[member.id];
         const last = lastWelcome(member.id);
         const share = `<button class="button button-secondary" type="button" data-action="welcome-share-card" data-id="${escapeHTML(member.id)}">Share welcome card</button>`;
-        if (!log || log.status === "loading") {
+        const facts = welcomeFacts[member.id];
+        if (!log || log.status === "loading" || !facts || facts.status === "loading") {
             content = `<div class="empty-state" role="status">Checking welcome history…</div>`;
         } else if (log.status === "error") {
             content = `<div class="empty-state" role="alert"><p>${escapeHTML(log.message)}</p><button class="button button-secondary" data-action="welcome-retry-log" data-id="${escapeHTML(member.id)}">Try again</button></div>`;
@@ -198,8 +204,9 @@ const drafts = {};
 function previewValues() {
     const start = localISODate();
     return {
-        membership: { plan_name: "Monthly", start_date: start, end_date: addDays(start, 30) },
-        member: { name: "Riya Shah", memberCode: "GP-7F3A2C91B4D0" }
+        membership: { id: "preview", plan_name: "Monthly", start_date: start, end_date: addDays(start, 30), total_fees: 1100 },
+        member: { name: "Riya Shah", memberCode: "GP-7F3A2C91B4D0" },
+        payments: [{ membership_id: "preview", amount: 500, method: "upi" }]
     };
 }
 
@@ -208,7 +215,7 @@ function previewText(body) {
     const problem = welcomeTemplateProblem(body);
     if (problem) return { text: problem, problem: true };
     const sample = previewValues();
-    return { text: buildWelcomeMessage(body, welcomeValues(sample.member, { membership: sample.membership })), problem: false };
+    return { text: buildWelcomeMessage(body, welcomeValues(sample.member, { membership: sample.membership, payments: sample.payments })), problem: false };
 }
 
 function editorLanguage() {
