@@ -25,6 +25,8 @@ import {
     updateAssignmentForm
 } from "./modules/memberMemberships.js";
 import { fetchActivePlans } from "./api/plansApi.js";
+import { fetchMembers } from "./api/membersApi.js";
+import { fetchAllMemberPhones, importMembers, validateImportRows } from "./modules/memberImport.js";
 import { createMemberPlanAssignment, fetchMemberMembershipHistory } from "./api/membershipsApi.js";
 import { createPayment, fetchMemberPayments } from "./api/paymentsApi.js";
 import { apiClient, clearAuthSession, restoreAuthSession, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
@@ -50,6 +52,7 @@ let memberFilters = { search: "", filter: "all", sort: "name", page: 1 };
 let memberSearchTimer;
 let memberRequestVersion = 0;
 let importedRows = [];
+let importPlans = [];
 let currentFileName = "members.csv";
 let memberPlanRequest = 0;
 let memberSaving = false;
@@ -902,96 +905,77 @@ function recordCheckIn(form) {
     closeModal(); safePersist(source === "fingerprint" ? "Simulated scan matched. Attendance recorded." : "Check-in recorded.");
 }
 
-function openImportPreview() {
-    const valid = [];
-    const invalid = [];
-    const seen = new Set(state.members.map((member) => phoneDigits(member.phone)));
-    importedRows.forEach(({ rowNumber, data }) => {
-        const name = data.name || data.fullname || "";
-        const phone = data.phone || data.phonenumber || data.mobile || "";
-        const digits = phoneDigits(phone);
-        const issues = [];
-        if (!name.trim()) issues.push("name is required");
-        if (!isValidIndianPhone(phone)) issues.push("valid Indian mobile number is required");
-        if (digits && seen.has(digits)) issues.push("duplicate phone number");
-        if (digits) seen.add(digits);
-        const planName = String(data.plan || "").trim();
-        if (planName && !state.plans.some((plan) => plan.active && plan.name.toLowerCase() === planName.toLowerCase())) issues.push("unknown membership plan");
-        const startDate = data.startdate || data.joinedat || data.joiningdate || "";
-        const expiryDate = data.expirydate || "";
-        const isISODate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T12:00:00`).getTime()) && new Date(`${value}T12:00:00`).toISOString().slice(0, 10) === value;
-        if (startDate && !isISODate(startDate)) issues.push("start date must use YYYY-MM-DD");
-        if (expiryDate && !isISODate(expiryDate)) issues.push("expiry date must use YYYY-MM-DD");
-        if (startDate && expiryDate && isISODate(startDate) && isISODate(expiryDate) && expiryDate < startDate) issues.push("expiry date precedes start date");
-        const row = { rowNumber, data, name: name.trim(), phone: phone.trim(), issues };
-        (issues.length ? invalid : valid).push(row);
+async function openImportPreview() {
+    openModal({
+        title: "Preview member import",
+        subtitle: escapeHTML(currentFileName),
+        body: `<div class="empty-state" role="status">Checking existing members and plans…</div>`,
+        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button>`
     });
-    importedRows = [...valid, ...invalid];
+    let existingPhones;
+    try {
+        [importPlans, existingPhones] = await Promise.all([fetchActivePlans(), fetchAllMemberPhones(fetchMembers)]);
+    } catch (error) {
+        openModal({
+            title: "Preview member import",
+            subtitle: escapeHTML(currentFileName),
+            body: `<div class="empty-state" role="alert"><p>${escapeHTML(error.message || "Existing members and plans could not be loaded.")}</p><button class="button button-secondary" data-action="retry-import-preview">Try again</button></div>`,
+            footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button>`
+        });
+        return;
+    }
+    const { valid, invalid, rows: checkedRows } = validateImportRows(importedRows, { existingPhones, activePlans: importPlans });
+    importedRows = checkedRows;
+    renderImportPreview(valid.length, invalid.length);
+}
+
+function renderImportPreview(validCount, invalidCount) {
     const rows = importedRows.slice(0, 30);
     openModal({
         title: "Preview member import",
-        subtitle: `${escapeHTML(currentFileName)} · ${valid.length} valid · ${invalid.length} invalid or duplicate`,
+        subtitle: `${escapeHTML(currentFileName)} · ${validCount} valid · ${invalidCount} invalid or duplicate`,
         wide: true,
-        body: `<div class="note-box" style="margin-bottom:12px">Required columns: <strong>name</strong> and <strong>phone</strong>. Supported aliases include full name, mobile, phone number, joining date and membership plan. Rows with an existing or repeated phone are skipped.</div>
+        body: `<div class="note-box" style="margin-bottom:12px">Required columns: <strong>name</strong> and <strong>phone</strong>. Supported aliases include full name, mobile, phone number, joining date and membership plan. Rows with an existing or repeated phone are skipped. Rows without a plan are added without a membership.</div>
         <p id="import-progress" role="status" aria-live="polite"></p>
-        <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(row.phone)}</td><td>${escapeHTML(row.data.plan || "Default plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
-        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-primary" data-action="confirm-import" ${valid.length ? "" : "disabled"}>Import ${valid.length} members</button>`
+        <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(row.phone)}</td><td>${escapeHTML(row.planName || "No plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
+        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-primary" data-action="confirm-import" ${validCount ? "" : "disabled"}>Import ${validCount} members</button>`
     });
 }
 
 async function confirmImport() {
     const rows = importedRows.filter((row) => !row.issues.length);
-    const errors = importedRows
+    if (!rows.length) return;
+    const skipped = importedRows
         .filter((row) => row.issues.length)
         .map((row) => ({ rowNumber: row.rowNumber, message: row.issues.join(", ") }));
-    let imported = 0;
     const progress = document.querySelector("#import-progress");
-    const submit = document.querySelector('[data-action="confirm-import"]');
-    if (submit) submit.disabled = true;
+    document.querySelectorAll('[data-action="confirm-import"], #modal-root [data-action="close-modal"]').forEach((button) => { button.disabled = true; });
 
-    try {
-        const plans = await fetchActivePlans();
-        for (const [index, row] of rows.entries()) {
-            if (progress) progress.textContent = `Importing row ${index + 1} of ${rows.length}…`;
-            try {
-                const planName = String(row.data.plan || "").trim();
-                const plan = planName
-                    ? plans.find((item) => item.name.toLowerCase() === planName.toLowerCase())
-                    : plans[0];
-                if (!plan) throw new Error(planName ? "Active membership plan not found." : "Create an active membership plan first.");
-
-                const joinedAt = row.data.joinedat || row.data.joiningdate || localISODate();
-                const startDate = row.data.startdate || joinedAt;
-                const member = await createMemberOnApi({
-                    name: row.name,
-                    phone: normalizeIndianPhone(row.phone),
-                    email: row.data.email || "",
-                    dob: row.data.dob || row.data.dateofbirth || "",
-                    gender: row.data.gender || "",
-                    status: "active",
-                    notes: "Imported from CSV"
-                });
-                if (!member?.id) throw new Error("The member was not returned by the API.");
-                await createMemberPlanAssignment(member.id, plan.id, startDate, Number(plan.price));
-                imported += 1;
-            } catch (error) {
-                errors.push({ rowNumber: row.rowNumber, message: error.message || "Import failed." });
-            }
+    const result = await importMembers(rows, {
+        plans: importPlans,
+        createMember: createMemberOnApi,
+        assignPlan: createMemberPlanAssignment,
+        today: localISODate(),
+        onProgress: ({ current, total }) => {
+            if (progress?.isConnected) progress.textContent = `Importing member ${current} of ${total}…`;
         }
-    } catch (error) {
-        errors.push(...rows.map((row) => ({
-            rowNumber: row.rowNumber,
-            message: error.message || "Active membership plans could not be loaded."
-        })));
-    }
+    });
+    if (progress?.isConnected) progress.textContent = "Refreshing the member list…";
 
     importedRows = [];
+    importPlans = [];
     memberFilters.page = 1;
     await refreshMembersFromApi({ page: 1 });
+    const errors = [...result.errors, ...skipped].sort((a, b) => a.rowNumber - b.rowNumber);
     const failureRows = errors.map((error) => `<li>Row ${error.rowNumber}: ${escapeHTML(error.message)}</li>`).join("");
+    const summary = [
+        `${result.imported} member${result.imported === 1 ? "" : "s"} imported`,
+        result.withoutPlan ? `${result.withoutPlan} without a plan` : "",
+        `${errors.length} row${errors.length === 1 ? "" : "s"} need${errors.length === 1 ? "s" : ""} attention`
+    ].filter(Boolean).join(" · ");
     openModal({
         title: "Member import complete",
-        body: `<p role="status">${imported} imported; ${errors.length} row${errors.length === 1 ? "" : "s"} need attention.</p>${failureRows ? `<ul class="helper-text" role="alert">${failureRows}</ul>` : ""}`,
+        body: `<p role="status">${summary}.</p>${failureRows ? `<ul class="helper-text" role="alert">${failureRows}</ul>` : ""}`,
         footer: `<button class="button button-primary" type="button" data-action="close-modal">Done</button>`
     });
 }
@@ -1263,6 +1247,7 @@ document.addEventListener("click", (event) => {
         }
         if (action.dataset.action === "confirm-reset") { confirmReset(); return; }
         if (action.dataset.action === "confirm-import") { confirmImport(); return; }
+        if (action.dataset.action === "retry-import-preview") { openImportPreview(); return; }
         if (action.dataset.action === "previous-members-page" || action.dataset.action === "next-members-page") {
             const pageDelta = action.dataset.action === "next-members-page" ? 1 : -1;
             refreshMembersFromApi({ page: Math.max(1, memberFilters.page + pageDelta) });
