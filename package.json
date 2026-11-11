@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "build": "npm --prefix server install",
+    "start": "npm --prefix server start"
+  },
   "devDependencies": {
     "eslint": "^10.14.0"
   }
