@@ -3,7 +3,7 @@ import { fetchActivePlans } from "../api/plansApi.js";
 import { closeModal, openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { state, getMember } from "../state.js";
-import { escapeHTML, formatDate, formatINR, localISODate, statusPill } from "../utils.js";
+import { escapeHTML, formatDate, formatINR, formatPlanDuration, localISODate, statusPill } from "../utils.js";
 
 const membershipsByMember = new Map();
 let allMemberships = [];
@@ -126,7 +126,7 @@ function renderMembershipHistory(memberId, memberships) {
     }
     return memberships.map((membership) => `<article class="membership-history-item">
         <div><strong>${escapeHTML(membership.plan_name)}</strong><span>${statusPill(membership.effective_status)}</span></div>
-        <p>${formatINR(membership.price)} · ${membership.duration_days} days</p>
+        <p>${formatINR(membership.price)} · ${escapeHTML(formatPlanDuration(membership.duration_days))}</p>
         <small>${formatDate(membership.start_date)} – ${formatDate(membership.end_date)}</small>
     </article>`).join("");
 }
@@ -161,7 +161,7 @@ function updateAssignmentPreview(form) {
         summary.innerHTML = `<div class="empty-state">Select a plan to review its details.</div>`;
         return;
     }
-    summary.innerHTML = `<strong>${escapeHTML(selected.dataset.name)}</strong><p>${selected.dataset.duration} days · ${formatINR(Number(selected.dataset.price))}</p>`;
+    summary.innerHTML = `<strong>${escapeHTML(selected.dataset.name)}</strong><p>${escapeHTML(formatPlanDuration(selected.dataset.duration))} · ${formatINR(Number(selected.dataset.price))}</p>`;
 }
 
 function renderAssignmentForm(memberId, plans) {
@@ -172,7 +172,7 @@ function renderAssignmentForm(memberId, plans) {
             footer: `<button class="button button-secondary" data-action="close-modal" type="button">Close</button>`
         };
     }
-    const options = activePlans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-duration="${plan.duration_days}" data-price="${plan.price}">${escapeHTML(plan.name)} · ${plan.duration_days} days · ${formatINR(plan.price)}</option>`).join("");
+    const options = activePlans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-duration="${plan.duration_days}" data-price="${plan.price}">${escapeHTML(plan.name)} · ${escapeHTML(formatPlanDuration(plan.duration_days))} · ${formatINR(plan.price)}</option>`).join("");
     const body = `<form id="membership-assignment-form" data-member-id="${escapeHTML(memberId)}" class="form-grid">
         <div class="field full"><label for="assignment-plan">Active plan *</label><select id="assignment-plan" name="plan_id" required><option value="">Select a plan</option>${options}</select></div>
         <div class="field full" id="assignment-summary"><div class="empty-state">Select a plan to review its details.</div></div>

@@ -95,6 +95,5 @@ export function applyNavigationTranslations() {
         const label = link.querySelector(".nav-label");
         if (label && labels[link.dataset.view]) label.textContent = labels[link.dataset.view];
     });
-    const more = document.querySelector('[data-action="mobile-more"] .nav-label');
-    if (more) more.textContent = t("more");
+    document.querySelectorAll('[data-action="mobile-more"] .nav-label, .nav-more-toggle .nav-label').forEach((label) => { label.textContent = t("more"); });
 }

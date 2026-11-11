@@ -1,5 +1,6 @@
-import { escapeHTML, formatINR, formatDate, indiaISODate, localISODate, monthKey, daysBetween, statusPill } from "../utils.js";
-import { state, memberBalance, getPlan } from "../state.js";
+import { escapeHTML, formatINR, formatDate, formatPhone, indiaISODate, localISODate, monthKey, daysBetween, statusPill } from "../utils.js";
+import { drawChartOrEmpty, hasNonZero } from "../components/charts.js";
+import { state, memberBalance, getPlan, revenueEmptyMessage } from "../state.js";
 import { emptyRow } from "../components/tables.js";
 import { areAllMembershipsLoaded, getCurrentMembership } from "./memberMemberships.js";
 
@@ -102,7 +103,7 @@ export function renderDashboard() {
         </div>
         <section class="card table-card dashboard-watch-card"><div class="card-header"><div><h2>Memberships to keep an eye on</h2><p>Expiring in the next 7 days</p></div><button class="text-button" data-view="renewals">View renewals</button></div><div class="table-wrap"><table><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expires</th><th>Status</th><th>Action</th></tr></thead><tbody>${expiringSoon.map((membership) => {
             const member = state.members.find((item) => item.id === membership.member_id);
-            return `<tr><td>${escapeHTML(member?.name || "Member")} <small class="helper-text">${escapeHTML(member?.memberCode || membership.member_id)}</small></td><td>${escapeHTML(member?.phone || "—")}</td><td>${escapeHTML(membership.plan_name)}</td><td>${formatDate(membership.end_date)}</td><td>${statusPill(membership.effective_status)}</td><td><button class="text-button" data-action="profile" data-id="${escapeHTML(membership.member_id)}">View</button></td></tr>`;
+            return `<tr><td>${escapeHTML(member?.name || "Member")} <small class="helper-text">${escapeHTML(member?.memberCode || membership.member_id)}</small></td><td>${escapeHTML(formatPhone(member?.phone) || "—")}</td><td>${escapeHTML(membership.plan_name)}</td><td>${formatDate(membership.end_date)}</td><td>${statusPill(membership.effective_status)}</td><td><button class="text-button" data-action="profile" data-id="${escapeHTML(membership.member_id)}">View</button></td></tr>`;
         }).join("") || emptyRow(6, areAllMembershipsLoaded() ? "No memberships expiring this week." : "Membership assignments are loading.")}</tbody></table></div></section>`;
 }
 
@@ -139,33 +140,31 @@ export function drawDashboardCharts() {
         };
     });
     window.gymPulseCharts?.forEach((chart) => chart.destroy());
+    const distribution = activeMemberships.reduce((counts, membership) => {
+        counts.set(membership.plan_name, (counts.get(membership.plan_name) || 0) + 1);
+        return counts;
+    }, new Map());
     const charts = [
-        new window.Chart(document.querySelector("#revenue-chart"), {
+        drawChartOrEmpty(document.querySelector("#revenue-chart"), { hasData: hasNonZero(months.map((month) => month.revenue)), emptyMessage: revenueEmptyMessage(), config: {
             type: "line",
             data: { labels: months.map((month) => month.label), datasets: [{ data: months.map((month) => month.revenue), borderColor: "#4b8b59", backgroundColor: "rgba(110,166,100,.12)", fill: true, tension: .38, pointRadius: 3, pointBackgroundColor: "#4b8b59" }] },
             options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatINR(context.raw) } } }, scales: { x: { grid: { display: false }, ticks: { color: "#536057", font: { size: 11 } } }, y: { beginAtZero: true, grid: { color: "#eef1ed" }, ticks: { color: "#536057", font: { size: 11 }, callback: (value) => formatINR(value) } } } }
-        }),
-        new window.Chart(document.querySelector("#attendance-chart"), {
+        } }),
+        drawChartOrEmpty(document.querySelector("#attendance-chart"), { hasData: hasNonZero(dates.map((day) => day.count)), emptyMessage: "No visits recorded in the last 7 days.", config: {
             type: "bar",
             data: { labels: dates.map((day) => day.label), datasets: [{ data: dates.map((day) => day.count), backgroundColor: "#8fbd7e", borderRadius: 5, maxBarThickness: 26 }] },
             options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: "#536057", font: { size: 11 } } }, y: { beginAtZero: true, grid: { color: "#eef1ed" }, ticks: { precision: 0, color: "#536057", font: { size: 11 } } } } }
-        }),
-        new window.Chart(document.querySelector("#growth-chart"), {
+        } }),
+        drawChartOrEmpty(document.querySelector("#growth-chart"), { hasData: hasNonZero(growth.map((month) => month.members)), emptyMessage: "No members yet.", config: {
             type: "line",
             data: { labels: growth.map((month) => month.label), datasets: [{ data: growth.map((month) => month.members), borderColor: "#d19a57", backgroundColor: "rgba(209,154,87,.12)", fill: true, tension: .35, pointRadius: 3 }] },
             options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#eef1ed" } } } }
-        }),
-        new window.Chart(document.querySelector("#dashboard-plan-chart"), {
+        } }),
+        drawChartOrEmpty(document.querySelector("#dashboard-plan-chart"), { hasData: distribution.size > 0, emptyMessage: "No active memberships yet.", config: {
             type: "doughnut",
-            data: (() => {
-                const distribution = activeMemberships.reduce((counts, membership) => {
-                    counts.set(membership.plan_name, (counts.get(membership.plan_name) || 0) + 1);
-                    return counts;
-                }, new Map());
-                return { labels: [...distribution.keys()], datasets: [{ data: [...distribution.values()], backgroundColor: ["#326a48", "#8db876", "#c4dc86", "#d9a966", "#b8c5ba"], borderWidth: 0 }] };
-            })(),
+            data: { labels: [...distribution.keys()], datasets: [{ data: [...distribution.values()], backgroundColor: ["#326a48", "#8db876", "#c4dc86", "#d9a966", "#b8c5ba"], borderWidth: 0 }] },
             options: { maintainAspectRatio: false, cutout: "66%", plugins: { legend: { position: "bottom", labels: { boxWidth: 8, usePointStyle: true, font: { size: 9 } } } } }
-        })
-    ];
+        } })
+    ].filter(Boolean);
     window.gymPulseCharts = charts;
 }

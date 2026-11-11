@@ -1,6 +1,7 @@
 import { escapeHTML, formatINR, formatDate, formatPhone, localISODate, daysBetween, memberStatus, statusPill, monthKey } from "../utils.js";
-import { state, memberBalance, getPlan, getMember } from "../state.js";
+import { state, memberBalance, getPlan, getMember, revenueEmptyMessage } from "../state.js";
 import { emptyRow, memberTableRow } from "../components/tables.js";
+import { drawChartOrEmpty, hasNonZero } from "../components/charts.js";
 import { getLanguage, t } from "../i18n.js";
 
 const pageHeading = (title, description, actions = "") =>
@@ -26,7 +27,7 @@ function renderAttendance() {
     const rows = [...state.attendance].sort((a, b) => b.checkedInAt.localeCompare(a.checkedInAt));
     const todayCount = rows.filter((record) => record.checkedInAt.slice(0, 10) === today).length;
     const weekCount = rows.filter((record) => daysBetween(record.checkedInAt.slice(0, 10)) < 7).length;
-    const actions = `<button class="button button-secondary" data-action="qr-check-in">▦ QR demo</button><button class="button button-secondary" data-action="fingerprint">♧ Simulate fingerprint</button><button class="button button-primary" data-action="check-in">＋ Check in member</button>`;
+    const actions = `<button class="button button-primary" data-action="check-in">＋ Check in member</button>`;
     return `${pageHeading("Attendance", "Track check-ins and understand visit patterns.", actions)}
         <div class="summary-row"><span class="summary-chip"><strong>${todayCount}</strong> visits today</span><span class="summary-chip"><strong>${weekCount}</strong> visits this week</span><span class="summary-chip"><strong>${new Set(rows.filter((item) => daysBetween(item.checkedInAt.slice(0, 10)) < 30).map((item) => item.memberId)).size}</strong> unique visitors this month</span></div>
         <div class="toolbar"><input class="search-field" id="attendance-search" type="search" placeholder="Search member name or ID…" aria-label="Search attendance"></div>
@@ -189,29 +190,27 @@ export function drawAnalyticsCharts() {
             value: Math.max(0, totalBilled - collected)
         };
     });
-    const charts = [];
-    const revenueNode = document.querySelector("#analytics-revenue");
-    const planNode = document.querySelector("#plan-chart");
-    const attendanceNode = document.querySelector("#analytics-attendance");
-    const outstandingNode = document.querySelector("#outstanding-chart");
-    if (revenueNode) charts.push(new window.Chart(revenueNode, {
+    const planCounts = state.plans.map((plan) => state.members.filter((member) => member.planId === plan.id).length);
+    const charts = [
+        drawChartOrEmpty(document.querySelector("#analytics-revenue"), { hasData: hasNonZero(monthDates.map((item) => item.value)), emptyMessage: revenueEmptyMessage(), config: {
         type: "line", data: { labels: monthDates.map((item) => item.label), datasets: [{ data: monthDates.map((item) => item.value), borderColor: "#4b8b59", backgroundColor: "rgba(110,166,100,.12)", fill: true, tension: .35 }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#eef1ed" } } } }
-    }));
-    if (planNode) charts.push(new window.Chart(planNode, {
-        type: "doughnut", data: { labels: state.plans.map((plan) => plan.name), datasets: [{ data: state.plans.map((plan) => state.members.filter((member) => member.planId === plan.id).length), backgroundColor: ["#326a48", "#8db876", "#c4dc86", "#d9a966", "#b8c5ba"], borderWidth: 0 }] },
+    } }),
+        drawChartOrEmpty(document.querySelector("#plan-chart"), { hasData: hasNonZero(planCounts), emptyMessage: "No members on a plan yet.", config: {
+        type: "doughnut", data: { labels: state.plans.map((plan) => plan.name), datasets: [{ data: planCounts, backgroundColor: ["#326a48", "#8db876", "#c4dc86", "#d9a966", "#b8c5ba"], borderWidth: 0 }] },
         options: { maintainAspectRatio: false, cutout: "66%", plugins: { legend: { position: "bottom", labels: { boxWidth: 8, usePointStyle: true, font: { size: 9 } } } } }
-    }));
-    if (attendanceNode) charts.push(new window.Chart(attendanceNode, {
+    } }),
+        drawChartOrEmpty(document.querySelector("#analytics-attendance"), { hasData: hasNonZero(attendanceDays.map((item) => item.value)), emptyMessage: "No visits recorded in the last 7 days.", config: {
         type: "bar",
         data: { labels: attendanceDays.map((item) => item.label), datasets: [{ data: attendanceDays.map((item) => item.value), backgroundColor: "#8fbd7e", borderRadius: 5, maxBarThickness: 26 }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: "#eef1ed" } } } }
-    }));
-    if (outstandingNode) charts.push(new window.Chart(outstandingNode, {
+    } }),
+        drawChartOrEmpty(document.querySelector("#outstanding-chart"), { hasData: hasNonZero(outstandingMonths.map((item) => item.value)), emptyMessage: "No outstanding balances to show.", config: {
         type: "line",
         data: { labels: outstandingMonths.map((item) => item.label), datasets: [{ data: outstandingMonths.map((item) => item.value), borderColor: "#c58255", backgroundColor: "rgba(197,130,85,.12)", fill: true, tension: .35 }] },
         options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => formatINR(context.raw) } } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#eef1ed" }, ticks: { callback: (value) => formatINR(value) } } } }
-    }));
+    } })
+    ].filter(Boolean);
     window.gymPulseCharts = charts;
 }
 

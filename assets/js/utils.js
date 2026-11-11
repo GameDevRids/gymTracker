@@ -75,6 +75,15 @@ export function normalizeIndianPhone(value) {
     return phone.startsWith("+91") ? phone.slice(3) : phone;
 }
 
+/** Plan length for display: "1 month (30 days)", "12 months (365 days)", or "45 days". */
+export function formatPlanDuration(days) {
+    const count = Number(days);
+    if (!Number.isFinite(count) || count <= 0) return "";
+    const months = count === 365 ? 12 : count % 30 === 0 ? count / 30 : 0;
+    const dayText = `${count} day${count === 1 ? "" : "s"}`;
+    return months ? `${months} month${months === 1 ? "" : "s"} (${dayText})` : dayText;
+}
+
 /** Shows an Indian mobile number as "+91 98230 12345". Anything else is returned unchanged. */
 export function formatPhone(value) {
     const raw = String(value ?? "").trim();

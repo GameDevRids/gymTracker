@@ -2,10 +2,12 @@ import { fetchPlans } from "../api/plansApi.js";
 import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
-import { escapeHTML, formatINR } from "../utils.js";
+import { escapeHTML, formatINR, formatPlanDuration } from "../utils.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 
 const pageSize = 12;
+// 1, 3, 6 and 12 months; a year is 365 days to match the seeded plans.
+const DURATION_PRESETS = [30, 90, 180, 365];
 let plans = [];
 let pagination = { page: 1, total: 0, totalPages: 0 };
 let search = "";
@@ -29,7 +31,7 @@ export function renderPlansPage() {
 
     const cards = plans.map((plan) => `<article class="card plan-card">
         <div class="plan-card-heading"><h3>${escapeHTML(plan.name)}</h3><span class="status status-${plan.is_active ? "active" : "inactive"}">${plan.is_active ? "Active" : "Inactive"}</span></div>
-        <div class="plan-price">${formatINR(plan.price)}<small> / ${plan.duration_days} days</small></div>
+        <div class="plan-price">${formatINR(plan.price)}<small> / ${escapeHTML(formatPlanDuration(plan.duration_days))}</small></div>
         <p>${escapeHTML(plan.description || "No description provided.")}</p>
         <div class="plan-card-footer"><span class="helper-text">Updated ${plan.updated_at ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(plan.updated_at)) : "—"}</span>
             <span class="inline-actions"><button class="text-button" data-action="edit-plan" data-id="${escapeHTML(plan.id)}">Edit</button><button class="text-button" data-action="toggle-plan" data-id="${escapeHTML(plan.id)}">${plan.is_active ? "Deactivate" : "Activate"}</button><button class="text-button" data-action="delete-plan" data-id="${escapeHTML(plan.id)}">Delete</button></span>
@@ -93,11 +95,14 @@ export function openPlanForm(planId = "") {
         return;
     }
     const editing = Boolean(plan);
+    const currentDays = Number(plan?.duration_days || DURATION_PRESETS[0]);
+    const customDays = !DURATION_PRESETS.includes(currentDays);
     openModal({
         title: editing ? "Edit membership plan" : "Create membership plan",
         body: `<form id="plan-form" data-id="${escapeHTML(plan?.id || "")}" class="form-grid" novalidate>
             <div class="field"><label for="form-name">Plan name *</label><input id="form-name" name="name" value="${escapeHTML(plan?.name || "")}" required maxlength="120" aria-describedby="plan-name-error"><span id="plan-name-error" class="helper-text plan-error" role="alert" hidden>Plan name is required and cannot contain only spaces.</span></div>
-            <div class="field"><label for="form-duration_days">Duration (days) *</label><input id="form-duration_days" name="duration_days" type="number" value="${escapeHTML(plan?.duration_days ?? "")}" required min="1" step="1" aria-describedby="plan-duration-error"><span id="plan-duration-error" class="helper-text plan-error" role="alert" hidden>Duration must be a positive whole number of days.</span></div>
+            <div class="field"><label for="form-duration_choice">Duration *</label><select id="form-duration_choice" name="duration_choice">${DURATION_PRESETS.map((days) => `<option value="${days}" ${!customDays && days === currentDays ? "selected" : ""}>${formatPlanDuration(days)}</option>`).join("")}<option value="custom" ${customDays ? "selected" : ""}>Custom days</option></select></div>
+            <div class="field" id="plan-custom-days" ${customDays ? "" : "hidden"}><label for="form-duration_days">Number of days *</label><input id="form-duration_days" name="duration_days" type="number" inputmode="numeric" value="${customDays ? currentDays : ""}" min="1" step="1" aria-describedby="plan-duration-error"><span id="plan-duration-error" class="helper-text plan-error" role="alert" hidden>Duration must be a positive whole number of days.</span></div>
             <div class="field"><label for="form-price">Price (₹) *</label><input id="form-price" name="price" type="number" value="${escapeHTML(plan?.price ?? "")}" required min="0" step="0.01" aria-describedby="plan-price-error"><span id="plan-price-error" class="helper-text plan-error" role="alert" hidden>Price must be a valid non-negative number.</span></div>
             <div class="field"><label for="form-is_active">Availability</label><select id="form-is_active" name="is_active"><option value="true" ${plan?.is_active !== false ? "selected" : ""}>Active</option><option value="false" ${plan?.is_active === false ? "selected" : ""}>Inactive</option></select></div>
             <div class="field full"><label for="form-description">Description</label><textarea id="form-description" name="description" maxlength="2000">${escapeHTML(plan?.description || "")}</textarea></div>
@@ -158,6 +163,16 @@ export function handlePlanAction(action, target, onRender) {
     return true;
 }
 
+/** Shows the custom days input only when "Custom days" is chosen. */
+export function updatePlanDurationField(select) {
+    const form = select.form;
+    const custom = form?.querySelector("#plan-custom-days");
+    if (!custom) return;
+    custom.hidden = select.value !== "custom";
+    setFieldError(form, "duration", false);
+    if (!custom.hidden) form.elements.duration_days.focus();
+}
+
 function setFieldError(form, field, invalid) {
     const error = form.querySelector(`#plan-${field}-error`);
     if (error) error.hidden = !invalid;
@@ -167,7 +182,8 @@ export async function handlePlanSubmit(form, onRender) {
     if (saving) return;
     const values = new FormData(form);
     const name = String(values.get("name") || "").trim();
-    const duration = Number(values.get("duration_days"));
+    const choice = String(values.get("duration_choice") || "custom");
+    const duration = Number(choice === "custom" ? values.get("duration_days") : choice);
     const priceValue = String(values.get("price") || "").trim();
     const price = Number(priceValue);
     const nameInvalid = !name;

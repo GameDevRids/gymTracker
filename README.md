@@ -56,7 +56,7 @@ Use only fictional demo data. Keep the WhatsApp Cloud API credentials empty unle
 
 - Dashboard membership counts, expiry alerts and plan distribution use assigned membership history; revenue and attendance remain derived from their existing local demo records.
 - Member search, status filters, sorting, profiles, add/edit/delete, CSV export and CSV import preview.
-- Backend-backed membership plan management and member plan assignment history with immutable plan-detail snapshots, plus manual check-in/out and simulated QR/fingerprint attendance.
+- Backend-backed membership plan management and member plan assignment history with immutable plan-detail snapshots, plus manual check-in/out. Plans are chosen in months (1, 3, 6 or 12) or as a custom number of days.
 - Follow-up recommendations, analytics, report exports, notification previews, integrations status cards and workspace settings.
 - A WhatsApp-style inbox with fictional Demo conversations, editable click-to-chat expiry reminders, member ID card sends, editable Meta templates, manual live messaging and opt-in-gated inactive-member follow-ups.
 - An optional Express backend with Meta Cloud API sends, media upload for member ID cards, webhook verification and in-memory message status tracking.

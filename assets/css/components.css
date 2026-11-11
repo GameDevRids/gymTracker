@@ -74,12 +74,25 @@
 @media (prefers-reduced-motion: reduce) {
     /* No press-down scale and no shimmer; skeletons stay as still grey blocks. */
     :is(button, .button):not(:disabled):active { transform: none; }
-    .skeleton-item::after { animation: none; opacity: 0; }
+    .skeleton-item::after, .skeleton-field::after { animation: none; opacity: 0; }
 }
 
 /* Member names open the profile but read as names, not links. */
 .text-button.member-cell, .text-button.member-cell:hover { color: inherit; text-decoration: none; }
 .field .name-error { color: var(--brick, #b42318); }
+
+/* Sidebar "More" group: the chevron turns when the group opens. */
+.nav-more-toggle .nav-more-chevron { width: 16px; height: 16px; margin-left: auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s ease; }
+.nav-more-toggle[aria-expanded="true"] .nav-more-chevron { transform: rotate(180deg); }
+.nav-more { display: grid; gap: 2px; }
+
+/* Charts with nothing to plot show a message instead of empty axes. */
+.chart-area .chart-empty { display: grid; height: 100%; place-items: center; text-align: center; }
+
+/* Input-sized loading placeholder for selects whose options are still loading. */
+.skeleton-field { position: relative; overflow: hidden; height: var(--control-height, 44px); border: 1px solid var(--line, #e5ebe3); border-radius: var(--radius-md, 8px); background: var(--surface, #fff); }
+.skeleton-field .skeleton-block { position: absolute; top: 50%; left: 14px; width: 45%; transform: translateY(-50%); }
+.skeleton-field::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .7), transparent); animation: skeleton-shimmer 1.4s ease-in-out infinite; }
 
 /* Read-only values inside forms, such as calculated expiry and billed fees. */
 .field .field-label { color: var(--ink, #35443a); font-size: 14px; font-weight: 600; }

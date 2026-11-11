@@ -137,6 +137,13 @@ export function memberBalance(member) {
     return Math.max(0, Number(member.totalFees || 0) - payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
 }
 
+// Revenue charts still read payments saved in this browser. When the database holds payments
+// that those charts cannot show yet, say so instead of claiming there are none.
+export function revenueEmptyMessage() {
+    const databasePaid = state.members.some((member) => member.memberCode && Number(member.paidTotal) > 0);
+    return databasePaid ? "Payments are recorded, but monthly totals are not available yet." : "No payments recorded yet.";
+}
+
 // Keeps the database totals current after this browser records a payment, until the next reload.
 export function addPaidAmount(memberId, amount) {
     const member = getMember(memberId);

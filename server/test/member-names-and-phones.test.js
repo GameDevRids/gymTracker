@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { memberNameProblem, validateMemberPayload } from "../middleware/validateMember.js";
-import { cleanMemberName, formatPhone, memberNameIssue } from "../../assets/js/utils.js";
+import { cleanMemberName, formatPhone, formatPlanDuration, memberNameIssue } from "../../assets/js/utils.js";
 import { validateImportRows } from "../../assets/js/modules/memberImport.js";
 
 const goodNames = ["Riya Shah", "Rhea D'Souza", "Anne-Marie Joseph", "S. Kumar", "Jr.", "प्रिया देशमुख", "सई", "José Álvarez", "O’Brien", "  Kabir   Mehta  "];
@@ -61,4 +61,15 @@ test("phone numbers display as +91 followed by two groups of five digits", () =>
     assert.equal(formatPhone(""), "");
     assert.equal(formatPhone(null), "");
     assert.equal(formatPhone("+44 20 7946 0958"), "+44 20 7946 0958");
+});
+
+test("plan durations read as months with the day count, or as plain days", () => {
+    assert.equal(formatPlanDuration(30), "1 month (30 days)");
+    assert.equal(formatPlanDuration(90), "3 months (90 days)");
+    assert.equal(formatPlanDuration(180), "6 months (180 days)");
+    assert.equal(formatPlanDuration(365), "12 months (365 days)");
+    assert.equal(formatPlanDuration("60"), "2 months (60 days)");
+    assert.equal(formatPlanDuration(45), "45 days");
+    assert.equal(formatPlanDuration(1), "1 day");
+    assert.equal(formatPlanDuration(0), "");
 });

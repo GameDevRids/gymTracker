@@ -15,7 +15,7 @@ import {
 } from "./state.js";
 import { renderDashboard, drawDashboardCharts } from "./modules/dashboard.js";
 import { renderMembers, renderProfile } from "./modules/members.js";
-import { renderPlansPage, loadPlans, setPlanSearch, setPlanStatus, handlePlanAction, handlePlanSubmit } from "./modules/plans.js";
+import { renderPlansPage, loadPlans, setPlanSearch, setPlanStatus, handlePlanAction, handlePlanSubmit, updatePlanDurationField } from "./modules/plans.js";
 import {
     handleMembershipAction,
     loadAllMemberships,
@@ -37,7 +37,7 @@ import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
 import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleWhatsAppChange } from "./modules/whatsapp.js";
 import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
-import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
+import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
 import { createDemoState } from "../../data/demo-data.js";
 
@@ -165,6 +165,8 @@ function render() {
     setCurrency(state.gym.currency || "INR");
     applyNavigationTranslations();
     document.querySelectorAll(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === currentView));
+    // Keep the active page visible: open "More" whenever the current page lives inside it.
+    if (document.querySelector(`#nav-more [data-view="${currentView}"]`)) setNavMoreOpen(true);
     const mobilePrimaryViews = ["expiring", "members", "plans", "attendance"];
     document.querySelectorAll(".mobile-nav-link[data-view]").forEach((link) => {
         const active = link.dataset.view === currentView;
@@ -298,6 +300,14 @@ function renderPlansIfCurrent() {
     if (currentView === "plans") render();
 }
 
+function setNavMoreOpen(open) {
+    const toggle = document.querySelector(".nav-more-toggle");
+    const group = document.querySelector("#nav-more");
+    if (!toggle || !group) return;
+    toggle.setAttribute("aria-expanded", String(open));
+    group.hidden = !open;
+}
+
 function closeMobileMenu() {
     document.querySelector("#sidebar").classList.remove("open");
     document.querySelector("#mobile-scrim").classList.remove("visible");
@@ -331,7 +341,7 @@ function setField(name, label, value = "", type = "text", required = false, extr
 }
 
 function memberPlanOptions(plans, selected = "") {
-    return plans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-price="${Number(plan.price)}" data-days="${Number(plan.duration_days)}" ${plan.id === selected ? "selected" : ""}>${escapeHTML(plan.name)} — ${plan.duration_days} days — ${formatINR(plan.price)}</option>`).join("");
+    return plans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-price="${Number(plan.price)}" data-days="${Number(plan.duration_days)}" ${plan.id === selected ? "selected" : ""}>${escapeHTML(plan.name)} — ${escapeHTML(formatPlanDuration(plan.duration_days))} — ${formatINR(plan.price)}</option>`).join("");
 }
 
 function demoRenewalPlanOptions(selected = "") {
@@ -343,7 +353,7 @@ function demoRenewalPlanOptions(selected = "") {
 
 function renderMemberPlanField(status, plans = []) {
     if (status === "loading") {
-        return `<div class="field full"><label for="form-planId">Membership plan *</label><select id="form-planId" disabled><option>Loading membership plans...</option></select><span class="helper-text" role="status">Loading membership plans...</span></div>`;
+        return `<div class="field full"><span class="field-label">Membership plan *</span>${fieldSkeleton("Loading membership plans…")}</div>`;
     }
     if (status === "error") {
         return `<div class="field full"><label>Membership plan *</label><p class="helper-text" role="alert">Unable to load membership plans. Please try again.</p><button class="button button-secondary" type="button" data-action="retry-member-plans">Try again</button></div>`;
@@ -366,7 +376,7 @@ function renderMemberFormBody(member, planStatus = "loading", plans = []) {
             <div class="field"><label for="form-status">Membership status</label><select id="form-status" name="status"><option value="active" ${member?.status !== "suspended" ? "selected" : ""}>Active</option><option value="suspended" ${member?.status === "suspended" ? "selected" : ""}>Suspended</option></select><span class="helper-text">Expired status is calculated from the expiry date.</span></div>
             ${isEdit
                 ? `${setField("startDate", "Membership start date", member.startDate || "", "date", false, 'readonly aria-readonly="true"')}${setField("expiryDate", "Membership expiry date", member.expiryDate || "", "date", false, 'readonly aria-readonly="true"')}`
-                : `${setField("assignmentStartDate", "Membership start date", localISODate(), "date", true)}${setField("assignmentEndDate", "Calculated membership expiry", "", "date", false, 'readonly aria-readonly="true"')}<p class="helper-text field full">The assignment service calculates and saves the membership expiry date.</p>`}
+                : `${setField("assignmentStartDate", "Membership start date", localISODate(), "date", true)}<div class="field"><span class="field-label" id="form-expiry-label">Membership expiry</span><p class="readonly-value" id="form-expiry-text" aria-labelledby="form-expiry-label" aria-live="polite">${EXPIRY_PLACEHOLDER}</p><input type="hidden" name="assignmentEndDate" value=""><span class="helper-text">Calculated from the plan and start date.</span></div>`}
             ${isEdit
                 ? `<div class="field"><span class="field-label">Total billed fees</span><p class="readonly-value">${formatINR(member.totalFees || 0)}</p><span class="helper-text">Fees are saved with each plan assignment and cannot be edited here.</span></div>`
                 : setField("totalFees", "Membership fee (₹)", "", "number", true, 'min="0" step="1"')}
@@ -422,9 +432,16 @@ function openMemberForm(memberId = "") {
     if (!isEdit) loadMemberFormPlans(form);
 }
 
+const EXPIRY_PLACEHOLDER = "Choose a plan to see the expiry date";
+
+// A grey input-sized placeholder shown while a select's options load.
+function fieldSkeleton(label) {
+    return `<div class="skeleton-field" role="status"><span class="sr-only">${escapeHTML(label)}</span><span class="skeleton-block" aria-hidden="true"></span></div>`;
+}
+
 function renderQuickAddPlanField(status, plans = []) {
     if (status === "loading") {
-        return `<div class="field"><label for="quick-planId">${t("plan")} *</label><select id="quick-planId" disabled><option>Loading plans…</option></select></div>`;
+        return `<div class="field"><span class="field-label">${t("plan")} *</span>${fieldSkeleton("Loading plans…")}</div>`;
     }
     if (status === "error") {
         return `<div class="field"><label for="quick-planId">${t("plan")} *</label><p class="helper-text" role="alert">Plans could not be loaded.</p><button class="button button-secondary" type="button" data-action="retry-quick-add-plans">Try again</button></div>`;
@@ -738,6 +755,10 @@ function updateMemberAssignmentPreview(form) {
     expiry.value = plan?.value && startDate && duration > 0
         ? addDays(startDate, duration - 1)
         : "";
+    const text = form.querySelector("#form-expiry-text");
+    if (text) {
+        text.textContent = expiry.value ? formatDate(expiry.value) : startDate ? EXPIRY_PLACEHOLDER : "Choose a start date to see the expiry date";
+    }
 }
 
 function phoneDigits(phone) {
@@ -1299,6 +1320,10 @@ document.addEventListener("click", (event) => {
     if (viewLink) { navigate(viewLink.dataset.view); return; }
     const action = event.target.closest("[data-action]");
     if (action) {
+        if (action.dataset.action === "toggle-nav-more") {
+            setNavMoreOpen(action.getAttribute("aria-expanded") !== "true");
+            return;
+        }
         if (action.dataset.action === "retry-expiring") {
             loadExpiringMemberships();
             return;
@@ -1369,6 +1394,7 @@ document.addEventListener("change", (event) => {
     }
     if (target.matches("#membership-assignment-form [name='plan_id'], #membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
     if (target.id === "plan-status-filter") { setPlanStatus(target.value, renderPlansIfCurrent); return; }
+    if (target.id === "form-duration_choice") { updatePlanDurationField(target); return; }
     if (target.id === "member-filter") {
         memberFilters.filter = target.value;
         memberFilters.page = 1;
