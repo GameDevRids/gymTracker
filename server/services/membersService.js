@@ -25,6 +25,9 @@ const memberColumns = [
     "archived_at"
 ].join(",");
 
+// The check-in QR token is sent only for a single member (profile, new member), never in lists.
+const singleMemberColumns = `${memberColumns},qr_token`;
+
 export class MembersServiceError extends Error {
     constructor(status, message) {
         super(message);
@@ -180,7 +183,7 @@ export async function getMember(id, gymId, client = supabaseClient) {
     if (!gymId) throw new MembersServiceError(403, "Gym is required.");
     const { data, error } = await client
         .from("members")
-        .select(memberColumns)
+        .select(singleMemberColumns)
         .eq("id", id)
         .eq("gym_id", gymId)
         .is("archived_at", null)
@@ -208,7 +211,7 @@ export async function createMember(member, gymId, client = supabaseClient) {
         const { data, error } = await client
             .from("members")
             .insert(record)
-            .select(memberColumns)
+            .select(singleMemberColumns)
             .single();
 
         if (!error) return data;

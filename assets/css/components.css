@@ -178,3 +178,43 @@
     .payments-table tbody td[colspan]::before { content: none; }
     .payments-table .cell-sub { display: inline; margin-left: 6px; }
 }
+
+/* ---------- QR check-in scanner ---------- */
+.scanner { overflow: hidden; padding: 0; }
+.scanner-stage { position: relative; display: grid; min-height: min(70dvh, 560px); place-items: center; background: #0f171e; }
+.scanner-stage video { width: 100%; height: 100%; max-height: min(70dvh, 560px); object-fit: cover; }
+.scanner-frame { position: absolute; width: min(62vw, 300px); aspect-ratio: 1; border: 4px solid rgba(244, 165, 28, .9); border-radius: 20px; box-shadow: 0 0 0 9999px rgba(15, 23, 30, .35); pointer-events: none; }
+.scanner-blocked .scanner-frame, .scanner-blocked video { display: none; }
+.scanner-status { position: absolute; bottom: 14px; left: 50%; margin: 0; padding: 6px 14px; border-radius: 999px; color: #fff; background: rgba(15, 23, 30, .75); font-size: 15px; font-weight: 600; transform: translateX(-50%); }
+.scan-result { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 28px 22px; color: #fff; text-align: center; }
+.scan-result[hidden] { display: none; }
+.scan-green { background: var(--leaf, #1D7A4F); }
+.scan-amber { color: var(--slate, #1E2D3A); background: var(--marigold, #F4A51C); }
+.scan-red { background: var(--brick, #B83A26); }
+.scan-grey { background: #4A5862; }
+.scan-title { margin: 0; font-family: var(--font-display, sans-serif); font-size: clamp(30px, 8vw, 52px); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.scan-line { margin: 0; font-size: clamp(20px, 5.5vw, 30px); font-weight: 600; line-height: 1.25; }
+.scan-sub { margin: 0; font-size: clamp(16px, 4.4vw, 22px); opacity: .92; }
+.scan-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
+.scan-actions .button { min-height: 48px; font-size: 16px; }
+.scan-red .button-secondary, .scan-grey .button-secondary { border-color: rgba(255, 255, 255, .7); color: #fff; background: transparent; }
+.scan-red .button-primary { color: var(--brick, #B83A26); background: #fff; }
+.checkin-results { display: grid; gap: 6px; max-height: 50dvh; margin-top: 10px; overflow-y: auto; }
+.checkin-result { display: grid; gap: 2px; min-height: 52px; padding: 10px 12px; border: 1px solid var(--line, #DFE5E9); border-radius: 10px; color: var(--ink, #1E2D3A); background: var(--surface, #fff); text-align: left; cursor: pointer; font: inherit; }
+.checkin-result:hover, .checkin-result:focus-visible { border-color: var(--marigold, #F4A51C); background: var(--marigold-tint, #FFF1D2); }
+.checkin-result small { color: var(--ink-3, #5E6C77); }
+.member-card-view { display: grid; gap: 10px; justify-items: center; }
+.member-card-preview { width: min(100%, 360px); height: auto; border-radius: 14px; box-shadow: var(--shadow-raised, 0 12px 32px rgba(30, 45, 58, .14)); }
+.import-note { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.last-visit { margin: 2px 0 0; color: var(--ink-2, #44535F); font-size: 14px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+@media (max-width: 760px) {
+    .visits-table, .visits-table tbody { display: block; }
+    .visits-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+    .visits-table tbody { display: grid; gap: 8px; padding: 10px; }
+    .visits-table tbody tr { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; padding: 10px 12px; border: 1px solid var(--line, #DFE5E9); border-radius: 12px; background: var(--surface, #fff); }
+    .visits-table tbody td { padding: 0; border: 0; font-size: 14px; overflow-wrap: anywhere; }
+    .visits-table td[data-label="Time"] { grid-row: span 3; color: var(--ink, #1E2D3A); font-size: 18px; font-weight: 700; }
+}
+.scan-actions a.button-whatsapp, .scan-actions a.button-whatsapp:visited { color: #fff; text-decoration: none; }

@@ -6,6 +6,7 @@ import { getLanguage, t } from "../i18n.js";
 import { renderWelcomeTemplateSettings } from "./welcomeUi.js";
 import { methodLabel, paymentsPage, renderUpiTestQr } from "./upiPayments.js";
 import { renderSkeletonList } from "../components/skeleton.js";
+import { renderVisitsPage } from "./attendance.js";
 
 const pageHeading = (title, description, actions = "") =>
     `<div class="page-heading"><div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`;
@@ -25,7 +26,12 @@ export function renderOperationsPage(view) {
     return renderers[view]?.() || `<div class="empty-state">This page is not available.</div>`;
 }
 
+// Check-ins from the database; fictional sample data keeps its browser-only list.
 function renderAttendance() {
+    return state.sampleDataLoaded ? renderSampleAttendance() : renderVisitsPage();
+}
+
+function renderSampleAttendance() {
     const today = localISODate();
     const rows = [...state.attendance].sort((a, b) => b.checkedInAt.localeCompare(a.checkedInAt));
     const todayCount = rows.filter((record) => record.checkedInAt.slice(0, 10) === today).length;
@@ -290,7 +296,7 @@ function renderNotifications() {
 
 function renderIntegrations() {
     const integrations = [
-        ["Biometric devices", "Simulated scan flow only. No hardware connection.", "Demo mode", "fingerprint"],
+        ["QR check-in", "Members show the QR on their member card; staff scan it at the entrance.", "Built in", "scan"],
         ["WhatsApp Cloud API", "Demo inbox is ready; live mode uses the official Meta Cloud API.", "Open inbox", "whatsapp-inbox"],
         ["CSV imports", "Map a CSV export and preview records before importing.", "Available", "import-csv"],
         ["Gym management software", "External system APIs are not connected.", "Coming soon", ""],
@@ -298,7 +304,7 @@ function renderIntegrations() {
     ];
     return `${pageHeading("Integrations", "Connect GymPulse to your gym's existing workflows over time.")}
         <div class="note-box" style="margin-bottom:15px">This prototype does not connect to external systems. Check with each vendor for official API or SDK availability for your specific product and device model.</div>
-        <div class="grid integration-grid">${integrations.map(([name, description, status, action]) => `<article class="card integration-card"><div style="display:flex;justify-content:space-between;gap:8px"><h3>${escapeHTML(name)}</h3><span class="badge-soft">${escapeHTML(status)}</span></div><p>${escapeHTML(description)}</p>${action ? `<button class="button button-secondary button-small" ${action === "whatsapp-inbox" ? `data-view="whatsapp"` : action === "import-csv" ? `data-action="import-csv"` : `data-action="${action}"`}>${action === "fingerprint" ? "Simulate scan" : action === "notifications" ? "View message previews" : action === "whatsapp-inbox" ? "Open WhatsApp inbox" : "Import CSV"}</button>` : ""}</article>`).join("")}</div>`;
+        <div class="grid integration-grid">${integrations.map(([name, description, status, action]) => `<article class="card integration-card"><div style="display:flex;justify-content:space-between;gap:8px"><h3>${escapeHTML(name)}</h3><span class="badge-soft">${escapeHTML(status)}</span></div><p>${escapeHTML(description)}</p>${action ? `<button class="button button-secondary button-small" ${action === "whatsapp-inbox" ? `data-view="whatsapp"` : action === "scan" ? `data-view="scan"` : action === "import-csv" ? `data-action="import-csv"` : `data-action="${action}"`}>${action === "scan" ? "Open scanner" : action === "notifications" ? "View message previews" : action === "whatsapp-inbox" ? "Open WhatsApp inbox" : "Import CSV"}</button>` : ""}</article>`).join("")}</div>`;
 }
 
 function renderSettings() {

@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v11";
+const CACHE_NAME = "gympulse-shell-v12";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -9,6 +9,7 @@ const APP_SHELL = [
     "/assets/css/theme.css",
     "/assets/vendor/chart.umd.min.js",
     "/assets/vendor/qrcode-generator-1.4.4.js",
+    "/assets/vendor/jsQR-1.4.0.js",
     "/assets/js/main.js",
     "/assets/js/state.js",
     "/assets/js/storage.js",
@@ -36,6 +37,8 @@ const APP_SHELL = [
     "/assets/js/modules/welcomeUi.js",
     "/assets/js/welcomeMessage.js",
     "/assets/js/upi.js",
+    "/assets/js/checkin.js",
+    "/assets/js/modules/attendance.js",
     "/assets/js/modules/cardCanvas.js",
     "/assets/js/modules/upiPayments.js",
     "/data/demo-data.js",

@@ -9,7 +9,7 @@ import { toast } from "../components/toast.js";
 import { escapeHTML, formatDate, formatINR } from "../utils.js";
 import { buildUpiLink, upiNote } from "../upi.js";
 import { welcomePhone } from "../welcomeMessage.js";
-import { CARD_COLORS, cardFontFamilies, cardFontsReady, fitTextBlock, roundedRect, setFont, shareImageFile } from "./cardCanvas.js";
+import { CARD_COLORS, cardFontFamilies, cardFontsReady, drawQr, fitTextBlock, roundedRect, setFont, shareImageFile } from "./cardCanvas.js";
 
 const METHOD_LABELS = { upi: "UPI", cash: "Cash", card: "Card", other: "Other" };
 
@@ -84,20 +84,6 @@ export function qrSvg(text, label = "UPI payment QR code") {
     return `<svg class="qr-svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${escapeHTML(label)}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="#fff"/><path d="${path}" fill="#1E2D3A"/></svg>`;
 }
 
-function drawQr(context, text, x, y, size) {
-    const qr = qrFor(text);
-    const count = qr.getModuleCount();
-    const cell = Math.floor(size / (count + 8));
-    const offset = Math.floor((size - cell * (count + 8)) / 2);
-    context.fillStyle = "#FFFFFF";
-    context.fillRect(x, y, size, size);
-    context.fillStyle = CARD_COLORS.slate;
-    for (let row = 0; row < count; row += 1) {
-        for (let col = 0; col < count; col += 1) {
-            if (qr.isDark(row, col)) context.fillRect(x + offset + (col + 4) * cell, y + offset + (row + 4) * cell, cell, cell);
-        }
-    }
-}
 
 function canvasFile(canvas, name) {
     return new Promise((resolve, reject) => canvas.toBlob((blob) => blob

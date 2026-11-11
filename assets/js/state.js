@@ -17,7 +17,34 @@ export const state = (() => {
 if (!state.whatsapp) state.whatsapp = {};
 if (!state.apiMemberPayments) state.apiMemberPayments = {};
 
-export function persist() { saveState(state); }
+// Check-ins live in the database. Real gyms keep them in memory only (state.attendance is
+// filled from the API). Check-ins an older version saved in this browser stay in storage,
+// untouched, until they are imported, so nothing is lost.
+let pendingLegacyAttendance = [];
+
+/** Call after loading a workspace: sets aside browser-saved check-ins for the one-time import. */
+export function setAsideLegacyAttendance() {
+    if (state.sampleDataLoaded) {
+        pendingLegacyAttendance = [];
+        return;
+    }
+    pendingLegacyAttendance = (Array.isArray(state.attendance) ? state.attendance : [])
+        .filter((record) => record && record.memberId && record.checkedInAt);
+    state.attendance = [];
+}
+
+export function legacyAttendance() {
+    return pendingLegacyAttendance;
+}
+
+export function clearLegacyAttendance() {
+    pendingLegacyAttendance = [];
+    persist();
+}
+
+export function persist() {
+    saveState(state.sampleDataLoaded ? state : { ...state, attendance: pendingLegacyAttendance });
+}
 
 export function resetDemo() {
     const fresh = resetState();
@@ -54,6 +81,8 @@ export function memberFromApiRow(member) {
         whatsappOptInAt: member.whatsapp_opt_in_at || "",
         whatsappOptOutAt: member.whatsapp_opt_out_at || "",
         notes: member.notes || "",
+        // Only single-member responses carry the check-in QR token.
+        ...(member.qr_token ? { qrToken: member.qr_token } : {}),
         followUpStatus: member.follow_up_status || "pending",
         renewals: [],
         createdAt: member.created_at || "",

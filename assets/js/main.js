@@ -14,7 +14,8 @@ import {
     updateMemberFieldsOnApi,
     setWhatsAppConsentOnApi,
     loadConsentHistory,
-    deleteMemberOnApi
+    deleteMemberOnApi,
+    setAsideLegacyAttendance
 } from "./state.js";
 import { renderDashboard, drawDashboardCharts } from "./modules/dashboard.js";
 import { renderMembers, renderProfile } from "./modules/members.js";
@@ -44,6 +45,7 @@ import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker 
 import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, paymentsPage, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel } from "./modules/upiPayments.js";
 import { upiIdProblem, UTR_PATTERN } from "./upi.js";
 import { welcomePayment } from "./welcomeMessage.js";
+import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, manualCheckIn, openCheckInByName, renderScanPage, searchCheckInMembers, selectVisitsDay, startScanner, stopScanner } from "./modules/attendance.js";
 import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
 import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
@@ -53,7 +55,7 @@ const page = document.querySelector("#page-content");
 const viewTitles = {
     expiring: "Expiring soon", overview: "Overview", members: "Members", plans: "Membership plans", attendance: "Attendance", payments: "Payments",
     renewals: "Renewals", retention: "Retention", analytics: "Analytics", reports: "Reports",
-    notifications: "Notifications", whatsapp: "WhatsApp inbox", integrations: "Integrations", settings: "Settings", profile: "Member profile"
+    notifications: "Notifications", whatsapp: "WhatsApp inbox", integrations: "Integrations", settings: "Settings", profile: "Member profile", scan: "Scan check-in"
 };
 let currentView = "expiring";
 let profileId = "";
@@ -115,6 +117,8 @@ function loadUserWorkspace(userId) {
     const savedState = loadState();
     Object.keys(state).forEach((key) => delete state[key]);
     Object.assign(state, savedState);
+    // Check-ins now come from the database; browser-saved ones wait for the one-time import.
+    setAsideLegacyAttendance();
     if (!state.whatsapp) state.whatsapp = {};
     if (!state.apiMemberPayments) state.apiMemberPayments = {};
 }
@@ -137,6 +141,7 @@ function startAuthenticatedApp(session) {
     loadExpiringMemberships();
     // Loaded early so the "Member added" dialog can open WhatsApp without waiting.
     loadWelcomeTemplates();
+    loadAttendanceFeed(rerenderAttendanceViews);
     // Gym phone, address and UPI details live in the database.
     loadGymSettings().then(() => { if (currentView === "settings") render(); });
     loadAllMemberships(() => {
@@ -181,7 +186,7 @@ function render() {
     document.querySelectorAll(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === currentView));
     // Keep the active page visible: open "More" whenever the current page lives inside it.
     if (document.querySelector(`#nav-more [data-view="${currentView}"]`)) setNavMoreOpen(true);
-    const mobilePrimaryViews = ["expiring", "members", "plans", "attendance"];
+    const mobilePrimaryViews = ["expiring", "members", "scan", "attendance"];
     document.querySelectorAll(".mobile-nav-link[data-view]").forEach((link) => {
         const active = link.dataset.view === currentView;
         link.classList.toggle("active", active);
@@ -208,6 +213,10 @@ function render() {
         page.innerHTML = renderWhatsAppPage();
     } else if (currentView === "profile") {
         page.innerHTML = renderProfile(profileId);
+    } else if (currentView === "scan") {
+        // The camera keeps running across re-renders; only draw the page once.
+        if (!page.querySelector("#scanner-root")) page.innerHTML = renderScanPage();
+        startScanner();
     } else {
         page.innerHTML = renderOperationsPage(currentView);
         if (currentView === "analytics") drawAnalyticsCharts();
@@ -264,8 +273,14 @@ async function refreshMemberTotal() {
     }
 }
 
+// Pages that read check-ins redraw when the database feed arrives.
+function rerenderAttendanceViews() {
+    if (["attendance", "overview", "retention", "analytics", "notifications", "profile"].includes(currentView)) render();
+}
+
 function navigate(view) {
     if (!viewTitles[view]) return;
+    if (currentView === "scan" && view !== "scan") stopScanner();
     currentView = view;
     if (view !== "profile") profileId = "";
     render();
@@ -276,12 +291,15 @@ function navigate(view) {
         loadWelcomeTemplates({ force: true }).then(renderSettings);
         loadGymSettings().then(renderSettings);
     }
+    if (view === "attendance") loadAttendanceFeed(rerenderAttendanceViews);
     if (view === "payments" && !state.sampleDataLoaded) loadPaymentsPage(() => { if (currentView === "payments") render(); });
     if (view === "profile" && profileId) {
         loadMemberMembershipHistory(profileId);
         loadMemberPaymentsFromApi(profileId);
         loadProfileConsent(profileId);
         loadProfileWelcome(profileId);
+        const visitsFor = profileId;
+        loadMemberAttendance(visitsFor, () => { if (currentView === "profile" && profileId === visitsFor) render(); });
     }
     if (initializationWarning) toast(initializationWarning, "error");
     page.focus({ preventScroll: true });
@@ -826,9 +844,13 @@ function handleAction(action, target) {
             break;
         }
         case "record-payment": openPaymentForm(id, target.dataset.membershipId || "", target.dataset.amount || ""); break;
-        case "check-in": openCheckInForm(id); break;
-        case "qr-check-in": openCheckInForm("", "qr"); break;
-        case "fingerprint": openCheckInForm("", "fingerprint"); break;
+        // Sample data keeps its browser-only check-ins; real members are checked in on the server.
+        case "check-in":
+            if (state.sampleDataLoaded) openCheckInForm(id);
+            else if (id) manualCheckIn(id, () => { rerenderAttendanceViews(); loadMemberAttendance(id, rerenderAttendanceViews); });
+            else openCheckInByName();
+            break;
+        case "qr-check-in": navigate("scan"); break;
         case "check-out": checkOut(id); break;
         case "renew-member": openRenewForm(id); break;
         case "export-members": exportMembers(); break;
@@ -1320,7 +1342,7 @@ function confirmReset() {
         resetDemo();
         memberFilters = { search: "", filter: "all", sort: "name" };
         currentView = "overview";
-        closeModal(); render(); refreshMembersFromApi({ page: 1 }); toast("Local sample data cleared.");
+        closeModal(); render(); refreshMembersFromApi({ page: 1 }); loadAttendanceFeed(rerenderAttendanceViews); toast("Local sample data cleared.");
     } catch (error) {
         toast(error.message || "Could not reset demo data.", "error");
     }
@@ -1536,6 +1558,7 @@ document.addEventListener("click", (event) => {
         }
         // Synchronous up to window.open / navigator.share, so phones treat it as the user's tap.
         if (handleUpiPaymentAction(action.dataset.action, action)) return;
+        if (handleAttendanceAction(action.dataset.action, action, rerenderAttendanceViews)) return;
         if (action.dataset.action === "open-upi-settings") {
             closeModal();
             navigate("settings");
@@ -1600,6 +1623,7 @@ document.addEventListener("change", (event) => {
     }
     if (handleWelcomeTemplateEvent(target)) return;
     if (onPaymentFormEdit(target)) return;
+    if (target.id === "visits-date" && target.value) { selectVisitsDay(target.value, () => { if (currentView === "attendance") render(); }); return; }
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
     if (target.id === "expiry-days") {
         expiringDays = Number(target.value);
@@ -1632,6 +1656,7 @@ document.addEventListener("change", (event) => {
 document.addEventListener("input", (event) => {
     const target = event.target;
     if (target.id === "welcome-body") { handleWelcomeTemplateEvent(target); return; }
+    if (target.id === "checkin-search") { searchCheckInMembers(target.value); return; }
     if (target.form?.id === "payment-form" && ["amount", "upiReference"].includes(target.name)) { onPaymentFormEdit(target); return; }
     if (target.id === "setting-upiId" || target.id === "setting-upiPayeeName") { updateUpiTestQr(target.form); return; }
     if (target.matches('#member-form [name="phone"], #quick-member-form [name="phone"]')) {
@@ -1770,6 +1795,11 @@ async function registerServiceWorker() {
 }
 
 registerServiceWorker();
+// The camera is released whenever the app is hidden, and comes back on the scan page.
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopScanner();
+    else if (currentView === "scan") startScanner();
+});
 setUnauthorizedHandler(() => {
     clearAuthSession();
     activeSession = null;

@@ -2,6 +2,7 @@
 // theme colours and fonts, text that wraps or shrinks to fit, a check that the fonts draw ₹,
 // and sharing an image through the phone share sheet (download on desktop).
 // No DOM access on load, so the server tests can import modules that use it.
+/* global qrcode */
 
 export const CARD_COLORS = { slate: "#1E2D3A", slate2: "#2A3F4F", marigold: "#F4A51C", white: "#FFFFFF", soft: "#C9D2D9", brick: "#B83A26", leaf: "#1D7A4F" };
 export const HEADING_FAMILIES = '"Anek Latin", "Anek Devanagari"';
@@ -114,4 +115,23 @@ export async function shareImageFile(file, { text = "" } = {}) {
     }
     downloadFile(file);
     return "downloaded";
+}
+
+/** Draws a QR code (with its 4-module quiet zone) into a white square. Uses the vendored qrcode library. */
+export function drawQr(context, text, x, y, size) {
+    if (typeof qrcode !== "function") throw new Error("The QR code library did not load. Reload the page.");
+    const qr = qrcode(0, "M");
+    qr.addData(text);
+    qr.make();
+    const count = qr.getModuleCount();
+    const cell = Math.floor(size / (count + 8));
+    const offset = Math.floor((size - cell * (count + 8)) / 2);
+    context.fillStyle = "#FFFFFF";
+    context.fillRect(x, y, size, size);
+    context.fillStyle = CARD_COLORS.slate;
+    for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+            if (qr.isDark(row, col)) context.fillRect(x + offset + (col + 4) * cell, y + offset + (row + 4) * cell, cell, cell);
+        }
+    }
 }

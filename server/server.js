@@ -14,6 +14,7 @@ import membershipsRouter from "./routes/memberships.js";
 import paymentsRouter from "./routes/payments.js";
 import messageTemplatesRouter from "./routes/messageTemplates.js";
 import gymSettingsRouter from "./routes/gymSettings.js";
+import attendanceRouter from "./routes/attendance.js";
 import whatsappRouter from "./routes/whatsapp.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
@@ -49,6 +50,9 @@ app.use(requireDemoAuth());
 app.use("/api", rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 300,
+    // Entrance scans have their own per-user limit (routes/attendance.js); every device on
+    // the gym Wi-Fi shares one IP, so a busy morning must not lock the whole gym out.
+    skip: (request) => request.path === "/attendance/scan",
     standardHeaders: true,
     legacyHeaders: false
 }));
@@ -87,6 +91,7 @@ app.use("/api/memberships", requireAuth(), membershipsRouter);
 app.use("/api/payments", requireAuth(), paymentsRouter);
 app.use("/api/message-templates", requireAuth(), messageTemplatesRouter);
 app.use("/api/gym-settings", requireAuth(), gymSettingsRouter);
+app.use("/api/attendance", requireAuth(), attendanceRouter);
 app.use("/api/whatsapp", (request, response, next) => {
     if (request.path === "/webhook" || request.path.startsWith("/webhook/")) return next();
     return requireAuth()(request, response, next);

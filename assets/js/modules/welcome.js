@@ -6,7 +6,8 @@ import { state } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
 import { getLanguage } from "../i18n.js";
 import { formatDate, formatINR } from "../utils.js";
-import { CARD_COLORS, cardFontFamilies, cardFontsReady, fitTextBlock, roundedRect, setFont, shareImageFile, truncateToWidth } from "./cardCanvas.js";
+import { CARD_COLORS, cardFontFamilies, cardFontsReady, drawQr, fitTextBlock, roundedRect, setFont, shareImageFile, truncateToWidth } from "./cardCanvas.js";
+import { memberQrText } from "../checkin.js";
 
 export { cardFontFamilies, fitTextBlock, fontHasGlyph } from "./cardCanvas.js";
 import {
@@ -206,12 +207,32 @@ export function sendWelcome(member, { membership, gym, payments, language = welc
 
 // ---------- The welcome card image ----------
 
-export const CARD_SIZE = 1080;
+// Portrait, so the check-in QR is large enough to scan from the member's phone screen.
+export const CARD_WIDTH = 1080;
+export const CARD_HEIGHT = 1350;
 const CARD_LABELS = {
-    en: { welcome: "Welcome,", plan: "Plan", start: "Starts", expiry: "Valid until", fee: "Fee", paid: "Paid", balance: "Balance due", paidInFull: "Paid in full", code: "MEMBER ID" },
-    hi: { welcome: "स्वागत है,", plan: "योजना", start: "शुरुआत", expiry: "वैध तिथि", fee: "शुल्क", paid: "भुगतान", balance: "बकाया", paidInFull: "पूरा भुगतान", code: "सदस्य आईडी" },
-    mr: { welcome: "स्वागत आहे,", plan: "योजना", start: "सुरुवात", expiry: "वैध तारीख", fee: "शुल्क", paid: "भरले", balance: "बाकी", paidInFull: "पूर्ण भरले", code: "सदस्य आयडी" }
+    en: { welcome: "Welcome,", memberCard: "Member card", plan: "Plan", start: "Starts", expiry: "Valid until", fee: "Fee", paid: "Paid", balance: "Balance due", paidInFull: "Paid in full", code: "MEMBER ID", scan: "Show this QR at the front desk to check in" },
+    hi: { welcome: "स्वागत है,", memberCard: "सदस्य कार्ड", plan: "योजना", start: "शुरुआत", expiry: "वैध तिथि", fee: "शुल्क", paid: "भुगतान", balance: "बकाया", paidInFull: "पूरा भुगतान", code: "सदस्य आईडी", scan: "चेक-इन के लिए यह QR रिसेप्शन पर दिखाएँ" },
+    mr: { welcome: "स्वागत आहे,", memberCard: "सदस्य कार्ड", plan: "योजना", start: "सुरुवात", expiry: "वैध तारीख", fee: "शुल्क", paid: "भरले", balance: "बाकी", paidInFull: "पूर्ण भरले", code: "सदस्य आयडी", scan: "चेक-इनसाठी हा QR रिसेप्शनवर दाखवा" }
 };
+
+/** The member's check-in QR token; lists do not carry it, so it is fetched once when missing. */
+export async function ensureQrToken(member) {
+    if (!member?.id) return "";
+    if (member.qrToken) return member.qrToken;
+    try {
+        const response = await apiClient.get(`/api/members/${member.id}`);
+        const token = response?.data?.qr_token || "";
+        if (token) {
+            member.qrToken = token;
+            const stored = state.members.find((item) => item.id === member.id);
+            if (stored) stored.qrToken = token;
+        }
+        return token;
+    } catch {
+        return "";
+    }
+}
 
 
 /** The rows under the name: plan, dates, then fee, paid and balance when known. */
@@ -233,29 +254,39 @@ function cardRows(labels, values, payment) {
     return rows.filter((row) => row.value);
 }
 
-/** Draws the 1080x1080 welcome card and resolves to a PNG file. The gym phone is not shown. */
-export async function createWelcomeCard(member, { membership = member?.currentMembership, gym = state.gym, payments, language = welcomeMessageLanguage() } = {}) {
+/**
+ * Draws the 1080x1350 welcome card (or, with variant "member", the member card) with the
+ * member's check-in QR, and resolves to a PNG file. The gym phone is not shown.
+ */
+export async function createWelcomeCard(member, { membership = member?.currentMembership, gym = state.gym, payments, language = welcomeMessageLanguage(), variant = "welcome" } = {}) {
     const labels = CARD_LABELS[welcomeLanguage(language)];
+    const token = await ensureQrToken(member);
+    const qrText = token ? memberQrText(token) : "";
     const values = welcomeValues(member, { membership, gym, payments });
-    const payment = welcomePaymentFor(member, { membership, payments });
+    // The member card shows the plan and dates only; fees belong on the welcome card.
+    const payment = variant === "member" ? null : welcomePaymentFor(member, { membership, payments });
     const rows = cardRows(labels, values, payment);
     await cardFontsReady([values.gym_name, values.name, values.member_code, ...Object.values(labels), ...rows.map((row) => row.value), "₹0123456789,"].join(" "));
 
     const canvas = document.createElement("canvas");
-    canvas.width = CARD_SIZE;
-    canvas.height = CARD_SIZE;
+    canvas.width = CARD_WIDTH;
+    canvas.height = CARD_HEIGHT;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("This browser cannot draw the welcome card.");
     const fonts = cardFontFamilies(context);
     const pad = 88;
-    const width = CARD_SIZE - pad * 2;
-    const footerTop = 940;
+    const width = CARD_WIDTH - pad * 2;
+    const footerTop = CARD_HEIGHT - 140;
+    // The QR block sits just above the member-ID band.
+    let qrBox = 360;
+    const captionBaseline = footerTop - 34;
+    let qrTop = captionBaseline - 46 - qrBox;
     context.textBaseline = "alphabetic";
 
     context.fillStyle = CARD_COLORS.slate;
-    context.fillRect(0, 0, CARD_SIZE, CARD_SIZE);
+    context.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
     context.fillStyle = CARD_COLORS.marigold;
-    context.fillRect(0, 0, CARD_SIZE, 16);
+    context.fillRect(0, 0, CARD_WIDTH, 16);
 
     // Rows first: their height decides how much room the name gets.
     const rowGap = 14;
@@ -269,8 +300,8 @@ export async function createWelcomeCard(member, { membership = member?.currentMe
         return { ...row, labelWidth, value, height };
     });
     const panelHeight = laidOut.length ? panelPad * 2 + laidOut.reduce((sum, row) => sum + row.height, 0) + rowGap * (laidOut.length - 1) : 0;
-    const panelBottom = footerTop - 28;
-    const panelTop = panelBottom - panelHeight;
+    let panelBottom = qrText ? qrTop - 32 : footerTop - 28;
+    let panelTop = panelBottom - panelHeight;
 
     let y = 64;
     const gymName = fitTextBlock(context, values.gym_name || "GymPulse", { weight: 700, family: fonts.heading, max: 52, min: 30, width, maxLines: 2, maxHeight: 130 });
@@ -283,11 +314,21 @@ export async function createWelcomeCard(member, { membership = member?.currentMe
     context.fillStyle = CARD_COLORS.soft;
     setFont(context, 500, 40, fonts.body);
     y += 40;
-    context.fillText(labels.welcome, pad, y);
+    context.fillText(variant === "member" ? labels.memberCard : labels.welcome, pad, y);
     y += 14;
 
+    // A two-line gym name, a long member name and six rows can crowd the card: the QR gives up
+    // size first (down to 260 px, still easy to scan) so the name keeps room for two lines.
+    const nameNeeds = 120;
+    if (qrText && panelTop < y + nameNeeds) {
+        qrBox = Math.max(260, qrBox - (y + nameNeeds - panelTop));
+        qrTop = captionBaseline - 46 - qrBox;
+        panelBottom = qrTop - 32;
+        panelTop = panelBottom - panelHeight;
+    }
+
     const nameSpace = Math.max(60, panelTop - 36 - y);
-    const name = fitTextBlock(context, values.name, { weight: 800, family: fonts.heading, max: 104, min: 40, width, maxLines: 2, maxHeight: nameSpace, lineHeight: 1.08 });
+    const name = fitTextBlock(context, values.name, { weight: 800, family: fonts.heading, max: 104, min: 34, width, maxLines: 2, maxHeight: nameSpace, lineHeight: 1.08 });
     context.fillStyle = CARD_COLORS.white;
     setFont(context, 800, name.size, fonts.heading);
     name.lines.forEach((line) => { y += name.lineHeight; context.fillText(line, pad, y); });
@@ -324,22 +365,35 @@ export async function createWelcomeCard(member, { membership = member?.currentMe
         context.textAlign = "left";
     }
 
+    if (qrText) {
+        context.fillStyle = CARD_COLORS.white;
+        roundedRect(context, (CARD_WIDTH - qrBox) / 2, qrTop, qrBox, qrBox, 24);
+        context.fill();
+        drawQr(context, qrText, (CARD_WIDTH - qrBox) / 2 + 12, qrTop + 12, qrBox - 24);
+        const caption = fitTextBlock(context, labels.scan, { weight: 500, family: fonts.body, max: 32, min: 22, width });
+        context.fillStyle = CARD_COLORS.soft;
+        setFont(context, 500, caption.size, fonts.body);
+        context.textAlign = "center";
+        context.fillText(caption.lines[0], CARD_WIDTH / 2, captionBaseline);
+        context.textAlign = "left";
+    }
+
     context.fillStyle = CARD_COLORS.marigold;
-    context.fillRect(0, footerTop, CARD_SIZE, CARD_SIZE - footerTop);
+    context.fillRect(0, footerTop, CARD_WIDTH, CARD_HEIGHT - footerTop);
     context.fillStyle = CARD_COLORS.slate;
     setFont(context, 500, 32, fonts.body);
-    context.fillText(labels.code, pad, 1024);
+    context.fillText(labels.code, pad, footerTop + 84);
     if (values.member_code) {
         const codeWidth = width - context.measureText(labels.code).width - 32;
         const code = fitTextBlock(context, values.member_code, { weight: 800, family: fonts.heading, max: 56, min: 28, width: codeWidth });
         setFont(context, 800, code.size, fonts.heading);
         context.textAlign = "right";
-        context.fillText(code.lines[0], pad + width, 1030);
+        context.fillText(code.lines[0], pad + width, footerTop + 90);
         context.textAlign = "left";
     }
 
     const blob = await new Promise((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error("The welcome card image could not be created.")), "image/png"));
-    const fileName = `welcome-${String(values.member_code || "member").replace(/[^A-Za-z0-9-]/g, "")}.png`;
+    const fileName = `${variant === "member" ? "member-card" : "welcome"}-${String(values.member_code || "member").replace(/[^A-Za-z0-9-]/g, "")}.png`;
     return new File([blob], fileName, { type: "image/png" });
 }
 

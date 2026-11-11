@@ -20,6 +20,7 @@ import {
 import { assignMemberPlan, getMemberMemberships } from "../controllers/membershipsController.js";
 import { validateAssignmentPayload } from "../middleware/validateMembership.js";
 import { validateMessageListQuery, validateMessagePayload } from "../middleware/validateWhatsAppMessage.js";
+import { listMemberAttendance, reissueQrToken } from "../services/attendanceService.js";
 
 const router = express.Router();
 
@@ -35,6 +36,17 @@ router.put("/:id/consent/whatsapp", validateMemberId, validateConsentPayload, se
 router.get("/:id/consent-events", validateMemberId, getConsentEvents);
 router.get("/:id/whatsapp-messages", validateMemberId, validateMessageListQuery, getWhatsAppMessages);
 router.post("/:id/whatsapp-messages", validateMemberId, validateMessagePayload, recordWhatsAppMessage);
+router.get("/:id/attendance", validateMemberId, (request, response, next) => {
+    listMemberAttendance(request.params.id, request.gymId)
+        .then((rows) => response.json({ status: "success", data: rows }))
+        .catch(next);
+});
+// A new QR token for a lost or shared card; the old QR stops working at once.
+router.post("/:id/qr-token/reissue", validateMemberId, (request, response, next) => {
+    reissueQrToken(request.params.id, request.gymId)
+        .then((member) => response.json({ status: "success", data: member }))
+        .catch(next);
+});
 router.use(membersErrorHandler);
 
 export default router;
