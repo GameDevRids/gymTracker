@@ -3,6 +3,7 @@ import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { escapeHTML, formatINR } from "../utils.js";
+import { renderSkeletonList } from "../components/skeleton.js";
 
 const pageSize = 12;
 let plans = [];
@@ -18,9 +19,9 @@ let saving = false;
 const heading = `<div class="page-heading"><div><h1>Membership plans</h1><p>Manage the membership packages offered by your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="refresh-plans">↻ Refresh</button><button class="button button-primary" data-action="add-plan">＋ Create plan</button></div></div>`;
 
 export function renderPlansPage() {
-    const toolbar = `<div class="toolbar"><input class="search-field" id="plan-search" type="search" placeholder="Search plan names…" aria-label="Search plans" value="${escapeHTML(search)}"><select id="plan-status-filter" class="field-control" aria-label="Filter plans by status"><option value="all" ${status === "all" ? "selected" : ""}>All plans</option><option value="active" ${status === "active" ? "selected" : ""}>Active</option><option value="inactive" ${status === "inactive" ? "selected" : ""}>Inactive</option></select><span class="toolbar-spacer"></span><span class="helper-text">${pagination.total} plan${pagination.total === 1 ? "" : "s"}</span></div>`;
+    const toolbar = `<div class="toolbar"><input class="search-field" id="plan-search" type="search" placeholder="Search plan names…" aria-label="Search plans" value="${escapeHTML(search)}"><select id="plan-status-filter" class="field-control" aria-label="Filter plans by status"><option value="all" ${status === "all" ? "selected" : ""}>All plans</option><option value="active" ${status === "active" ? "selected" : ""}>Active</option><option value="inactive" ${status === "inactive" ? "selected" : ""}>Inactive</option></select><span class="toolbar-spacer"></span>${loading ? "" : `<span class="helper-text">${pagination.total} plan${pagination.total === 1 ? "" : "s"}</span>`}</div>`;
     if (loading) {
-        return `${heading}${toolbar}<section class="card"><div class="empty-state" role="status">Loading membership plans…</div></section>`;
+        return `${heading}${toolbar}<section class="card skeleton-section">${renderSkeletonList({ count: 3, label: "Loading membership plans…", variant: "card" })}</section>`;
     }
     if (errorMessage) {
         return `${heading}${toolbar}<section class="card"><div class="empty-state"><p>${escapeHTML(errorMessage)}</p><button class="button button-secondary" data-action="refresh-plans">Try again</button></div></section>`;

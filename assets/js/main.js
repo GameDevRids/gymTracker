@@ -30,7 +30,7 @@ import { fetchAllMemberPhones, importMembers, validateImportRows } from "./modul
 import { createMemberPlanAssignment, fetchMemberMembershipHistory } from "./api/membershipsApi.js";
 import { createPayment, fetchMemberPayments } from "./api/paymentsApi.js";
 import { apiClient, clearAuthSession, restoreAuthSession, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
-import { renderExpiring } from "./modules/expiring.js";
+import { markReminderSent, renderExpiring } from "./modules/expiring.js";
 import { renderOperationsPage, drawAnalyticsCharts } from "./modules/operations.js";
 import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
@@ -59,6 +59,8 @@ let memberSaving = false;
 let expiringDays = 7;
 let expiringMemberships = [];
 let expiringStatus = "loading";
+// "loading" until the first members request after sign-in finishes, so the list shows skeletons, not "No members yet".
+let membersStatus = "loading";
 let expiringRequestVersion = 0;
 let activeSession;
 
@@ -173,12 +175,12 @@ function render() {
     const now = new Date();
     document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(now);
     if (currentView === "expiring") {
-        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiringDays, expiryReminderTemplate());
+        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiringDays, expiryReminderTemplate(), new Set(Object.keys(state.expiryReminders || {})));
     } else if (currentView === "overview") {
         page.innerHTML = renderDashboard();
         drawDashboardCharts();
     } else if (currentView === "members") {
-        page.innerHTML = renderMembers({ ...memberFilters, pagination: memberListPagination });
+        page.innerHTML = renderMembers({ ...memberFilters, pagination: memberListPagination, loading: membersStatus === "loading" });
     } else if (currentView === "plans") {
         page.innerHTML = renderPlansPage();
     } else if (currentView === "whatsapp") {
@@ -206,10 +208,17 @@ async function refreshMembersFromApi({ silent = false, page: requestedPage = mem
         });
         if (requestVersion !== memberRequestVersion) return;
         state.members = members;
+        membersStatus = "ready";
         await Promise.all(members.map((member) => loadMemberPaymentsFromApi(member.id, { silent: true })));
         if (!silent) render();
     } catch (error) {
-        if (requestVersion === memberRequestVersion && !silent) toast(error.message || "Unable to load members from the backend.", "error");
+        if (requestVersion === memberRequestVersion) {
+            if (membersStatus === "loading") {
+                membersStatus = "ready";
+                if (currentView === "members") render();
+            }
+            if (!silent) toast(error.message || "Unable to load members from the backend.", "error");
+        }
     }
 }
 
@@ -267,6 +276,18 @@ function closeMobileMenu() {
     document.querySelector("#sidebar").classList.remove("open");
     document.querySelector("#mobile-scrim").classList.remove("visible");
     document.querySelector("#mobile-menu").setAttribute("aria-expanded", "false");
+}
+
+// Reminders are remembered in this browser only, keyed by membership and end date.
+function recordExpiryReminder(key) {
+    const cutoff = localISODate(new Date(Date.now() - 90 * 86400000));
+    const kept = Object.entries(state.expiryReminders || {}).filter(([savedKey]) => savedKey.split(":").pop() >= cutoff);
+    state.expiryReminders = { ...Object.fromEntries(kept), [key]: new Date().toISOString() };
+    try {
+        persist();
+    } catch (error) {
+        toast(error.message || "The reminder could not be saved in this browser.", "error");
+    }
 }
 
 function safePersist(message = "Changes saved.") {
@@ -1223,6 +1244,13 @@ async function handleSubmit(event) {
 }
 
 document.addEventListener("click", (event) => {
+    // The WhatsApp link still opens normally; this only records and animates the reminder.
+    const reminderLink = event.target.closest("a[data-remind-key]");
+    if (reminderLink) {
+        const key = markReminderSent(reminderLink);
+        if (key) recordExpiryReminder(key);
+        return;
+    }
     const viewLink = event.target.closest("[data-view]");
     if (viewLink) { navigate(viewLink.dataset.view); return; }
     const action = event.target.closest("[data-action]");

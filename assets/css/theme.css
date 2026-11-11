@@ -260,7 +260,20 @@ tbody tr:hover { background: #F7F9FA; }
 .expiring-actions .button { min-height: 40px; }
 
 /* Hooks for the UX changes in the Claude Code prompt (harmless until used) */
-.expiring-card.is-reminded::before { background: var(--leaf); }
+/* Reminded: the card fades and a green stripe fades in over the marigold one (opacity only). */
+.expiring-card { transition: opacity .2s ease; }
+.expiring-card::after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 6px;
+    background: var(--leaf);
+    content: "";
+    opacity: 0;
+    transition: opacity .2s ease;
+}
+.expiring-card.is-reminded::after { opacity: 1; }
 .expiring-card.is-reminded { opacity: .72; }
 .board-summary {
     display: flex;
@@ -276,7 +289,8 @@ tbody tr:hover { background: #F7F9FA; }
 .board-summary strong { color: #fff; font: 700 26px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
 .board-summary .money-at-risk { color: var(--marigold); }
 .board-progress { flex-basis: 100%; height: 6px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.14); }
-.board-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--marigold); transition: width .3s ease; }
+/* The bar is full width and scaled from the left; --progress is a 0-1 fraction set by the page. */
+.board-progress > span { display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--marigold); transform: scaleX(var(--progress, 0)); transform-origin: left center; transition: transform .25s ease; }
 
 /* ---------- Modals and toasts ---------- */
 .modal-root { background: rgba(30, 45, 58, .55); }
