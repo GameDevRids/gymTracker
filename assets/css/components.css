@@ -97,3 +97,10 @@
 /* Read-only values inside forms, such as calculated expiry and billed fees. */
 .field .field-label { color: var(--ink, #35443a); font-size: 14px; font-weight: 600; }
 .field .readonly-value { min-height: var(--control-height); margin: 0; padding: 9px 0; color: var(--ink, #293a30); font-size: 15px; font-weight: 600; }
+
+/* WhatsApp consent on the member profile and expiring cards. */
+.consent-current { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.consent-current small { color: var(--ink-3, #68766d); font-size: 12px; }
+.activity-dot.consent-granted { background: var(--leaf, #2f7d4f); }
+.activity-dot.consent-withdrawn { background: var(--brick, #b42318); }
+.reminder-blocked { max-width: 140px; text-align: right; }

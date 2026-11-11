@@ -12,8 +12,14 @@ function remindablePhone(member) {
     return /^[6-9]\d{9}$/.test(phoneDigits) ? phoneDigits : "";
 }
 
+/** Reminders go only to members who consented and have a valid mobile number. */
+export function reminderBlocker(member) {
+    if (member?.whatsapp_opt_in !== true) return "no-consent";
+    return remindablePhone(member || {}) ? "" : "invalid-phone";
+}
+
 function renderSummary(memberships, remindedKeys) {
-    const remindable = memberships.filter((membership) => remindablePhone(membership.member));
+    const remindable = memberships.filter((membership) => !reminderBlocker(membership.member));
     if (!remindable.length) return "";
     const reminded = remindable.filter((membership) => remindedKeys.has(reminderKey(membership))).length;
     return `<div class="board-summary" data-reminder-summary data-total="${remindable.length}">
@@ -43,9 +49,10 @@ export function renderExpiring(memberships = [], status = "loading", days = 7, r
                             plan: membership.plan_name,
                             expiry_date: formatDate(membership.end_date)
                         })[placeholder]);
-                    const whatsappAction = phoneDigits
+                    const blocker = reminderBlocker(member);
+                    const whatsappAction = !blocker
                         ? `<a class="button button-secondary button-small" href="https://wa.me/91${phoneDigits}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer" data-remind-key="${escapeHTML(key)}">${escapeHTML(isReminded ? t("reminded") : t("remindWhatsApp"))}</a>`
-                        : `<span class="helper-text">Invalid phone</span>`;
+                        : `<span class="helper-text reminder-blocked">${blocker === "no-consent" ? escapeHTML(t("noWhatsAppConsent")) : "Invalid phone"}</span>`;
                     return `<article class="card expiring-card${isReminded ? " is-reminded" : ""}">
                         <div class="expiring-member"><span class="member-avatar">${escapeHTML(member.full_name.slice(0, 1))}</span><div><strong>${escapeHTML(member.full_name)}</strong><small>${escapeHTML(formatPhone(member.phone))}</small></div></div>
                         <div class="expiring-detail"><small>${t("plan")}</small><strong>${escapeHTML(membership.plan_name)}</strong></div>

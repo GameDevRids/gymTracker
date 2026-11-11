@@ -43,6 +43,21 @@ export function updateMember(request, response, next) {
         .catch(next);
 }
 
+export function setWhatsAppConsent(request, response, next) {
+    membersService.setWhatsAppConsent(request.params.id, {
+        ...request.validatedConsent,
+        recordedBy: request.authUser?.id || null
+    }, request.gymId)
+        .then((member) => response.json({ status: "success", data: member }))
+        .catch(next);
+}
+
+export function getConsentEvents(request, response, next) {
+    membersService.listConsentEvents(request.params.id, request.gymId)
+        .then((events) => response.json({ status: "success", data: events }))
+        .catch(next);
+}
+
 export function deleteMember(request, response, next) {
     membersService.deleteMember(request.params.id, request.gymId)
         .then(() => response.json({ status: "success", message: "Member deleted successfully." }))

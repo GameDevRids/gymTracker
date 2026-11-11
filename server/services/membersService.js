@@ -15,6 +15,11 @@ const memberColumns = [
     "membership_end_date",
     "status",
     "notes",
+    "emergency_contact",
+    "follow_up_status",
+    "whatsapp_opt_in",
+    "whatsapp_opt_in_at",
+    "whatsapp_opt_out_at",
     "created_at",
     "updated_at",
     "archived_at"
@@ -41,7 +46,7 @@ function throwDatabaseError(error, operation) {
         throw new MembersServiceError(409, "Member has related records and cannot be deleted.");
     }
     if (error?.code === "PGRST204" || error?.code === "42703") {
-        throw new MembersServiceError(503, "The members table is missing required columns. Run the latest members migration in Supabase SQL Editor.");
+        throw new MembersServiceError(503, "The members table is missing required columns. Run migration 009_add_member_contact_and_whatsapp_consent.sql in Supabase SQL Editor.");
     }
     if (error?.code === "PGRST205" || error?.code === "42P01") {
         throw new MembersServiceError(503, "Membership history is unavailable. Run migration 004_create_member_memberships.sql in Supabase SQL Editor.");
@@ -231,6 +236,63 @@ export async function updateMember(id, member, gymId, client = supabaseClient) {
     if (error) throwDatabaseError(error, "update");
     if (!data) throw new MembersServiceError(404, "Member not found.");
     return data;
+}
+
+const CONSENT_SOURCES = new Set(["staff_form", "csv_import", "member_reply_stop"]);
+const consentEventColumns = "id,gym_id,member_id,channel,action,source,recorded_by,created_at";
+
+function consentDatabaseError(error) {
+    if (error?.code === "P0002") throw new MembersServiceError(404, "Member not found.");
+    if (["PGRST202", "PGRST205", "42883", "42P01"].includes(error?.code)) {
+        throw new MembersServiceError(503, "WhatsApp consent is unavailable. Run migration 009_add_member_contact_and_whatsapp_consent.sql in Supabase SQL Editor.");
+    }
+    if (error?.code === "22023") throw new MembersServiceError(400, "Unknown consent source.");
+    throw new MembersServiceError(500, "The database could not record WhatsApp consent.");
+}
+
+/**
+ * Grants or withdraws WhatsApp consent. The database function updates the member and appends
+ * one history event in the same transaction; repeating the current choice changes nothing.
+ */
+export async function setWhatsAppConsent(memberId, { optIn, source, recordedBy = null }, gymId, client = supabaseClient) {
+    requireSupabaseClient(client);
+    if (!gymId) throw new MembersServiceError(403, "Gym is required.");
+    if (typeof optIn !== "boolean") throw new MembersServiceError(400, "Choose whether the member consents.");
+    if (!CONSENT_SOURCES.has(source)) throw new MembersServiceError(400, "Unknown consent source.");
+    const { data, error } = await client.rpc("gympulse_set_member_whatsapp_consent", {
+        p_gym_id: gymId,
+        p_member_id: memberId,
+        p_opt_in: optIn,
+        p_source: source,
+        p_recorded_by: recordedBy
+    });
+    if (error) consentDatabaseError(error);
+    const member = Array.isArray(data) ? data[0] : data;
+    if (!member?.id) throw new MembersServiceError(404, "Member not found.");
+    return (await addCurrentMemberships([member], gymId, client))[0];
+}
+
+/** Consent history for one member of this gym, newest first. */
+export async function listConsentEvents(memberId, gymId, client = supabaseClient) {
+    requireSupabaseClient(client);
+    if (!gymId) throw new MembersServiceError(403, "Gym is required.");
+    const { data: member, error: memberError } = await client
+        .from("members")
+        .select("id")
+        .eq("id", memberId)
+        .eq("gym_id", gymId)
+        .maybeSingle();
+    if (memberError) throwDatabaseError(memberError, "get");
+    if (!member) throw new MembersServiceError(404, "Member not found.");
+    const { data, error } = await client
+        .from("member_consent_events")
+        .select(consentEventColumns)
+        .eq("gym_id", gymId)
+        .eq("member_id", memberId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
+    if (error) consentDatabaseError(error);
+    return data || [];
 }
 
 export async function deleteMember(id, gymId, client = supabaseClient) {

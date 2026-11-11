@@ -30,6 +30,10 @@ export function importPhoneKey(phone) {
     return digits.length === 10 ? digits : "";
 }
 
+// Optional consent column: only an explicit "yes" grants consent. Blank means no consent.
+const CONSENT_YES = /^(yes|y|true|1)$/i;
+const CONSENT_NO = /^(no|n|false|0)$/i;
+
 export function readImportRow({ rowNumber, data }) {
     return {
         rowNumber,
@@ -41,7 +45,8 @@ export function readImportRow({ rowNumber, data }) {
         gender: pick(data, ["gender"]),
         planName: pick(data, ["plan", "membershipplan", "planname"]),
         startDate: pick(data, ["startdate", "joinedat", "joiningdate"]),
-        expiryDate: pick(data, ["expirydate"])
+        expiryDate: pick(data, ["expirydate"]),
+        whatsappConsent: pick(data, ["whatsappoptin", "whatsappconsent", "whatsapp"])
     };
 }
 
@@ -63,6 +68,9 @@ export function validateImportRows(parsedRows, { existingPhones = [], activePlan
         if (!isValidIndianPhone(row.phone)) issues.push("valid Indian mobile number is required");
         else if (seen.has(phoneKey)) issues.push("duplicate phone number");
         if (phoneKey) seen.add(phoneKey);
+        if (row.whatsappConsent && !CONSENT_YES.test(row.whatsappConsent) && !CONSENT_NO.test(row.whatsappConsent)) {
+            issues.push("WhatsApp consent must be yes or no");
+        }
         if (row.planName && !planNames.has(row.planName.toLowerCase())) issues.push("unknown membership plan");
         if (row.startDate && !isISODate(row.startDate)) issues.push("start date must use YYYY-MM-DD");
         if (row.expiryDate && !isISODate(row.expiryDate)) issues.push("expiry date must use YYYY-MM-DD");
@@ -78,7 +86,7 @@ export function validateImportRows(parsedRows, { existingPhones = [], activePlan
  * Creates each valid row through the API, one at a time, collecting per-row errors.
  * Rows without a plan are created unassigned rather than given an arbitrary plan.
  */
-export async function importMembers(rows, { plans = [], createMember, assignPlan, onProgress = () => {}, today }) {
+export async function importMembers(rows, { plans = [], createMember, assignPlan, recordConsent, onProgress = () => {}, today }) {
     const errors = [];
     let imported = 0;
     let withoutPlan = 0;
@@ -108,6 +116,17 @@ export async function importMembers(rows, { plans = [], createMember, assignPlan
             continue;
         }
         imported += 1;
+        if (CONSENT_YES.test(row.whatsappConsent || "")) {
+            try {
+                if (!recordConsent) throw new Error("consent recording is unavailable");
+                await recordConsent(member.id, true, "csv_import");
+            } catch (error) {
+                errors.push({
+                    rowNumber: row.rowNumber,
+                    message: `Member was created, but WhatsApp consent was not recorded: ${String(error?.message || "unknown error").replace(/\.+$/, "")}. Record it from the member's profile.`
+                });
+            }
+        }
         if (!plan) {
             withoutPlan += 1;
             continue;

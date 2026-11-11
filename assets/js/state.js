@@ -48,10 +48,13 @@ export function memberFromApiRow(member) {
         paidTotal: Number(member.billing?.paid ?? 0),
         charges: [],
         amountPaid: 0,
-        emergencyContact: "",
-        whatsappOptIn: false,
+        emergencyContact: member.emergency_contact || "",
+        // Consent comes only from the database; the browser never assumes it.
+        whatsappOptIn: member.whatsapp_opt_in === true,
+        whatsappOptInAt: member.whatsapp_opt_in_at || "",
+        whatsappOptOutAt: member.whatsapp_opt_out_at || "",
         notes: member.notes || "",
-        followUpStatus: "pending",
+        followUpStatus: member.follow_up_status || "pending",
         renewals: [],
         createdAt: member.created_at || "",
         updatedAt: member.updated_at || ""
@@ -67,6 +70,8 @@ export function memberToApiPayload(member) {
         date_of_birth: member.dob || null,
         status: member.status === "suspended" ? "suspended" : "active",
         notes: member.notes || null,
+        emergency_contact: member.emergencyContact || null,
+        follow_up_status: member.followUpStatus || "pending"
     };
     if (member.memberCode) payload.member_code = member.memberCode;
     return payload;
@@ -113,6 +118,42 @@ export async function updateMemberOnApi(id, member) {
         else state.members.unshift(mapped);
     }
     return mapped;
+}
+
+function storeMember(mapped) {
+    if (!mapped) return mapped;
+    const index = state.members.findIndex((entry) => entry.id === mapped.id);
+    if (index >= 0) state.members[index] = { ...state.members[index], ...mapped };
+    else state.members.unshift(mapped);
+    return mapped;
+}
+
+/** Saves only the given database fields, e.g. { follow_up_status: "contacted" }. */
+export async function updateMemberFieldsOnApi(id, fields) {
+    const response = await apiClient.put(`/api/members/${id}`, fields);
+    return storeMember(memberFromApiRow(response?.data ?? null));
+}
+
+/** Grants or withdraws WhatsApp consent; the server records it in the member's consent history. */
+export async function setWhatsAppConsentOnApi(id, optIn, source = "staff_form") {
+    const response = await apiClient.put(`/api/members/${id}/consent/whatsapp`, { opt_in: optIn, source });
+    delete consentHistory[id];
+    return storeMember(memberFromApiRow(response?.data ?? null));
+}
+
+// Consent history per member id: { status: "loading" | "ready" | "error", events, message }.
+export const consentHistory = {};
+
+export async function loadConsentHistory(id, onChange = () => {}) {
+    consentHistory[id] = { status: "loading", events: consentHistory[id]?.events || [] };
+    onChange();
+    try {
+        const response = await apiClient.get(`/api/members/${id}/consent-events`);
+        consentHistory[id] = { status: "ready", events: Array.isArray(response?.data) ? response.data : [] };
+    } catch (error) {
+        consentHistory[id] = { status: "error", events: [], message: error.message || "Consent history could not be loaded." };
+    }
+    onChange();
 }
 
 export async function deleteMemberOnApi(id) {

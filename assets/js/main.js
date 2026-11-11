@@ -11,6 +11,9 @@ import {
     loadMembersFromApi,
     createMemberOnApi,
     updateMemberOnApi,
+    updateMemberFieldsOnApi,
+    setWhatsAppConsentOnApi,
+    loadConsentHistory,
     deleteMemberOnApi
 } from "./state.js";
 import { renderDashboard, drawDashboardCharts } from "./modules/dashboard.js";
@@ -260,6 +263,7 @@ function navigate(view) {
     if (view === "profile" && profileId) {
         loadMemberMembershipHistory(profileId);
         loadMemberPaymentsFromApi(profileId);
+        loadProfileConsent(profileId);
     }
     if (initializationWarning) toast(initializationWarning, "error");
     page.focus({ preventScroll: true });
@@ -294,6 +298,12 @@ async function loadMemberPaymentsFromApi(memberId, { silent = false } = {}) {
         if (silent) console.error(`GymPulse could not load payments for member ${memberId}.`, error);
         else toast(error.message || "Could not load member payment history.", "error");
     }
+}
+
+function loadProfileConsent(memberId) {
+    loadConsentHistory(memberId, () => {
+        if (currentView === "profile" && profileId === memberId) render();
+    });
 }
 
 function renderPlansIfCurrent() {
@@ -383,7 +393,7 @@ function renderMemberFormBody(member, planStatus = "loading", plans = []) {
             ${!isEdit ? setField("initialPayment", "Amount collected now (₹)", 0, "number", false, 'min="0" step="1"') : ""}
             ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
             <p class="helper-text field full" id="member-assignment-error" role="alert" hidden></p>
-            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member has opted in to WhatsApp messages</label><span class="helper-text">Record consent before sending live WhatsApp messages. Keep proof of consent in your gym records.</span></div>
+            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member has opted in to WhatsApp messages</label><span class="helper-text">${member?.whatsappOptIn && member.whatsappOptInAt ? `Consent recorded on ${escapeHTML(formatDate(member.whatsappOptInAt.slice(0, 10)))}. ` : ""}Only tick this when the member has agreed. Every change is kept in their consent history, and reminders skip members without consent.</span></div>
             <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes">${escapeHTML(member?.notes || "")}</textarea></div>
             <p class="helper-text field full">Phone numbers must be unique. For imports, use columns: name, phone, email, plan, joinedAt, startDate, expiryDate.</p>
         </form>`;
@@ -896,7 +906,6 @@ async function saveMember(form) {
             expiryDate: createdAssignment?.end_date || current?.expiryDate || record.expiryDate,
             totalFees,
             emergencyContact: record.emergencyContact,
-            whatsappOptIn: record.whatsappOptIn,
             charges: record.charges,
             renewals: record.renewals,
             followUpStatus: record.followUpStatus
@@ -905,6 +914,13 @@ async function saveMember(form) {
         if (targetIndex >= 0) state.members[targetIndex] = normalized;
         else state.members.unshift(normalized);
         if (createdAssignment) setMemberCurrentMembership(normalized.id, createdAssignment);
+    }
+
+    // Consent changes go through their own endpoint so the database records them in the history.
+    const consentMember = getMember(saved.id);
+    if (consentMember && record.whatsappOptIn !== (consentMember.whatsappOptIn === true)) {
+        await setWhatsAppConsentOnApi(saved.id, record.whatsappOptIn, "staff_form");
+        if (currentView === "profile" && profileId === saved.id) loadProfileConsent(saved.id);
     }
 
     if (initialPayment > 0) {
@@ -1017,7 +1033,7 @@ function renderImportPreview(validCount, invalidCount) {
         title: "Preview member import",
         subtitle: `${escapeHTML(currentFileName)} · ${validCount} valid · ${invalidCount} invalid or duplicate`,
         wide: true,
-        body: `<div class="note-box" style="margin-bottom:12px">Required columns: <strong>name</strong> and <strong>phone</strong>. Supported aliases include full name, mobile, phone number, joining date and membership plan. Rows with an existing or repeated phone are skipped. Rows without a plan are added without a membership.</div>
+        body: `<div class="note-box" style="margin-bottom:12px">Required columns: <strong>name</strong> and <strong>phone</strong>. An optional <strong>whatsapp_opt_in</strong> column records consent only for rows marked yes. Supported aliases include full name, mobile, phone number, joining date and membership plan. Rows with an existing or repeated phone are skipped. Rows without a plan are added without a membership.</div>
         <p id="import-progress" role="status" aria-live="polite"></p>
         <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(formatPhone(row.phone))}</td><td>${escapeHTML(row.planName || "No plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
         footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-primary" data-action="confirm-import" ${validCount ? "" : "disabled"}>Import ${validCount} members</button>`
@@ -1037,6 +1053,7 @@ async function confirmImport() {
         plans: importPlans,
         createMember: createMemberOnApi,
         assignPlan: createMemberPlanAssignment,
+        recordConsent: setWhatsAppConsentOnApi,
         today: localISODate(),
         onProgress: ({ current, total }) => {
             if (progress?.isConnected) progress.textContent = `Importing member ${current} of ${total}…`;
@@ -1324,6 +1341,10 @@ document.addEventListener("click", (event) => {
             setNavMoreOpen(action.getAttribute("aria-expanded") !== "true");
             return;
         }
+        if (action.dataset.action === "retry-consent-history") {
+            loadProfileConsent(action.dataset.id);
+            return;
+        }
         if (action.dataset.action === "retry-expiring") {
             loadExpiringMemberships();
             return;
@@ -1412,7 +1433,7 @@ document.addEventListener("change", (event) => {
     if (target.id === "payment-method-filter" || target.id === "payment-date-filter") filterPaymentRows();
     if (target.classList.contains("followup-select")) {
         const member = getMember(target.dataset.id);
-        if (member) { member.followUpStatus = target.value; safePersist("Follow-up status updated."); }
+        if (member) saveFollowUpStatus(member, target);
     }
 });
 
@@ -1441,6 +1462,21 @@ document.addEventListener("input", (event) => {
         filterPaymentRows();
     }
 });
+
+async function saveFollowUpStatus(member, select) {
+    const previous = member.followUpStatus || "pending";
+    select.disabled = true;
+    try {
+        if (member.memberCode) await updateMemberFieldsOnApi(member.id, { follow_up_status: select.value });
+        else member.followUpStatus = select.value;
+        safePersist("Follow-up status updated.");
+    } catch (error) {
+        select.value = previous;
+        toast(error.message || "Follow-up status could not be saved.", "error");
+    } finally {
+        if (select.isConnected) select.disabled = false;
+    }
+}
 
 function validateMemberName(form, showError) {
     const input = form?.elements?.name;

@@ -164,7 +164,7 @@ export async function listExpiringMemberships({ days, gymId }, client = supabase
     for (let offset = 0; ; offset += pageSize) {
         const { data, error } = await client
             .from("member_memberships")
-            .select(`${membershipColumns},members!member_memberships_member_id_fkey!inner(id,full_name,phone,archived_at,status)`)
+            .select(`${membershipColumns},members!member_memberships_member_id_fkey!inner(id,full_name,phone,archived_at,status,whatsapp_opt_in)`)
             .eq("gym_id", gymId)
             .eq("members.gym_id", gymId)
             .is("members.archived_at", null)
@@ -196,7 +196,8 @@ export async function listExpiringMemberships({ days, gymId }, client = supabase
                 member: {
                     id: member.id,
                     full_name: member.full_name,
-                    phone: member.phone
+                    phone: member.phone,
+                    whatsapp_opt_in: member.whatsapp_opt_in === true
                 },
                 days_left: daysLeft
             };

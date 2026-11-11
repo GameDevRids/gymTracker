@@ -3,11 +3,14 @@ import {
     createMember,
     deleteMember,
     getMember,
+    getConsentEvents,
     getMembers,
     membersErrorHandler,
+    setWhatsAppConsent,
     updateMember
 } from "../controllers/membersController.js";
 import {
+    validateConsentPayload,
     validateMemberId,
     validateMemberListQuery,
     validateMemberPayload
@@ -24,6 +27,9 @@ router.get("/:id", validateMemberId, getMember);
 router.post("/", validateMemberPayload("create"), createMember);
 router.put("/:id", validateMemberId, validateMemberPayload("update"), updateMember);
 router.delete("/:id", validateMemberId, deleteMember);
+// Consent history is append-only: there is deliberately no update or delete route for it.
+router.put("/:id/consent/whatsapp", validateMemberId, validateConsentPayload, setWhatsAppConsent);
+router.get("/:id/consent-events", validateMemberId, getConsentEvents);
 router.use(membersErrorHandler);
 
 export default router;

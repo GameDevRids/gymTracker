@@ -1,5 +1,5 @@
 import { escapeHTML, formatINR, formatDate, formatPhone, statusPill } from "../utils.js";
-import { state, getMember, getPlan, memberBalance, getMemberPayments } from "../state.js";
+import { state, getMember, getPlan, memberBalance, getMemberPayments, consentHistory } from "../state.js";
 import { emptyRow } from "../components/tables.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { getCurrentMembership } from "./memberMemberships.js";
@@ -50,9 +50,30 @@ export function renderProfile(memberId) {
             <section class="card profile-section"><div class="card-header"><div><h2>Attendance history</h2><p>Recent recorded check-ins</p></div><button class="text-button" data-view="attendance">View attendance</button></div><div class="table-wrap"><table><thead><tr><th>Check-in</th><th>Check-out</th><th>Source</th></tr></thead><tbody>${visits.slice(0, 8).map((visit) => `<tr><td>${new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedInAt))}</td><td>${visit.checkedOutAt ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedOutAt)) : "—"}</td><td>${escapeHTML(visit.source)}</td></tr>`).join("") || emptyRow(3, "No check-ins recorded for this member yet.")}</tbody></table></div></section>
         </div><aside>
             <section class="card"><div class="card-header"><h2>Membership</h2></div><div class="card-body profile-fields membership-fields">${detail("Plan", planName)}${detail("Membership period", `${formatDate(membership?.start_date)} – ${formatDate(membership?.end_date)}`)}${detail("Status", membership?.effective_status || "unassigned")}${detail("Total fees", formatINR(member.totalFees))}${detail("Amount paid", formatINR(member.totalFees - balance))}${detail("Outstanding", formatINR(balance))}</div><div class="card-body profile-card-actions"><button class="button button-primary button-full" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew membership</button></div></section>
+            ${renderConsentSection(member)}
             <section class="card profile-section"><div class="card-header"><h2>Renewal history</h2></div><div class="activity-list">${member.renewals?.length ? member.renewals.slice().reverse().map((renewal) => `<div class="activity-row"><span class="activity-dot"></span><span><p>Renewed to <strong>${escapeHTML(getPlan(renewal.planId)?.name || "Membership")}</strong></p><small>${formatDate(renewal.date)} · until ${formatDate(renewal.expiryDate)}</small></span></div>`).join("") : `<div class="empty-state">No renewals recorded yet.</div>`}</div></section>
             <section class="card profile-section"><div class="card-header"><h2>Member actions</h2></div><div class="card-body profile-action-list"><button class="button button-secondary" data-action="check-in" data-id="${escapeHTML(member.id)}">Record check-in</button><button class="button button-secondary" data-action="delete-member" data-id="${escapeHTML(member.id)}">Archive member</button></div></section>
         </aside></div>`;
+}
+
+const CONSENT_SOURCES = { staff_form: "Member form", csv_import: "CSV import", member_reply_stop: "Member replied STOP" };
+
+function consentDate(value) {
+    return value ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "";
+}
+
+/** Current WhatsApp consent plus its full history, newest first. */
+export function renderConsentSection(member) {
+    const current = member.whatsappOptIn
+        ? `<span class="status status-active">Opted in</span><small>since ${escapeHTML(consentDate(member.whatsappOptInAt))}</small>`
+        : `<span class="status status-inactive">No consent</span>${member.whatsappOptOutAt ? `<small>withdrawn ${escapeHTML(consentDate(member.whatsappOptOutAt))}</small>` : ""}`;
+    const history = consentHistory[member.id];
+    let list;
+    if (!history || history.status === "loading") list = `<div class="empty-state" role="status">Loading consent history…</div>`;
+    else if (history.status === "error") list = `<div class="empty-state" role="alert"><p>${escapeHTML(history.message)}</p><button class="button button-secondary" data-action="retry-consent-history" data-id="${escapeHTML(member.id)}">Try again</button></div>`;
+    else if (!history.events.length) list = `<div class="empty-state">No consent recorded yet. Reminders are not sent without consent.</div>`;
+    else list = history.events.map((event) => `<div class="activity-row consent-event"><span class="activity-dot consent-${escapeHTML(event.action)}"></span><span><p><strong>${event.action === "granted" ? "Granted" : "Withdrawn"}</strong> · ${escapeHTML(CONSENT_SOURCES[event.source] || event.source)}</p><small>${escapeHTML(consentDate(event.created_at))}</small></span></div>`).join("");
+    return `<section class="card profile-section" id="member-consent"><div class="card-header"><div><h2>WhatsApp consent</h2><p class="consent-current">${current}</p></div></div><div class="activity-list">${list}</div></section>`;
 }
 
 function detail(label, value) {

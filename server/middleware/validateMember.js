@@ -43,7 +43,9 @@ const memberValueSchemas = {
     gender: emptyToNull(z.string().trim().max(32)).nullable(),
     date_of_birth: emptyToNull(dateSchema).nullable(),
     status: z.string().trim().pipe(z.enum(["active", "suspended"])),
-    notes: emptyToNull(z.string().max(5000)).nullable()
+    notes: emptyToNull(z.string().max(5000)).nullable(),
+    emergency_contact: emptyToNull(z.string().trim().max(32)).nullable(),
+    follow_up_status: z.enum(["pending", "contacted", "returned", "renewed", "not interested"])
 };
 const editableFields = new Set(Object.keys(memberValueSchemas));
 const memberObjectSchema = z.record(z.string(), z.unknown());
@@ -55,6 +57,8 @@ function memberFieldError(field, result) {
     if (field === "email") return "Enter a valid email address.";
     if (field === "gender") return "Gender must be 32 characters or fewer.";
     if (field === "notes") return "Notes must be 5000 characters or fewer.";
+    if (field === "emergency_contact") return "Emergency contact must be 32 characters or fewer.";
+    if (field === "follow_up_status") return "Follow-up status must be pending, contacted, returned, renewed or not interested.";
     if (field === "date_of_birth") return `${field} must be a valid YYYY-MM-DD date.`;
     return "Status must be active or suspended.";
 }
@@ -99,6 +103,22 @@ export function validateMemberPayload(mode) {
         request.validatedMember = member;
         next();
     };
+}
+
+// Owners record consent from the member form or a CSV import. "member_reply_stop" is reserved
+// for the WhatsApp webhook, so it cannot be sent through this endpoint.
+const consentPayloadSchema = z.object({
+    opt_in: z.boolean(),
+    source: z.enum(["staff_form", "csv_import"]).optional().default("staff_form")
+}).strict();
+
+export function validateConsentPayload(request, response, next) {
+    const parsed = consentPayloadSchema.safeParse(request.body);
+    if (!parsed.success) {
+        return sendValidationError(response, "Send opt_in as true or false, and source as staff_form or csv_import.");
+    }
+    request.validatedConsent = { optIn: parsed.data.opt_in, source: parsed.data.source };
+    next();
 }
 
 export function validateMemberId(request, response, next) {
