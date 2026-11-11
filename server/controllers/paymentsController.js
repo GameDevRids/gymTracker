@@ -14,6 +14,21 @@ export function getMemberPayments(request, response, next) {
         .catch(next);
 }
 
+export function getPayments(request, response, next) {
+    paymentsService.listPayments(request.paymentListQuery, request.gymId)
+        .then(({ payments, total, monthTotal }) => response.json({
+            status: "success",
+            data: { payments, month_total: monthTotal, pagination: { ...request.paymentListQuery, total, totalPages: Math.ceil(total / request.paymentListQuery.limit) } }
+        }))
+        .catch(next);
+}
+
+export function getReceipt(request, response, next) {
+    paymentsService.getReceipt(request.params.id, request.gymId)
+        .then((receipt) => response.json({ status: "success", data: receipt }))
+        .catch(next);
+}
+
 export function paymentsErrorHandler(error, _request, response, _next) {
     const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 600 ? error.status : 500;
     if (status === 500) {

@@ -4,6 +4,8 @@ import { emptyRow, memberTableRow } from "../components/tables.js";
 import { drawChartOrEmpty, hasNonZero } from "../components/charts.js";
 import { getLanguage, t } from "../i18n.js";
 import { renderWelcomeTemplateSettings } from "./welcomeUi.js";
+import { methodLabel, paymentsPage, renderUpiTestQr } from "./upiPayments.js";
+import { renderSkeletonList } from "../components/skeleton.js";
 
 const pageHeading = (title, description, actions = "") =>
     `<div class="page-heading"><div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`;
@@ -39,7 +41,32 @@ function renderAttendance() {
         <p class="helper-text" style="margin-top:11px">Duplicate check-ins on the same day are blocked. Expired memberships can still be recorded with a warning for staff review.</p>`;
 }
 
+// Payments recorded in the gym's database, newest first, each with its receipt.
 function renderPayments() {
+    if (state.sampleDataLoaded) return renderSamplePayments();
+    const pending = state.members.reduce((sum, member) => sum + memberBalance(member), 0);
+    const actions = `<button class="button button-secondary" data-action="export-payments">↓ Export CSV</button><button class="button button-primary" data-action="record-payment">＋ Record payment</button>`;
+    const page = paymentsPage;
+    let content;
+    if (page.status === "idle" || page.status === "loading") {
+        content = `<section class="card skeleton-section">${renderSkeletonList({ count: 4, label: "Loading payments…" })}</section>`;
+    } else if (page.status === "error") {
+        content = `<div class="empty-state" role="alert"><p>${escapeHTML(page.message)}</p><button class="button button-secondary" data-action="retry-payments">Try again</button></div>`;
+    } else {
+        content = `<section class="card table-card"><div class="table-wrap"><table class="payments-table"><thead><tr><th>Receipt</th><th>Member</th><th>Date</th><th>Method</th><th>Amount</th><th>UTR</th><th></th></tr></thead><tbody>${page.payments.length
+            ? page.payments.map((payment) => `<tr data-payment-row data-method="${escapeHTML(methodLabel(payment.method))}" data-date="${escapeHTML(payment.paid_on)}"><td data-label="Receipt">${escapeHTML(payment.receipt_number || "—")}</td><td data-label="Member"><span>${escapeHTML(payment.member?.full_name || "Removed member")}<small class="cell-sub">${escapeHTML(payment.member?.member_code || "")}</small></span></td><td data-label="Date">${formatDate(payment.paid_on)}</td><td data-label="Method">${escapeHTML(methodLabel(payment.method))}</td><td data-label="Amount">${formatINR(payment.amount)}</td><td data-label="UTR">${escapeHTML(payment.upi_reference || "—")}</td><td data-label="Receipt card"><button class="button button-secondary button-small" data-action="receipt" data-id="${escapeHTML(payment.id)}">Receipt</button></td></tr>`).join("")
+            : emptyRow(7, "No payments recorded yet. Use Record payment to add the first one.")}</tbody></table></div></section>`;
+    }
+    const shown = page.total > page.payments.length ? ` <span class="helper-text">Showing the latest ${page.payments.length} of ${page.total}.</span>` : "";
+    return `${pageHeading("Payments", "Record collections and share receipts.", actions)}
+        <div class="summary-row"><span class="summary-chip"><strong>${formatINR(page.monthTotal)}</strong> collected this month</span><span class="summary-chip"><strong>${formatINR(pending)}</strong> outstanding</span><span class="summary-chip"><strong>${page.total}</strong> payments</span></div>
+        <div class="toolbar"><input class="search-field" id="payment-search" type="search" placeholder="Search receipts, members or UTR…" aria-label="Search payments"><select class="field-control" id="payment-method-filter" aria-label="Filter by payment method"><option value="all">All methods</option>${["UPI", "Cash", "Card", "Other"].map((method) => `<option>${method}</option>`).join("")}</select><input class="field-control" id="payment-date-filter" type="date" aria-label="Filter payments by date"></div>
+        ${content}${shown}
+        <div class="note-box" style="margin-top:13px">GymPulse has no payment gateway and can't see your bank. Staff confirm each payment has arrived before marking it paid.</div>`;
+}
+
+// Fictional sample data loaded in this browser for demonstrations.
+function renderSamplePayments() {
     const revenue = state.payments.filter((payment) => payment.status === "paid" && payment.date.slice(0, 7) === monthKey()).reduce((sum, payment) => sum + Number(payment.amount), 0);
     const pending = state.members.reduce((sum, member) => sum + memberBalance(member), 0);
     const actions = `<button class="button button-secondary" data-action="export-payments">↓ Export CSV</button><button class="button button-primary" data-action="record-payment">＋ Record payment</button>`;
@@ -281,6 +308,9 @@ function renderSettings() {
         <div class="settings-layout"><div><section class="card settings-section"><h2>Gym profile</h2><form id="settings-form" class="form-grid">
             ${field("Gym name", "name", gym.name, "text", true)}${field("Phone number", "phone", gym.phone, "tel")}
             ${field("Address", "address", gym.address, "text", false, true)}
+            <div class="field"><label for="setting-upiId">UPI ID</label><input id="setting-upiId" name="upiId" type="text" value="${escapeHTML(gym.upiId || "")}" placeholder="powergym@okicici" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email" maxlength="320" aria-describedby="setting-upiId-help setting-upiId-error"><span class="helper-text" id="setting-upiId-help">Members pay to this ID by scanning the payment QR.</span><span class="helper-text field-error" id="setting-upiId-error" role="alert" hidden></span></div>
+            <div class="field"><label for="setting-upiPayeeName">Name shown to payers</label><input id="setting-upiPayeeName" name="upiPayeeName" type="text" value="${escapeHTML(gym.upiPayeeName || "")}" placeholder="${escapeHTML(gym.name || "Gym name")}" maxlength="100"><span class="helper-text">Shown in the member's UPI app. Leave empty to use the gym name.</span></div>
+            <div class="field full" id="upi-test-qr" aria-live="polite">${gym.upiId ? renderUpiTestQr(gym.upiId, gym.upiPayeeName) : `<p class="helper-text">Enter your UPI ID to see a ₹1 test QR.</p>`}</div>
             <div class="field"><label for="currency">Currency</label><select name="currency" id="currency"><option value="INR" ${gym.currency === "INR" ? "selected" : ""}>INR · Indian Rupee (₹)</option><option value="USD" ${gym.currency === "USD" ? "selected" : ""}>USD · US Dollar ($)</option></select></div>
             <div class="field"><label for="dateFormat">Date format</label><select name="dateFormat" id="dateFormat"><option ${gym.dateFormat === "DD MMM YYYY" ? "selected" : ""}>DD MMM YYYY</option><option ${gym.dateFormat === "DD/MM/YYYY" ? "selected" : ""}>DD/MM/YYYY</option></select></div>
             <div class="field"><label for="setting-language">${t("language")}</label><select id="setting-language" name="language"><option value="en" ${getLanguage() === "en" ? "selected" : ""}>${t("english")}</option><option value="hi" ${getLanguage() === "hi" ? "selected" : ""}>${t("hindi")}</option><option value="mr" ${getLanguage() === "mr" ? "selected" : ""}>${t("marathi")}</option></select></div>

@@ -41,6 +41,9 @@ import { toast } from "./components/toast.js";
 import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleWhatsAppChange } from "./modules/whatsapp.js";
 import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
 import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
+import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, paymentsPage, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel } from "./modules/upiPayments.js";
+import { upiIdProblem, UTR_PATTERN } from "./upi.js";
+import { welcomePayment } from "./welcomeMessage.js";
 import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
 import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
@@ -134,6 +137,8 @@ function startAuthenticatedApp(session) {
     loadExpiringMemberships();
     // Loaded early so the "Member added" dialog can open WhatsApp without waiting.
     loadWelcomeTemplates();
+    // Gym phone, address and UPI details live in the database.
+    loadGymSettings().then(() => { if (currentView === "settings") render(); });
     loadAllMemberships(() => {
         if (currentView === "overview") render();
     });
@@ -163,7 +168,9 @@ function mapPayment(payment) {
         date: payment.paid_on,
         method: payment.method.charAt(0).toUpperCase() + payment.method.slice(1),
         status: "paid",
-        notes: payment.note || ""
+        notes: payment.note || "",
+        receiptNumber: payment.receipt_number || "",
+        upiReference: payment.upi_reference || ""
     };
 }
 
@@ -264,7 +271,12 @@ function navigate(view) {
     render();
     if (view === "expiring") loadExpiringMemberships();
     if (view === "plans") loadPlans(renderPlansIfCurrent);
-    if (view === "settings") loadWelcomeTemplates({ force: true }).then(() => { if (currentView === "settings") render(); });
+    if (view === "settings") {
+        const renderSettings = () => { if (currentView === "settings") render(); };
+        loadWelcomeTemplates({ force: true }).then(renderSettings);
+        loadGymSettings().then(renderSettings);
+    }
+    if (view === "payments" && !state.sampleDataLoaded) loadPaymentsPage(() => { if (currentView === "payments") render(); });
     if (view === "profile" && profileId) {
         loadMemberMembershipHistory(profileId);
         loadMemberPaymentsFromApi(profileId);
@@ -621,19 +633,84 @@ function openPaymentForm(memberId = "", membershipId = "", suggestedAmount = "")
     }
     if (memberId && !member) return toast("Member was not found.", "error");
     const membership = member ? getCurrentMembership(member.id) || member.currentMembership : null;
-    const choices = state.members.map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)} · ${escapeHTML(item.id)}</option>`).join("");
+    const choices = state.members.map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)} · ${escapeHTML(item.memberCode || item.id)}</option>`).join("");
+    // Expiring soon passes the plan price: that payment is for the renewal. Otherwise the
+    // amount is filled with the balance due, read from the database.
+    const renewal = suggestedAmount !== "" && suggestedAmount !== undefined && suggestedAmount !== null;
     openModal({
         title: t("recordPayment"),
         subtitle: t("paymentSubtitle"),
-        body: `<form id="payment-form" class="form-grid" data-membership-id="${escapeHTML(membershipId || membership?.id || "")}">
+        body: `<form id="payment-form" class="form-grid" data-membership-id="${escapeHTML(membershipId || membership?.id || "")}" data-amount-source="${renewal ? "renewal" : "balance"}" novalidate>
             <div class="field full"><label for="form-memberId">${t("member")} *</label><select id="form-memberId" name="memberId" required><option value="">${t("selectMember")}</option>${choices}</select></div>
-            ${setField("amount", t("amountCollected"), suggestedAmount || membership?.price || "", "number", true, 'min="1" step="0.01"')}
-            <div class="field"><label for="form-method">${t("paymentMethod")}</label><select id="form-method" name="method">${[["upi", "UPI"], ["cash", "Cash"], ["card", "Card"], ["other", "Other"]].map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></div>
+            <div class="field"><label for="form-amount">${t("amountCollected")} *</label><input id="form-amount" name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required value="${escapeHTML(renewal ? String(Number(suggestedAmount)) : "")}" aria-describedby="payment-amount-hint"><span class="helper-text" id="payment-amount-hint" aria-live="polite">${renewal ? "Plan price for the renewal." : ""}</span></div>
+            <div class="field"><label for="form-method">${t("paymentMethod")}</label><select id="form-method" name="method">${[["upi", "UPI"], ["cash", "Cash"], ["card", "Card"], ["other", "Other"]].map(([value, label]) => `<option value="${value}" ${value === "upi" ? "selected" : ""}>${label}</option>`).join("")}</select></div>
+            <div class="field full" id="payment-qr-panel" aria-live="polite"></div>
+            <div class="field" id="payment-utr-field"><label for="form-upiReference">UPI reference (UTR)</label><input id="form-upiReference" name="upiReference" type="text" inputmode="numeric" autocomplete="off" maxlength="12" pattern="[0-9]{12}" placeholder="12 digits, optional"><span class="helper-text">From the payer's UPI app. Stops the same payment being recorded twice.</span></div>
             ${setField("date", t("paidOn"), localISODate(), "date", true)}
-            <div class="field full"><label for="form-notes">${t("note")}</label><textarea id="form-notes" name="notes" placeholder="Optional reference or payment note"></textarea></div>
+            <div class="field full"><label for="form-notes">${t("note")}</label><textarea id="form-notes" name="notes" placeholder="Optional payment note"></textarea></div>
+            <p class="note-box field full payment-verify-note" role="note"><strong>Check before you mark it paid.</strong> GymPulse can't see your bank or UPI app. Make sure the money has arrived before you tap Mark as paid.</p>
         </form>`,
-        footer: `<button class="button button-secondary" data-action="close-modal" type="button">${t("cancel")}</button><button class="button button-primary" type="submit" form="payment-form">${t("save")}</button>`
+        footer: `<button class="button button-secondary" data-action="close-modal" type="button">${t("cancel")}</button><button class="button button-primary" type="submit" form="payment-form">Mark as paid</button>`
     });
+    const form = document.querySelector("#payment-form");
+    refreshPaymentQr(form);
+    if (member && !renewal) prefillPaymentBalance(form, member.id);
+}
+
+function paymentFormMember(form) {
+    return getMember(String(form.elements.memberId?.value || ""));
+}
+
+function refreshPaymentQr(form) {
+    const member = paymentFormMember(form);
+    const membership = member ? getCurrentMembership(member.id) || member.currentMembership : null;
+    updatePaymentQrPanel(form, { memberCode: member?.memberCode || "", planName: membership?.plan_name || "" });
+}
+
+// Fills the amount with the balance due on the membership, from the database.
+async function prefillPaymentBalance(form, memberId) {
+    const hint = form.querySelector("#payment-amount-hint");
+    const request = String(Math.random());
+    form.dataset.prefillRequest = request;
+    if (hint) hint.textContent = "Checking the balance due…";
+    const facts = await loadWelcomeFacts(memberId);
+    if (!form.isConnected || form.dataset.prefillRequest !== request) return;
+    if (facts.status !== "ready") {
+        if (hint) hint.textContent = "The balance due could not be loaded. Enter the amount.";
+        return;
+    }
+    const membership = facts.memberships.find((row) => row.id === form.dataset.membershipId)
+        || facts.memberships.find((row) => row.id === getCurrentMembership(memberId)?.id);
+    const payment = welcomePayment(membership, facts.payments);
+    if (!membership || !payment) {
+        if (hint) hint.textContent = "No membership plan is assigned, so there is no balance to fill in.";
+        return;
+    }
+    form.dataset.membershipId = membership.id;
+    if (payment.balance > 0) {
+        if (form.dataset.amountTouched !== "true") form.elements.amount.value = String(payment.balance);
+        if (hint) hint.textContent = `Balance due on ${membership.plan_name}: ${formatINR(payment.balance)}.`;
+    } else if (hint) {
+        hint.textContent = `${membership.plan_name} is paid in full.`;
+    }
+    refreshPaymentQr(form);
+}
+
+function onPaymentFormEdit(target) {
+    const form = target.form;
+    if (!form || form.id !== "payment-form") return false;
+    if (target.name === "amount") form.dataset.amountTouched = "true";
+    if (target.name === "memberId" && target.matches("select")) {
+        const member = paymentFormMember(form);
+        form.dataset.membershipId = member ? getCurrentMembership(member.id)?.id || member.currentMembership?.id || "" : "";
+        form.dataset.amountTouched = "false";
+        form.dataset.amountSource = "balance";
+        form.elements.amount.value = "";
+        if (member) prefillPaymentBalance(form, member.id);
+    }
+    if (target.name === "upiReference") target.value = target.value.replace(/\D/g, "").slice(0, 12);
+    refreshPaymentQr(form);
+    return true;
 }
 
 function openCheckInForm(memberId = "", source = "manual") {
@@ -763,7 +840,11 @@ function handleAction(action, target) {
         case "import-csv": document.querySelector("#csv-file").click(); break;
         case "confirm-import": confirmImport(); break;
         case "copy-message": copyMessage(target.dataset.message || ""); break;
-        case "receipt": openReceipt(id); break;
+        // Database payments open the receipt from the server; sample data keeps the local preview.
+        case "receipt":
+            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) openReceiptDialog(id);
+            else openReceipt(id);
+            break;
         case "print-receipt": printReceipt(id); break;
         case "reset-demo": resetDemoData(); break;
         case "load-sample-data": if (state.gym.isDemo) loadSampleData(); break;
@@ -1000,21 +1081,35 @@ async function savePayment(form) {
     if (!member) throw new Error("Select a valid member.");
     const amount = Number(values.get("amount"));
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Payment amount must be greater than zero.");
-    const saved = await createPayment({
-        member_id: member.id,
-        membership_id: form.dataset.membershipId || null,
-        amount,
-        method: String(values.get("method")),
-        paid_on: String(values.get("date")),
-        note: String(values.get("notes") || "").trim() || null
-    });
+    const method = String(values.get("method"));
+    const upiReference = method === "upi" ? String(values.get("upiReference") || "").replace(/\s/g, "") : "";
+    if (upiReference && !UTR_PATTERN.test(upiReference)) throw new Error("The UPI reference (UTR) must be 12 digits.");
+    if (form.dataset.saving === "true") return;
+    const submit = document.querySelector('[type="submit"][form="payment-form"]');
+    form.dataset.saving = "true";
+    if (submit) submit.disabled = true;
+    let saved;
+    try {
+        saved = await createPayment({
+            member_id: member.id,
+            membership_id: form.dataset.membershipId || null,
+            amount,
+            method,
+            paid_on: String(values.get("date")),
+            note: String(values.get("notes") || "").trim() || null,
+            upi_reference: upiReference || null
+        });
+    } finally {
+        form.dataset.saving = "false";
+        if (submit?.isConnected) submit.disabled = false;
+    }
     if (!saved) throw new Error("The payments API did not return the saved record.");
     const mapped = mapPayment(saved);
     if (member.memberCode) addPaidAmount(member.id, mapped.amount);
     state.apiMemberPayments[member.id] = [mapped, ...(state.apiMemberPayments[member.id] || []).filter((item) => item.id !== mapped.id)];
-    closeModal();
-    safePersist("Payment recorded successfully.");
-    if (currentView === "profile" && profileId === member.id) render();
+    safePersist(null);
+    if (currentView === "payments" && !state.sampleDataLoaded) loadPaymentsPage(() => { if (currentView === "payments") render(); });
+    await openReceiptDialog(saved.id, { recorded: true });
 }
 
 function saveRenewal(form) {
@@ -1137,6 +1232,19 @@ function exportMembers() {
 }
 
 function exportPayments() {
+    if (!state.sampleDataLoaded) {
+        runExport("payments.csv", paymentsPage.payments.map((payment) => ({
+            receiptNumber: payment.receipt_number,
+            date: payment.paid_on,
+            memberName: payment.member?.full_name || "Removed member",
+            memberCode: payment.member?.member_code || "",
+            amount: payment.amount,
+            method: methodLabel(payment.method),
+            upiReference: payment.upi_reference || "",
+            note: payment.note || ""
+        })));
+        return;
+    }
     runExport("payments.csv", state.payments.map((payment) => ({ ...payment, memberName: getMember(payment.memberId)?.name || "Removed member" })));
 }
 
@@ -1238,19 +1346,24 @@ function loadSampleData() {
     }
 }
 
-function saveSettings(form) {
+async function saveSettings(form) {
     const values = new FormData(form);
     const phone = String(values.get("phone") || "").trim();
     if (phone && (phoneDigits(phone).length < 10 || phoneDigits(phone).length > 15)) throw new Error("Enter a valid gym phone number.");
     const name = String(values.get("name") || "").trim();
     if (!name) throw new Error("Gym name is required.");
+    const upiId = String(values.get("upiId") || "").trim();
+    const upiProblem = upiIdProblem(upiId);
+    if (upiProblem) throw new Error(upiProblem);
+    const upiPayeeName = String(values.get("upiPayeeName") || "").trim();
+    if (upiPayeeName.length > 100) throw new Error("The name shown to payers must be 100 characters or fewer.");
+    const address = String(values.get("address") || "").trim();
+    // Name, phone, address and UPI details are saved for the gym in the database.
+    await saveGymSettingsOnApi({ name, phone: phone || null, address: address || null, upi_id: upiId || null, upi_payee_name: upiPayeeName || null });
     const language = String(values.get("language") || "en");
     setLanguage(language);
     state.gym = {
         ...state.gym,
-        name,
-        phone,
-        address: String(values.get("address") || "").trim(),
         currency: String(values.get("currency") || "INR"),
         dateFormat: String(values.get("dateFormat") || "DD MMM YYYY"),
         language,
@@ -1422,6 +1535,16 @@ document.addEventListener("click", (event) => {
             return;
         }
         // Synchronous up to window.open / navigator.share, so phones treat it as the user's tap.
+        if (handleUpiPaymentAction(action.dataset.action, action)) return;
+        if (action.dataset.action === "open-upi-settings") {
+            closeModal();
+            navigate("settings");
+            return;
+        }
+        if (action.dataset.action === "retry-payments") {
+            loadPaymentsPage(() => { if (currentView === "payments") render(); });
+            return;
+        }
         if (action.dataset.action.startsWith("welcome-")) {
             handleWelcomeAction(action.dataset.action, action, rerenderAfterWelcome);
             return;
@@ -1476,6 +1599,7 @@ document.addEventListener("change", (event) => {
         return;
     }
     if (handleWelcomeTemplateEvent(target)) return;
+    if (onPaymentFormEdit(target)) return;
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
     if (target.id === "expiry-days") {
         expiringDays = Number(target.value);
@@ -1508,6 +1632,8 @@ document.addEventListener("change", (event) => {
 document.addEventListener("input", (event) => {
     const target = event.target;
     if (target.id === "welcome-body") { handleWelcomeTemplateEvent(target); return; }
+    if (target.form?.id === "payment-form" && ["amount", "upiReference"].includes(target.name)) { onPaymentFormEdit(target); return; }
+    if (target.id === "setting-upiId" || target.id === "setting-upiPayeeName") { updateUpiTestQr(target.form); return; }
     if (target.matches('#member-form [name="phone"], #quick-member-form [name="phone"]')) {
         target.value = target.value.replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "").slice(0, 13);
         validateMemberPhone(target.form, false);
@@ -1531,6 +1657,21 @@ document.addEventListener("input", (event) => {
         filterPaymentRows();
     }
 });
+
+// Settings: redraw the ₹1 test QR as the UPI ID or payee name is typed.
+function updateUpiTestQr(form) {
+    const panel = form?.querySelector("#upi-test-qr");
+    if (!panel) return;
+    const upiId = String(form.elements.upiId.value || "").trim();
+    const problem = upiIdProblem(upiId);
+    const error = form.querySelector("#setting-upiId-error");
+    if (error) {
+        error.textContent = problem;
+        error.hidden = !problem;
+    }
+    form.elements.upiId.setAttribute("aria-invalid", String(Boolean(problem)));
+    panel.innerHTML = problem ? "" : renderUpiTestQr(upiId, String(form.elements.upiPayeeName.value || "").trim());
+}
 
 async function saveFollowUpStatus(member, select) {
     const previous = member.followUpStatus || "pending";

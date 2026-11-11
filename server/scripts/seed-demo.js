@@ -48,7 +48,11 @@ function shiftDate(date, offset) {
 }
 
 async function clearDemo(client, gymId) {
-    for (const table of ["payments", "member_memberships", "members", "membership_plans"]) {
+    // Payments cannot be deleted directly (receipt numbers must stay complete); this database
+    // function empties the demo gym's payments and restarts its receipt numbers.
+    const { error: paymentsError } = await client.rpc("gympulse_reset_demo_payments", { p_gym_id: gymId });
+    if (paymentsError) throw new Error(`Could not clear demo payments: ${paymentsError.message}`);
+    for (const table of ["member_memberships", "members", "membership_plans"]) {
         const { error } = await client.from(table).delete().eq("gym_id", gymId);
         if (error) throw new Error(`Could not clear demo ${table}: ${error.message}`);
     }

@@ -137,3 +137,44 @@
 @media (max-width: 560px) {
     body:has(#modal-root .modal) .toast-region { top: max(12px, env(safe-area-inset-top)); right: 16px; bottom: auto; left: 16px; }
 }
+
+/* ---------- UPI payment QR and receipts ---------- */
+.payment-qr { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 14px; border: 1px solid var(--line, #DFE5E9); border-radius: 12px; background: var(--surface, #fff); }
+.payment-qr-code { flex: 0 0 auto; width: 176px; padding: 6px; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--line, #DFE5E9); }
+.qr-svg { display: block; width: 100%; height: auto; }
+.payment-qr-info { display: grid; flex: 1 1 140px; gap: 6px; min-width: 0; }
+.payment-qr-label { color: var(--ink-3, #5E6C77); font-size: 13px; font-weight: 600; }
+.payment-qr-amount { color: var(--ink, #1E2D3A); font-family: var(--font-display, sans-serif); font-size: 34px; font-variant-numeric: tabular-nums; font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.payment-qr-payee { color: var(--ink-2, #44535F); font-size: 14px; overflow-wrap: anywhere; }
+.payment-qr-payee small { color: var(--ink-3, #5E6C77); font-size: 13px; }
+.qr-note { margin: 0; }
+.payment-verify-note { margin: 0; border-left: 4px solid var(--marigold, #F4A51C); }
+.field-error { color: var(--brick, #B83A26); }
+.receipt-summary { display: grid; gap: 14px; }
+.receipt-amount { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; padding: 14px 16px; border-radius: 12px; background: var(--marigold-tint, #FFF1D2); }
+.receipt-amount span:first-child { flex-basis: 100%; color: var(--marigold-ink, #7A4A00); font-size: 13px; font-weight: 600; }
+.receipt-amount strong { color: var(--ink, #1E2D3A); font-family: var(--font-display, sans-serif); font-size: 32px; font-weight: 800; }
+.cell-sub { display: block; color: var(--ink-3, #5E6C77); font-size: 12px; }
+
+@media (max-width: 560px) {
+    .payment-qr { justify-content: center; }
+    .payment-qr-code { width: min(220px, 70vw); }
+    .payment-qr-info { flex-basis: 100%; text-align: center; justify-items: center; }
+    .payment-qr-info .button { width: 100%; min-height: 44px; }
+}
+
+/* Payments list on phones: one card per payment, like the members list. */
+@media (max-width: 760px) {
+    .payments-table, .payments-table tbody { display: block; }
+    .payments-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+    .payments-table tbody { display: grid; gap: 10px; padding: 10px; }
+    .payments-table tbody tr { display: block; padding: 6px 12px; border: 1px solid var(--line, #DFE5E9); border-radius: var(--radius-lg, 14px); background: var(--surface, #fff); }
+    .payments-table tbody td { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line, #DFE5E9); font-size: 14px; text-align: right; overflow-wrap: anywhere; }
+    .payments-table tbody td::before { flex: 0 0 auto; color: var(--ink-3, #5E6C77); content: attr(data-label); font-size: 12px; font-weight: 600; text-align: left; }
+    .payments-table tbody td:last-child { border-bottom: 0; }
+    .payments-table tbody td[data-label="Receipt card"]::before { content: none; }
+    .payments-table tbody td[data-label="Receipt card"] .button { width: 100%; min-height: 44px; }
+    .payments-table tbody td[colspan] { display: block; border: 0; text-align: center; }
+    .payments-table tbody td[colspan]::before { content: none; }
+    .payments-table .cell-sub { display: inline; margin-left: 6px; }
+}
