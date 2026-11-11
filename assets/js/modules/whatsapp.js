@@ -11,6 +11,14 @@ const defaultTemplates = [
 ];
 let mobileConversationOpen = false;
 
+const seededInboundTexts = ["Thanks, see you at training!", "What are the gym hours this weekend?", "Could you share my membership details?"];
+
+function isSeededDemoMessage(message) {
+    if (message?.status !== "demo") return false;
+    if (message.direction === "inbound") return seededInboundTexts.includes(message.text);
+    return message.direction === "outbound" && /^Welcome to .*! Reply here if you need any help\.$/.test(String(message.text || ""));
+}
+
 function ensureWhatsAppState() {
     if (!state.whatsapp || typeof state.whatsapp !== "object") state.whatsapp = {};
     const data = state.whatsapp;
@@ -19,8 +27,17 @@ function ensureWhatsAppState() {
     if (!data.expiryReminderTemplate) {
         data.expiryReminderTemplate = "Hi {name}, your {plan} membership expires on {expiry_date}. We would love to see you again!";
     }
+    if (!state.sampleDataLoaded && Array.isArray(data.conversations) && !data.seededConversationsRemoved) {
+        // Older versions invented chats with real members. Remove those canned messages, keep real ones.
+        data.conversations = data.conversations
+            .map((conversation) => ({ ...conversation, messages: (conversation.messages || []).filter((message) => !isSeededDemoMessage(message)) }))
+            .filter((conversation) => conversation.messages.length);
+        if (!data.conversations.some((conversation) => conversation.memberId === data.activeMemberId)) data.activeMemberId = data.conversations[0]?.memberId || "";
+        data.seededConversationsRemoved = true;
+    }
     if (!Array.isArray(data.conversations)) {
-        data.conversations = state.members.slice(0, 5).map((member, index) => ({
+        // Example chats are only created for explicitly loaded, fictional sample members.
+        data.conversations = !state.sampleDataLoaded ? [] : state.members.slice(0, 5).map((member, index) => ({
             memberId: member.id,
             unread: index % 2,
             messages: [

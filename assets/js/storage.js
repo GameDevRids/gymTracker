@@ -1,4 +1,4 @@
-import { createEmptyState } from "../../data/demo-data.js";
+import { createEmptyState, removeLegacyDemoData } from "../../data/demo-data.js";
 
 let storageKey = "gympulse.prototype.v1";
 
@@ -16,7 +16,9 @@ export function loadState() {
         }
         const state = JSON.parse(saved);
         if (!state || !Array.isArray(state.members) || !Array.isArray(state.plans)) throw new Error("Saved GymPulse data is not valid.");
-        return state;
+        const { state: cleaned, changed } = removeLegacyDemoData(state);
+        if (changed) saveState(cleaned);
+        return cleaned;
     } catch (error) {
         if (error instanceof SyntaxError) throw new Error("Saved GymPulse data could not be read. Use Settings → Clear local sample data to restore an empty workspace.");
         if (error instanceof DOMException && error.name === "SecurityError") throw new Error("Browser storage is blocked. Enable local storage to use GymPulse.");

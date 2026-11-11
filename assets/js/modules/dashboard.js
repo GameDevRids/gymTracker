@@ -3,6 +3,13 @@ import { state, memberBalance, getPlan } from "../state.js";
 import { emptyRow } from "../components/tables.js";
 import { areAllMembershipsLoaded, getCurrentMembership } from "./memberMemberships.js";
 
+// The "Sample data" label only applies when the owner explicitly loaded fictional sample records.
+const sampleBadge = () => state.sampleDataLoaded ? ` <span class="sample-data-badge">Sample data</span>` : "";
+const greeting = () => {
+    const hour = new Date().getHours();
+    return hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+};
+
 const sameMonth = (date, month) => String(date || "").slice(0, 7) === month;
 
 function monthSeries(count = 6) {
@@ -65,7 +72,7 @@ export function renderDashboard() {
     ].filter(Boolean);
 
     return `
-        <div class="page-heading"><div><h1>Good ${new Date().getHours() < 12 ? "morning" : "afternoon"}, Alex <span aria-hidden="true">✦</span></h1><p>Here’s what’s happening at ${escapeHTML(state.gym.name)} today.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="export-members">↓ Export members</button><button class="button button-secondary" data-action="quick-add-member">Quick add</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>
+        <div class="page-heading"><div><h1>${greeting()} <span aria-hidden="true">✦</span></h1><p>Here’s what’s happening at ${escapeHTML(state.gym.name)} today.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="export-members">↓ Export members</button><button class="button button-secondary" data-action="quick-add-member">Quick add</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>
         <div class="grid kpi-grid">
             ${kpi("Total members", state.members.length, `${active} currently active`, "♙")}
             ${kpi("New members", newMembers, "Joined this month", "✚")}
@@ -77,11 +84,11 @@ export function renderDashboard() {
             ${kpi("Active members", active, "Valid membership today", "✓")}
         </div>
         <div class="grid content-grid">
-            <section class="card"><div class="card-header"><div><h2>Revenue overview</h2><p>Collected payments · last 6 months <span class="sample-data-badge">Sample data</span></p></div><span class="badge-soft">INR</span></div><div class="chart-area"><canvas id="revenue-chart" aria-label="Revenue for last six months"></canvas><div class="chart-fallback" hidden>Chart library unavailable. Metrics remain available below.</div></div></section>
+            <section class="card"><div class="card-header"><div><h2>Revenue overview</h2><p>Collected payments · last 6 months${sampleBadge()}</p></div><span class="badge-soft">INR</span></div><div class="chart-area"><canvas id="revenue-chart" aria-label="Revenue for last six months"></canvas><div class="chart-fallback" hidden>Chart library unavailable. Metrics remain available below.</div></div></section>
             <section class="card"><div class="card-header"><div><h2>Actionable alerts</h2><p>Things that may need your attention</p></div></div><div class="card-body"><div class="alert-list">${alerts.length ? alerts.map((alert) => `<button class="alert-item" data-view="${alert.view}"><span class="alert-symbol">!</span><span><strong>${escapeHTML(alert.title)}</strong><p>${escapeHTML(alert.detail)}</p></span></button>`).join("") : `<div class="empty-state">You're all caught up. Nice work!</div>`}</div></div></section>
         </div>
         <div class="grid bottom-grid">
-            <section class="card"><div class="card-header"><div><h2>Weekly attendance</h2><p>Recorded visits over the last 7 days <span class="sample-data-badge">Sample data</span></p></div></div><div class="chart-area"><canvas id="attendance-chart" aria-label="Weekly attendance"></canvas><div class="chart-fallback" hidden>Chart library unavailable.</div></div></section>
+            <section class="card"><div class="card-header"><div><h2>Weekly attendance</h2><p>Recorded visits over the last 7 days${sampleBadge()}</p></div></div><div class="chart-area"><canvas id="attendance-chart" aria-label="Weekly attendance"></canvas><div class="chart-fallback" hidden>Chart library unavailable.</div></div></section>
             <section class="card"><div class="card-header"><div><h2>Member growth</h2><p>Total members by month</p></div></div><div class="chart-area"><canvas id="growth-chart" aria-label="Member growth"></canvas><div class="chart-fallback" hidden>Chart library unavailable.</div></div></section>
         </div>
         <div class="grid bottom-grid dashboard-secondary-grid">
@@ -100,7 +107,7 @@ export function renderDashboard() {
 }
 
 function kpi(label, value, note, icon, sampleData = false) {
-    return `<article class="card kpi-card"><div class="kpi-top"><span>${label}${sampleData ? ' <span class="sample-data-badge">Sample data</span>' : ""}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${note}</div></article>`;
+    return `<article class="card kpi-card"><div class="kpi-top"><span>${label}${sampleData ? sampleBadge() : ""}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${note}</div></article>`;
 }
 
 export function drawDashboardCharts() {
