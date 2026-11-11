@@ -1,0 +1,368 @@
+/*
+ * GymPulse theme — "Renewal board"
+ * Load AFTER styles.css, components.css and responsive.css.
+ * It only overrides; delete this file (and its <link>) to go back to the old look.
+ *
+ * Design intent, in one line: a front-desk tool where the next action is always obvious.
+ * - Slate + marigold: calm, trustworthy base; one warm accent reserved for "do this now".
+ * - Colour means one thing each: brick = money at risk (overdue), marigold = due soon,
+ *   leaf = done / active / WhatsApp. Never decorative.
+ * - One primary action per card (Von Restorff), big targets near the thumb (Fitts),
+ *   fewer competing choices (Hick), plain sentence-case labels (recognition over recall).
+ */
+
+:root {
+    /* Palette */
+    --slate: #1E2D3A;
+    --slate-2: #2A3F4F;
+    --slate-soft: #E6EBEF;
+    --canvas: #F2F4F5;
+    --surface: #FFFFFF;
+    --marigold: #F4A51C;
+    --marigold-strong: #E08F00;
+    --marigold-tint: #FFF1D2;
+    --marigold-ink: #7A4A00;
+    --brick: #B83A26;
+    --brick-tint: #FCE9E4;
+    --leaf: #1D7A4F;
+    --leaf-strong: #166240;
+    --leaf-tint: #E2F2E9;
+
+    --ink: #1E2D3A;
+    --ink-2: #44535F;
+    --ink-3: #5E6C77;
+    --line: #DFE5E9;
+    --line-strong: #C9D2D9;
+
+    /* Map the old tokens so existing rules pick up the new look */
+    --forest: var(--slate);
+    --deep: var(--slate-2);
+    --lime: var(--marigold);
+    --muted: var(--ink-3);
+    --danger: var(--brick);
+    --text-primary: var(--ink);
+    --text-secondary: var(--ink-2);
+    --text-muted: var(--ink-3);
+
+    /* Type: Anek for headings and numbers, Mukta for text. Both include Devanagari. */
+    --font-display: "Anek Latin", "Anek Devanagari", "Manrope", system-ui, sans-serif;
+    --font-body: "Mukta", "DM Sans", system-ui, sans-serif;
+
+    /* Shape: controls < cards < sheets; pills are fully round */
+    --radius-sm: 8px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --control-height: 42px;
+    --focus-ring: 0 0 0 3px rgba(244, 165, 28, .55);
+    --shadow: none;
+    --shadow-raised: 0 12px 32px rgba(30, 45, 58, .14);
+
+    font-family: var(--font-body);
+    color: var(--ink);
+    background: var(--canvas);
+}
+
+body { color: var(--ink); background: var(--canvas); font-size: 15px; line-height: 1.55; }
+::selection { color: var(--slate); background: var(--marigold-tint); }
+
+/* Keyboard focus: always visible, never colour-only */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--slate);
+    outline-offset: 2px;
+    box-shadow: var(--focus-ring);
+}
+
+/* ---------- Headings and numbers ---------- */
+.brand, .page-heading h1, .card-header h2, .section-title, .kpi-value, .detail-card strong,
+.profile-hero h2, .plan-card h3, .integration-card h3, .notification-card h3, .plan-price,
+.settings-section h2, .modal-header h2, .auth-card h1, .wa-mode-settings strong,
+.wa-sidebar-heading h2, .wa-id-card span {
+    font-family: var(--font-display);
+}
+.page-heading h1 { color: var(--ink); font-size: clamp(28px, 2.4vw, 34px); font-weight: 700; letter-spacing: -.4px; }
+.page-heading p { max-width: 62ch; color: var(--ink-2); font-size: 15px; }
+.card-header h2, .section-title { color: var(--ink); font-size: 19px; font-weight: 700; }
+.card-header p { color: var(--ink-3); font-size: 13px; }
+.kpi-value, .plan-price, .detail-card strong { font-variant-numeric: tabular-nums; }
+.kpi-value { color: var(--ink); font-weight: 700; letter-spacing: -.3px; }
+.kpi-top { color: var(--ink-2); font-size: 14px; }
+.kpi-foot { color: var(--ink-3); font-size: 13px; }
+.kpi-icon { color: var(--marigold-ink); background: var(--marigold-tint); }
+.positive { color: var(--leaf); }
+
+/* ---------- Brand, login ---------- */
+.brand { font-weight: 800; letter-spacing: -.3px; }
+.brand-mark { color: var(--slate); background: var(--marigold); }
+.brand-light, .auth-brand .brand-light { color: var(--marigold); }
+/* Bug fix: the sidebar's white brand colour made "Gym" invisible on the login card */
+.brand.auth-brand { color: var(--slate); }
+.auth-brand .brand-light { color: #A86500; }
+
+.auth-screen {
+    background:
+        linear-gradient(var(--slate) 0 34vh, transparent 34vh),
+        var(--canvas);
+}
+.auth-card { border-color: var(--line); border-radius: 18px; box-shadow: var(--shadow-raised); }
+.auth-card h1 { color: var(--ink); font-size: 28px; font-weight: 700; }
+.auth-card > p { color: var(--ink-2); font-size: 15px; }
+.auth-form label { color: var(--ink); font-size: 14px; }
+.auth-form input { min-height: 52px; border-color: var(--line-strong); border-radius: var(--radius-md); font-size: 16px; }
+.auth-form input:focus { border-color: var(--slate); box-shadow: var(--focus-ring); outline: 0; }
+.auth-form .button { min-height: 52px; font-size: 16px; }
+.auth-error { padding: 10px 12px; border-radius: var(--radius-sm); color: var(--brick); background: var(--brick-tint); font-size: 14px; }
+
+/* ---------- Sidebar ---------- */
+.sidebar { color: #D5DEE5; background: var(--slate); }
+.gym-switcher { border-color: rgba(255,255,255,.12); background: rgba(255,255,255,.05); }
+.gym-avatar, .profile-avatar { color: var(--slate); background: var(--marigold); }
+.gym-label strong { font-size: 14px; }
+.gym-label small, .sidebar-profile small, .switcher-caret, .profile-menu { color: #9FB0BD; font-size: 12px; }
+.sidebar-profile strong { font-size: 13px; }
+/* Sentence case instead of SHOUTED captions */
+.nav-caption { color: #8FA2B1; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: lowercase; }
+.nav-caption::first-letter { text-transform: uppercase; }
+.nav-link { color: #C9D4DC; font-size: 14px; border-radius: var(--radius-sm); }
+.nav-link:hover { color: #fff; background: rgba(255,255,255,.07); }
+.nav-link.active { color: #fff; background: rgba(255,255,255,.09); box-shadow: inset 3px 0 var(--marigold); }
+.nav-icon { color: #9FB0BD; }
+.active .nav-icon { color: var(--marigold); }
+.nav-count { color: var(--slate); background: var(--marigold); font-weight: 700; }
+.sidebar .nav-link:focus-visible { outline-color: var(--marigold); }
+
+/* ---------- Top bar ---------- */
+.topbar { border-bottom-color: var(--line); background: rgba(255,255,255,.96); }
+.breadcrumbs { color: var(--ink-3); font-size: 13px; }
+.breadcrumbs strong { color: var(--ink); }
+.today-label { color: var(--ink-3); font-size: 13px; }
+.icon-button { border-color: var(--line); color: var(--ink-2); }
+.icon-button:hover { border-color: var(--line-strong); background: var(--canvas); }
+.notification-button i { background: var(--brick); }
+.top-avatar { color: var(--slate); background: var(--slate-soft); }
+#logout-button { white-space: nowrap; }
+.app-footer { color: var(--ink-3); font-size: 12px; }
+
+/* ---------- Buttons ---------- */
+.button { border-radius: var(--radius-md); font-size: 14px; font-weight: 600; }
+.button-primary { color: var(--slate); background: var(--marigold); }
+.button-primary:hover { background: var(--marigold-strong); }
+.button-primary:active { transform: translateY(1px); }
+.button-secondary { border-color: var(--line-strong); color: var(--ink); background: var(--surface); }
+.button-secondary:hover { border-color: var(--ink-3); background: var(--canvas); }
+.button-danger { color: #fff; background: var(--brick); }
+.button-small { font-size: 13px; }
+.text-button { color: var(--slate-2); font-size: 13px; }
+/* Destructive actions look different from safe ones, so they are not tapped by habit */
+.text-button[data-action^="delete-"] { color: var(--brick); }
+.page-content a { color: var(--slate-2); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+/* ---------- Cards: borders, not shadows ---------- */
+.card { border-color: var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: none; }
+
+/* ---------- Forms ---------- */
+.search-field, .field-control,
+.field input, .field select, .field textarea {
+    border-color: var(--line-strong);
+    border-radius: var(--radius-md);
+    color: var(--ink);
+    font-size: 15px;
+}
+.search-field:focus, .field-control:focus, .field input:focus, .field select:focus, textarea:focus {
+    border-color: var(--slate);
+    box-shadow: var(--focus-ring);
+}
+.field label { color: var(--ink); font-size: 14px; }
+.helper-text { color: var(--ink-3); font-size: 13px; }
+.field .phone-error, .field .plan-error { color: var(--brick); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--leaf); }
+
+/* ---------- Tables ---------- */
+th { color: var(--ink-3); font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; border-bottom-color: var(--line); }
+td { color: var(--ink); font-size: 14px; border-bottom-color: #EDF1F3; font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: #F7F9FA; }
+.member-avatar { color: var(--slate); background: var(--slate-soft); font-size: 12px; }
+.member-cell strong { color: var(--ink); font-size: 14px; }
+.member-cell small { color: var(--ink-3); font-size: 12px; }
+
+/* ---------- Status: one meaning per colour ---------- */
+.status { color: var(--leaf); background: var(--leaf-tint); font-size: 12px; }
+.status-expired, .status-overdue, .status-cancelled { color: var(--brick); background: var(--brick-tint); }
+.status-suspended, .status-pending, .status-upcoming, .status-expiring { color: var(--marigold-ink); background: var(--marigold-tint); }
+.status-inactive, .status-unassigned { color: var(--ink-3); background: var(--slate-soft); }
+.badge-soft { color: var(--leaf); background: var(--leaf-tint); font-size: 12px; }
+.sample-data-badge { color: var(--ink-3); background: var(--slate-soft); font-size: 11px; }
+
+/* ---------- Summary chips, alerts, notes ---------- */
+.summary-chip { border-color: var(--line); color: var(--ink-2); font-size: 13px; }
+.summary-chip strong { color: var(--ink); }
+.alert-item { border-color: var(--line); background: var(--surface); }
+.alert-symbol { color: var(--marigold-ink); background: var(--marigold-tint); }
+.alert-item strong { color: var(--ink); font-size: 14px; }
+.alert-item p { color: var(--ink-2); font-size: 13px; }
+.note-box { border-color: var(--line); color: var(--ink-2); background: #F7F9FA; font-size: 14px; }
+.empty-state { padding: 40px 20px; color: var(--ink-2); font-size: 15px; }
+
+/* ---------- Plans ---------- */
+.plan-card h3 { color: var(--ink); font-size: 18px; font-weight: 700; }
+.plan-price { color: var(--ink); font-size: 32px; font-weight: 700; line-height: 1.1; }
+.plan-price small { color: var(--ink-3); font-family: var(--font-body); font-size: 14px; font-weight: 500; }
+.plan-card p, .integration-card p, .notification-card p { color: var(--ink-2); font-size: 14px; }
+
+/* ================================================================
+   The renewal board (Expiring soon) — the one bold element.
+   Urgency is shown three ways at once (stripe, chip colour, words),
+   so it works for colour-blind users and at a glance from a metre away.
+   ================================================================ */
+.expiring-list { gap: 12px; }
+.expiring-card {
+    position: relative;
+    overflow: hidden;
+    padding: 16px 18px 16px 24px;
+    border-color: var(--line);
+}
+.expiring-card::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 6px;
+    background: var(--marigold);
+    content: "";
+}
+.expiring-card:has(.expiry-overdue)::before { background: var(--brick); }
+.expiring-card:has(.expiry-overdue) { background: linear-gradient(90deg, #FFF7F5, var(--surface) 40%); }
+.expiring-member strong { color: var(--ink); font-size: 16px; font-weight: 600; }
+.expiring-member small, .expiring-detail small { color: var(--ink-3); font-size: 13px; }
+.expiring-detail strong { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; }
+.expiring-card .member-avatar { width: 40px; height: 40px; border-radius: 12px; font-size: 15px; }
+
+/* Days-left chip: large, condensed numerals, readable at a glance */
+.expiring-card .badge-soft {
+    justify-self: start;
+    padding: 6px 12px;
+    border-radius: 999px;
+    color: var(--marigold-ink);
+    background: var(--marigold-tint);
+    font: 700 17px/1.2 var(--font-display);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.expiring-card .badge-soft.expiry-overdue { color: var(--brick); background: var(--brick-tint); }
+
+/* One primary action per card: the WhatsApp reminder */
+.expiring-actions a[href*="wa.me"] {
+    border-color: var(--leaf);
+    color: #fff;
+    background: var(--leaf);
+}
+.expiring-actions a[href*="wa.me"]:hover { border-color: var(--leaf-strong); background: var(--leaf-strong); text-decoration: none; }
+.expiring-actions .button { min-height: 40px; }
+
+/* Hooks for the UX changes in the Claude Code prompt (harmless until used) */
+.expiring-card.is-reminded::before { background: var(--leaf); }
+.expiring-card.is-reminded { opacity: .72; }
+.board-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 18px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+    border-radius: var(--radius-lg);
+    color: #E8EEF2;
+    background: var(--slate);
+}
+.board-summary strong { color: #fff; font: 700 26px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+.board-summary .money-at-risk { color: var(--marigold); }
+.board-progress { flex-basis: 100%; height: 6px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.14); }
+.board-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--marigold); transition: width .3s ease; }
+
+/* ---------- Modals and toasts ---------- */
+.modal-root { background: rgba(30, 45, 58, .55); }
+.modal { border-color: var(--line); border-radius: 16px; box-shadow: var(--shadow-raised); }
+.modal-header, .modal-footer { border-color: var(--line); }
+.modal-header h2 { color: var(--ink); font-size: 22px; font-weight: 700; }
+.modal-header p, .confirm-copy { color: var(--ink-2); font-size: 14px; }
+.modal-close { color: var(--ink); background: var(--canvas); }
+.toast { border-color: var(--line); border-radius: var(--radius-md); color: var(--ink); box-shadow: var(--shadow-raised); font-size: 14px; }
+.toast-icon { color: var(--leaf); background: var(--leaf-tint); }
+.toast-error { border-color: #F2C9BF; color: var(--brick); }
+.toast-error .toast-icon { color: var(--brick); background: var(--brick-tint); }
+.quick-add-form .field input:not([type="checkbox"]):not([type="radio"]), .quick-add-form .field select { border-radius: 12px; font-size: 17px; }
+
+/* ---------- WhatsApp inbox colours ---------- */
+.wa-contact:hover, .wa-contact.selected { background: #F4F7F9; }
+.wa-avatar { color: var(--slate); background: var(--slate-soft); }
+.wa-outgoing { border-color: #CDE7D8; background: var(--leaf-tint); }
+.wa-contact-time i { background: var(--leaf); }
+.wa-id-card { background: var(--slate); }
+.wa-id-card strong { color: var(--marigold); }
+.wa-mode-live { color: var(--leaf); background: var(--leaf-tint); }
+.wa-mode-demo, .wa-demo-label { color: var(--marigold-ink); background: var(--marigold-tint); }
+
+/* ================================================================
+   Phones: thumb-friendly, nothing wraps awkwardly.
+   ================================================================ */
+@media (max-width: 767px) {
+    :root { --control-height: 48px; }
+    body { font-size: 16px; }
+    .page-heading h1 { font-size: 30px; }
+    .page-heading p { font-size: 15px; }
+
+    .mobile-bottom-nav { border-top-color: var(--line); box-shadow: 0 -6px 18px rgba(30,45,58,.08); }
+    .mobile-nav-link { gap: 3px; color: var(--ink-3); font-size: 11px; line-height: 1.15; text-align: center; }
+    .mobile-nav-link.active { color: var(--slate); background: var(--marigold-tint); }
+    .mobile-nav-link.active svg { stroke: var(--marigold-ink); }
+
+    .members-table tbody tr { border-color: var(--line); border-radius: var(--radius-lg); }
+    .members-table tbody td { font-size: 14px; }
+    .members-table tbody td::before { color: var(--ink-3); font-size: 12px; font-weight: 600; text-transform: none; }
+    /* The member's name needs no label; give it the full width at the top of the card */
+    .members-table tbody td[data-label="Member"]::before,
+    .members-table tbody td[data-label="Actions"]::before { display: none; }
+    .members-table tbody td[data-label="Member"] .member-cell { max-width: 100%; }
+    .members-table tbody td[data-label="Member"] .member-cell strong { font-size: 16px; }
+    .members-table tbody td[data-label="Actions"] .inline-actions { width: 100%; gap: 8px; }
+    .members-table tbody td[data-label="Actions"] .text-button {
+        flex: 1 1 0;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        text-decoration: none;
+    }
+
+    /* Fewer choices at the top of Members: CSV tools step back, adding a member leads */
+    .heading-actions [data-action="import-csv"],
+    .heading-actions [data-action="export-members"] {
+        flex: 1 1 40%;
+        min-height: 40px;
+        border-color: transparent;
+        color: var(--ink-2);
+        background: transparent;
+        font-weight: 500;
+    }
+
+    /* Renewal board on a phone: name, urgency, details, then the main action full width */
+    .expiring-card { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 14px; padding: 16px 16px 16px 22px; }
+    .expiring-member { grid-column: 1 / -1; }
+    .expiring-card .badge-soft { grid-column: 1 / -1; grid-row: 2; font-size: 18px; }
+    .expiring-actions { display: flex; flex-direction: column; gap: 8px; }
+    .expiring-actions > * { flex: 0 0 auto; width: 100%; min-height: 48px; justify-content: center; text-align: center; font-size: 15px; }
+    .expiring-actions a[href*="wa.me"] { order: -1; min-height: 52px; font-size: 16px; }
+}
+
+@media (max-width: 560px) {
+    .topbar { gap: 8px; }
+    /* Keep only the page name; "Workspace /" is noise on a small screen */
+    .breadcrumbs > span, .breadcrumbs > b { display: none; }
+    .breadcrumbs strong { font: 700 18px/1.2 var(--font-display); }
+    .top-avatar { display: none; }
+    .page-heading h1 { font-size: 28px; }
+    .modal-header h2 { font-size: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .button-primary:active { transform: none; }
+    .board-progress > span { transition: none; }
+}

@@ -6,6 +6,7 @@ const APP_SHELL = [
     "/assets/css/styles.css",
     "/assets/css/components.css",
     "/assets/css/responsive.css",
+    "/assets/css/theme.css",
     "/assets/vendor/chart.umd.min.js",
     "/assets/js/main.js",
     "/assets/js/state.js",
