@@ -3,6 +3,7 @@ import { state, memberBalance, getPlan, getMember, revenueEmptyMessage } from ".
 import { emptyRow, memberTableRow } from "../components/tables.js";
 import { drawChartOrEmpty, hasNonZero } from "../components/charts.js";
 import { getLanguage, t } from "../i18n.js";
+import { renderWelcomeTemplateSettings } from "./welcomeUi.js";
 
 const pageHeading = (title, description, actions = "") =>
     `<div class="page-heading"><div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`;
@@ -289,6 +290,7 @@ function renderSettings() {
             <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="inactivityReminders" ${preferences.inactivityReminders !== false ? "checked" : ""}> Preview inactive-member reminders</label></div>
             <div class="field full"><button class="button button-primary" type="submit">Save settings</button></div>
         </form></section>
+        ${renderWelcomeTemplateSettings()}
         <section class="card settings-section"><h2>Membership preferences</h2><p class="helper-text">Membership expiry is evaluated by calendar date. Renewals default to start after the current expiry date when the membership is still valid.</p></section></div>
         ${renderSampleDataCard(gym)}</div>`;
 }

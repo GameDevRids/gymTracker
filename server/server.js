@@ -12,6 +12,7 @@ import membersRouter from "./routes/members.js";
 import plansRouter from "./routes/plans.js";
 import membershipsRouter from "./routes/memberships.js";
 import paymentsRouter from "./routes/payments.js";
+import messageTemplatesRouter from "./routes/messageTemplates.js";
 import whatsappRouter from "./routes/whatsapp.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
@@ -83,6 +84,7 @@ app.use("/api/members", requireAuth(), membersRouter);
 app.use("/api/plans", requireAuth(), plansRouter);
 app.use("/api/memberships", requireAuth(), membershipsRouter);
 app.use("/api/payments", requireAuth(), paymentsRouter);
+app.use("/api/message-templates", requireAuth(), messageTemplatesRouter);
 app.use("/api/whatsapp", (request, response, next) => {
     if (request.path === "/webhook" || request.path.startsWith("/webhook/")) return next();
     return requireAuth()(request, response, next);

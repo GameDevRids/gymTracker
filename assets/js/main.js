@@ -40,6 +40,8 @@ import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
 import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleWhatsAppChange } from "./modules/whatsapp.js";
 import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
+import { loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
+import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
 import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
 import { createDemoState } from "../../data/demo-data.js";
@@ -130,6 +132,8 @@ function startAuthenticatedApp(session) {
     render();
     refreshMembersFromApi();
     loadExpiringMemberships();
+    // Loaded early so the "Member added" dialog can open WhatsApp without waiting.
+    loadWelcomeTemplates();
     loadAllMemberships(() => {
         if (currentView === "overview") render();
     });
@@ -260,10 +264,12 @@ function navigate(view) {
     render();
     if (view === "expiring") loadExpiringMemberships();
     if (view === "plans") loadPlans(renderPlansIfCurrent);
+    if (view === "settings") loadWelcomeTemplates({ force: true }).then(() => { if (currentView === "settings") render(); });
     if (view === "profile" && profileId) {
         loadMemberMembershipHistory(profileId);
         loadMemberPaymentsFromApi(profileId);
         loadProfileConsent(profileId);
+        loadProfileWelcome(profileId);
     }
     if (initializationWarning) toast(initializationWarning, "error");
     page.focus({ preventScroll: true });
@@ -306,6 +312,17 @@ function loadProfileConsent(memberId) {
     });
 }
 
+function loadProfileWelcome(memberId) {
+    if (welcomeBlocker(getMember(memberId))) return;
+    loadWelcomeLog(memberId, () => {
+        if (currentView === "profile" && profileId === memberId) render();
+    });
+}
+
+function rerenderAfterWelcome() {
+    if (currentView === "profile" || currentView === "settings") render();
+}
+
 function renderPlansIfCurrent() {
     if (currentView === "plans") render();
 }
@@ -340,7 +357,7 @@ function safePersist(message = "Changes saved.") {
     try {
         persist();
         render();
-        toast(message);
+        if (message) toast(message);
     } catch (error) {
         toast(error.message || "Unable to save changes.", "error");
     }
@@ -393,7 +410,7 @@ function renderMemberFormBody(member, planStatus = "loading", plans = []) {
             ${!isEdit ? setField("initialPayment", "Amount collected now (₹)", 0, "number", false, 'min="0" step="1"') : ""}
             ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
             <p class="helper-text field full" id="member-assignment-error" role="alert" hidden></p>
-            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member has opted in to WhatsApp messages</label><span class="helper-text">${member?.whatsappOptIn && member.whatsappOptInAt ? `Consent recorded on ${escapeHTML(formatDate(member.whatsappOptInAt.slice(0, 10)))}. ` : ""}Only tick this when the member has agreed. Every change is kept in their consent history, and reminders skip members without consent.</span></div>
+            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member agrees to receive WhatsApp updates</label><span class="helper-text">${member?.whatsappOptIn && member.whatsappOptInAt ? `Consent recorded on ${escapeHTML(formatDate(member.whatsappOptInAt.slice(0, 10)))}. ` : ""}Only tick this when the member has agreed. Every change is kept in their consent history, and reminders skip members without consent.</span></div>
             <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes">${escapeHTML(member?.notes || "")}</textarea></div>
             <p class="helper-text field full">Phone numbers must be unique. For imports, use columns: name, phone, email, plan, joinedAt, startDate, expiryDate.</p>
         </form>`;
@@ -490,11 +507,41 @@ function openQuickAddMemberForm() {
             ${nameField("quick", "", t("name"))}
             <div class="field"><label for="quick-phone">${t("phone")} *</label><input id="quick-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="quick-phone-error"><span id="quick-phone-error" class="helper-text phone-error" role="alert" hidden>${t("phoneHelp")}</span></div>
             <div id="quick-plan-field">${renderQuickAddPlanField("loading")}</div>
+            ${consentField()}
             <p class="helper-text" id="quick-assignment-error" role="alert" hidden></p>
         </form>`,
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">${t("cancel")}</button><button class="button button-primary" type="submit" form="quick-member-form" disabled>${t("addAssign")}</button>`
     });
     loadQuickAddPlans(document.querySelector("#quick-member-form"));
+}
+
+function consentField() {
+    return `<div class="field consent-field"><label class="checkbox-label"><input type="checkbox" name="whatsappOptIn"> Member agrees to receive WhatsApp updates</label><span class="helper-text">Only tick this when the member has agreed. It is kept in their consent history.</span></div>`;
+}
+
+// Records consent through the consent endpoint (migration 009), after the member exists.
+async function recordFormConsent(memberId, optIn) {
+    const member = getMember(memberId);
+    if (!member || optIn === (member.whatsappOptIn === true)) return;
+    try {
+        await setWhatsAppConsentOnApi(memberId, optIn, "staff_form");
+    } catch (error) {
+        const failure = new Error(`Member saved, but WhatsApp consent was not recorded: ${String(error.message || "please try again").replace(/\.+$/, "")}. Press the button again to retry.`);
+        failure.stage = "consent";
+        throw failure;
+    }
+    if (currentView === "profile" && profileId === memberId) loadProfileConsent(memberId);
+}
+
+// After a successful save: the welcome dialog when the member consented, otherwise a toast.
+async function finishMemberSave(memberId, message) {
+    const member = getMember(memberId);
+    if (member && !welcomeBlocker(member)) {
+        safePersist(null);
+        if (await openMemberAddedDialog(member)) return;
+    }
+    closeModal();
+    safePersist(message);
 }
 
 function nameField(prefix, value, label = "Full name") {
@@ -544,10 +591,10 @@ async function saveQuickMember(form) {
     };
     const index = state.members.findIndex((item) => item.id === member.id);
     if (index >= 0) state.members[index] = updatedMember;
+    await recordFormConsent(member.id, form.elements.whatsappOptIn.checked);
     const error = form.querySelector("#quick-assignment-error");
     if (error) error.hidden = true;
-    closeModal();
-    safePersist("Member added and plan assigned.");
+    await finishMemberSave(member.id, "Member added and plan assigned.");
 }
 
 function openPaymentForm(memberId = "", membershipId = "", suggestedAmount = "") {
@@ -917,11 +964,7 @@ async function saveMember(form) {
     }
 
     // Consent changes go through their own endpoint so the database records them in the history.
-    const consentMember = getMember(saved.id);
-    if (consentMember && record.whatsappOptIn !== (consentMember.whatsappOptIn === true)) {
-        await setWhatsAppConsentOnApi(saved.id, record.whatsappOptIn, "staff_form");
-        if (currentView === "profile" && profileId === saved.id) loadProfileConsent(saved.id);
-    }
+    await recordFormConsent(saved.id, record.whatsappOptIn);
 
     if (initialPayment > 0) {
         const payment = await createPayment({
@@ -941,8 +984,12 @@ async function saveMember(form) {
         ];
     }
 
+    if (isNewMember) {
+        await finishMemberSave(saved.id, "New member added and plan assigned.");
+        return;
+    }
     closeModal();
-    safePersist(isNewMember ? "New member added and plan assigned." : "Member details updated.");
+    safePersist("Member details updated.");
 }
 
 async function savePayment(form) {
@@ -1257,6 +1304,11 @@ async function handleSubmit(event) {
         await handlePlanSubmit(form, renderPlansIfCurrent);
         return;
     }
+    if (form.id === "welcome-template-form") {
+        event.preventDefault();
+        await handleWelcomeTemplateSubmit(form);
+        return;
+    }
     if (form.id === "whatsapp-compose" || form.id === "whatsapp-template-form" || form.id === "whatsapp-click-template-form") {
         event.preventDefault();
         if (!form.reportValidity()) return;
@@ -1289,7 +1341,15 @@ async function handleSubmit(event) {
         try {
             await handler(form);
         } catch (error) {
-            if (form.id === "quick-member-form" && form.dataset.createdMemberId) {
+            if (error?.stage === "consent") {
+                const errorElement = form.querySelector(form.id === "quick-member-form" ? "#quick-assignment-error" : "#member-assignment-error");
+                if (errorElement) {
+                    errorElement.textContent = error.message;
+                    errorElement.hidden = false;
+                }
+                if (submitButton) submitButton.textContent = "Retry saving consent";
+                toast(error.message, "error");
+            } else if (form.id === "quick-member-form" && form.dataset.createdMemberId) {
                 const assignmentError = form.querySelector("#quick-assignment-error");
                 const message = `Member saved, but plan assignment failed: ${error.message || "Please retry."} Use the button to retry without creating another member.`;
                 if (assignmentError) {
@@ -1359,6 +1419,11 @@ document.addEventListener("click", (event) => {
             if (form) loadQuickAddPlans(form);
             return;
         }
+        // Synchronous up to window.open / navigator.share, so phones treat it as the user's tap.
+        if (action.dataset.action.startsWith("welcome-")) {
+            handleWelcomeAction(action.dataset.action, action, rerenderAfterWelcome);
+            return;
+        }
         if (action.dataset.action.startsWith("whatsapp-")) {
             handleWhatsAppAction(action.dataset.action, action, render);
             return;
@@ -1408,6 +1473,7 @@ document.addEventListener("change", (event) => {
         handleWhatsAppChange(target, render);
         return;
     }
+    if (handleWelcomeTemplateEvent(target)) return;
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
     if (target.id === "expiry-days") {
         expiringDays = Number(target.value);
@@ -1439,6 +1505,7 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("input", (event) => {
     const target = event.target;
+    if (target.id === "welcome-body") { handleWelcomeTemplateEvent(target); return; }
     if (target.matches('#member-form [name="phone"], #quick-member-form [name="phone"]')) {
         target.value = target.value.replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "").slice(0, 13);
         validateMemberPhone(target.form, false);

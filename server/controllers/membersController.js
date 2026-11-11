@@ -1,4 +1,5 @@
 import * as membersService from "../services/membersService.js";
+import * as whatsappMessages from "../services/whatsappMessagesService.js";
 import { logger } from "../config/logger.js";
 import { captureException } from "../config/monitoring.js";
 
@@ -55,6 +56,21 @@ export function setWhatsAppConsent(request, response, next) {
 export function getConsentEvents(request, response, next) {
     membersService.listConsentEvents(request.params.id, request.gymId)
         .then((events) => response.json({ status: "success", data: events }))
+        .catch(next);
+}
+
+export function getWhatsAppMessages(request, response, next) {
+    whatsappMessages.listMemberMessages(request.params.id, request.messageListQuery, request.gymId)
+        .then((messages) => response.json({ status: "success", data: messages }))
+        .catch(next);
+}
+
+export function recordWhatsAppMessage(request, response, next) {
+    whatsappMessages.recordMemberMessage(request.params.id, {
+        ...request.validatedMessage,
+        sentBy: request.authUser?.id || null
+    }, request.gymId)
+        .then((message) => response.status(201).json({ status: "success", data: message }))
         .catch(next);
 }
 

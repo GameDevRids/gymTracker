@@ -104,3 +104,36 @@
 .activity-dot.consent-granted { background: var(--leaf, #2f7d4f); }
 .activity-dot.consent-withdrawn { background: var(--brick, #b42318); }
 .reminder-blocked { max-width: 140px; text-align: right; }
+
+/* ---------- WhatsApp welcome ---------- */
+/* Theme green rather than WhatsApp's brand green, which is too light for white text. */
+.button-whatsapp { border-color: var(--leaf, #1D7A4F); color: #fff; background: var(--leaf, #1D7A4F); }
+.button-whatsapp:hover { border-color: var(--leaf-strong, #166240); background: var(--leaf-strong, #166240); }
+.button-whatsapp:disabled { opacity: .65; }
+.welcome-dialog { display: grid; gap: 10px; }
+.welcome-dialog-label { margin: 0; color: var(--ink-2, #44535F); font-size: 13px; font-weight: 600; }
+.welcome-preview { padding: 12px 14px; border: 1px solid var(--line, #DFE5E9); border-left: 4px solid var(--leaf, #1D7A4F); border-radius: 10px; color: var(--ink, #1E2D3A); background: var(--leaf-tint, #E2F2E9); font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.welcome-preview-problem { border-left-color: var(--brick, #B83A26); background: var(--brick-tint, #FCE9E4); }
+.welcome-footer { display: flex; width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.welcome-placeholders { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.welcome-chip { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
+.welcome-chip:hover { filter: brightness(.96); }
+.welcome-template-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.welcome-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.welcome-profile-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.checkbox-label { display: flex; gap: 8px; align-items: center; }
+.checkbox-label input { width: 18px; height: 18px; flex: 0 0 auto; }
+
+@media (max-width: 560px) {
+    /* Primary action on top, full width, easy to reach with a thumb. */
+    .welcome-footer { flex-direction: column-reverse; }
+    .welcome-footer .button, .welcome-profile-actions .button { width: 100%; }
+    .checkbox-label { min-height: 44px; }
+}
+
+/* Toasts hold no controls: let taps reach what is underneath. On phones, while a dialog
+   (a bottom sheet) is open, show them at the top so they do not cover its buttons. */
+.toast-region { pointer-events: none; }
+@media (max-width: 560px) {
+    body:has(#modal-root .modal) .toast-region { top: max(12px, env(safe-area-inset-top)); right: 16px; bottom: auto; left: 16px; }
+}

@@ -3,6 +3,7 @@ import { state, getMember, getPlan, memberBalance, getMemberPayments, consentHis
 import { emptyRow } from "../components/tables.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { getCurrentMembership } from "./memberMemberships.js";
+import { renderWelcomeSection } from "./welcomeUi.js";
 
 export function renderMembers({ search = "", filter = "all", sort = "name", pagination = { page: 1, limit: 25, total: state.members.length }, loading = false } = {}) {
     const query = search.trim().toLowerCase();
@@ -51,6 +52,7 @@ export function renderProfile(memberId) {
         </div><aside>
             <section class="card"><div class="card-header"><h2>Membership</h2></div><div class="card-body profile-fields membership-fields">${detail("Plan", planName)}${detail("Membership period", `${formatDate(membership?.start_date)} – ${formatDate(membership?.end_date)}`)}${detail("Status", membership?.effective_status || "unassigned")}${detail("Total fees", formatINR(member.totalFees))}${detail("Amount paid", formatINR(member.totalFees - balance))}${detail("Outstanding", formatINR(balance))}</div><div class="card-body profile-card-actions"><button class="button button-primary button-full" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew membership</button></div></section>
             ${renderConsentSection(member)}
+            ${renderWelcomeSection(member)}
             <section class="card profile-section"><div class="card-header"><h2>Renewal history</h2></div><div class="activity-list">${member.renewals?.length ? member.renewals.slice().reverse().map((renewal) => `<div class="activity-row"><span class="activity-dot"></span><span><p>Renewed to <strong>${escapeHTML(getPlan(renewal.planId)?.name || "Membership")}</strong></p><small>${formatDate(renewal.date)} · until ${formatDate(renewal.expiryDate)}</small></span></div>`).join("") : `<div class="empty-state">No renewals recorded yet.</div>`}</div></section>
             <section class="card profile-section"><div class="card-header"><h2>Member actions</h2></div><div class="card-body profile-action-list"><button class="button button-secondary" data-action="check-in" data-id="${escapeHTML(member.id)}">Record check-in</button><button class="button button-secondary" data-action="delete-member" data-id="${escapeHTML(member.id)}">Archive member</button></div></section>
         </aside></div>`;
