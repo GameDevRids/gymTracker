@@ -90,8 +90,29 @@ test("frontend HTML and static assets load with the expected content security po
     const workerResponse = await fetch(`${baseUrl}/sw.js`);
     assert.equal(workerResponse.status, 200);
     const workerSource = await workerResponse.text();
-    assert.match(workerSource, /gympulse-shell-v3/);
+    assert.match(workerSource, /gympulse-shell-v4/);
     assert.match(workerSource, /fetch\(new Request\(request, \{ cache: "no-cache" \}\)\)[\s\S]*?cache\.put\(url\.pathname, copy\)/);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-192.png`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-512.png`)).status, 200);
+});
+
+test("the service worker pre-caches every frontend module so the app can start offline", async () => {
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const { join, relative, sep } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const projectDir = fileURLToPath(new URL("../../", import.meta.url));
+    const worker = readFileSync(join(projectDir, "sw.js"), "utf8");
+    const listed = new Set([...worker.matchAll(/"(\/assets\/js\/[^"]+\.js)"/g)].map((match) => match[1]));
+    const root = join(projectDir, "assets", "js");
+    const modules = [];
+    const walk = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const path = join(dir, entry.name);
+            if (entry.isDirectory()) walk(path);
+            else if (entry.name.endsWith(".js")) modules.push(`/assets/js/${relative(root, path).split(sep).join("/")}`);
+        }
+    };
+    walk(root);
+    assert.ok(modules.length > 10);
+    assert.deepEqual(modules.filter((path) => !listed.has(path)), []);
 });

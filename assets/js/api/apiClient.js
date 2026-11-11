@@ -11,12 +11,22 @@ export function resolveApiOrigin(
 
 export const API_BASE_URL = resolveApiOrigin();
 
+// The access token lives only in memory. The refresh token is kept by the server in an
+// HttpOnly cookie that page scripts cannot read; it is sent automatically to /api/auth.
 let accessToken = "";
-let refreshToken = "";
 let refreshTimer;
 let refreshPromise;
 let unauthorizedHandler = () => {};
-const REFRESH_TOKEN_KEY = "gympulse.refresh-token";
+// Older versions stored the refresh token here; it is removed whenever the session changes.
+const LEGACY_REFRESH_TOKEN_KEY = "gympulse.refresh-token";
+
+function removeLegacyRefreshToken() {
+    try {
+        globalThis.sessionStorage?.removeItem(LEGACY_REFRESH_TOKEN_KEY);
+    } catch {
+        // Storage can be blocked; there is nothing to remove then.
+    }
+}
 
 function isAuthEndpoint(path) {
     try {
@@ -27,19 +37,30 @@ function isAuthEndpoint(path) {
     }
 }
 
+class SessionError extends Error {
+    constructor(message, status) {
+        super(message);
+        this.status = status;
+    }
+}
+
+// Exchanges the refresh cookie for a new access token. Concurrent callers share one request.
 async function refreshSession() {
-    if (!refreshToken) throw new Error("Your session has expired. Sign in again.");
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
-        const response = await fetch(new URL("/api/auth/refresh", `${API_BASE_URL.replace(/\/$/, "")}/`), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: refreshToken })
-        });
+        let response;
+        try {
+            response = await fetch(new URL("/api/auth/refresh", `${API_BASE_URL.replace(/\/$/, "")}/`), {
+                method: "POST",
+                credentials: "same-origin"
+            });
+        } catch {
+            throw new SessionError("GymPulse could not reach the server to restore your session.", 0);
+        }
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload?.data?.access_token) {
-            clearAuthSession();
-            throw new Error(payload?.message || "Your session has expired. Sign in again.");
+            if (response.status === 401 || response.ok) clearAuthSession();
+            throw new SessionError(payload?.message || "Your session has expired. Sign in again.", response.ok ? 401 : response.status);
         }
         setAuthSession(payload.data);
         return payload.data;
@@ -52,37 +73,35 @@ async function refreshSession() {
 }
 
 export function setAuthSession(session) {
-    const newAccessToken = session?.access_token || "";
-    const newRefreshToken = session?.refresh_token || "";
-    if (typeof globalThis.sessionStorage !== "undefined") {
-        if (newRefreshToken) globalThis.sessionStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
-        else globalThis.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-    }
-    accessToken = newAccessToken;
-    refreshToken = newRefreshToken;
+    removeLegacyRefreshToken();
+    accessToken = session?.access_token || "";
     clearTimeout(refreshTimer);
-    if (accessToken && refreshToken && Number.isFinite(session?.expires_in)) {
+    if (accessToken && Number.isFinite(session?.expires_in)) {
         refreshTimer = setTimeout(() => {
             refreshSession().catch(() => unauthorizedHandler());
         }, Math.max(1000, (session.expires_in - 60) * 1000));
     }
 }
 
+/** Forgets the in-memory session. The server clears the refresh cookie on logout. */
 export function clearAuthSession() {
     accessToken = "";
-    refreshToken = "";
     clearTimeout(refreshTimer);
-    if (typeof globalThis.sessionStorage !== "undefined") {
-        globalThis.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-    }
+    removeLegacyRefreshToken();
 }
 
+/**
+ * Restores the session after a page load from the refresh cookie.
+ * Resolves to null when there is no saved session, and throws for other failures.
+ */
 export async function restoreAuthSession() {
-    if (typeof globalThis.sessionStorage === "undefined") return null;
-    const storedRefreshToken = globalThis.sessionStorage.getItem(REFRESH_TOKEN_KEY);
-    if (!storedRefreshToken) return null;
-    refreshToken = storedRefreshToken;
-    return refreshSession();
+    removeLegacyRefreshToken();
+    try {
+        return await refreshSession();
+    } catch (error) {
+        if (error instanceof SessionError && error.status === 401) return null;
+        throw error;
+    }
 }
 
 export function setUnauthorizedHandler(handler) {

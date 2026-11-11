@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { readCookie } from "./sessionCookie.js";
 
 // Optional HTTP Basic Auth gate for private demo deployments, enabled by DEMO_PASSWORD.
 //
@@ -31,14 +32,6 @@ export function isValidDemoCookie(value, password, now = Date.now()) {
     return signatureMatches && expiresAt > Math.floor(now / 1000);
 }
 
-function readCookie(header, name) {
-    for (const part of String(header || "").split(";")) {
-        const separator = part.indexOf("=");
-        if (separator > 0 && part.slice(0, separator).trim() === name) return part.slice(separator + 1).trim();
-    }
-    return "";
-}
-
 function hasValidBasicAuth(header, password) {
     const match = /^Basic\s+([A-Za-z0-9+/]+={0,2})$/i.exec(header || "");
     const decoded = match ? Buffer.from(match[1], "base64").toString("utf8") : "";
@@ -54,7 +47,7 @@ export function requireDemoAuth(password = process.env.DEMO_PASSWORD, { now = ()
     return (request, response, next) => {
         if (!password || request.path === "/health") return next();
 
-        if (isValidDemoCookie(readCookie(request.get("Cookie"), DEMO_COOKIE_NAME), password, now())) return next();
+        if (isValidDemoCookie(readCookie(request, DEMO_COOKIE_NAME), password, now())) return next();
 
         if (hasValidBasicAuth(request.get("Authorization"), password)) {
             response.append("Set-Cookie", [

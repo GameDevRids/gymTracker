@@ -29,14 +29,12 @@ test("API client refreshes once after 401 and retries with the new bearer token"
     const originalFetch = globalThis.fetch;
     const requests = [];
     let apiAttempts = 0;
-    setAuthSession({ access_token: "old-access", refresh_token: "old-refresh", expires_in: 3600 });
+    setAuthSession({ access_token: "old-access", expires_in: 3600 });
     globalThis.fetch = async (url, options) => {
         const path = new URL(url).pathname;
         requests.push({ path, options });
         if (path === "/api/auth/refresh") {
-            return jsonResponse(200, {
-                data: { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }
-            });
+            return jsonResponse(200, { data: { access_token: "new-access", expires_in: 3600 } });
         }
         apiAttempts += 1;
         return apiAttempts === 1
@@ -57,7 +55,7 @@ test("API client refreshes once after 401 and retries with the new bearer token"
 test("API client never forwards the owner token to a custom origin", async () => {
     const originalFetch = globalThis.fetch;
     let requestOptions;
-    setAuthSession({ access_token: "owner-access", refresh_token: "owner-refresh", expires_in: 3600 });
+    setAuthSession({ access_token: "owner-access", expires_in: 3600 });
     globalThis.fetch = async (_url, options) => {
         requestOptions = options;
         return jsonResponse(401, { message: "Unauthorized" });
@@ -71,34 +69,53 @@ test("API client never forwards the owner token to a custom origin", async () =>
     }
 });
 
-test("refresh token persists in sessionStorage and restores a rotated session", async () => {
+test("session restore uses the HttpOnly refresh cookie and removes the legacy stored token", async () => {
     const originalFetch = globalThis.fetch;
     const originalStorage = globalThis.sessionStorage;
-    const values = new Map();
+    const values = new Map([["gympulse.refresh-token", "legacy-refresh"]]);
     globalThis.sessionStorage = {
         getItem(key) { return values.get(key) || null; },
         setItem(key, value) { values.set(key, value); },
         removeItem(key) { values.delete(key); }
     };
+    let refreshRequest;
+    globalThis.fetch = async (url, options) => {
+        const path = new URL(url).pathname;
+        if (path === "/api/auth/refresh") {
+            refreshRequest = options;
+            return jsonResponse(200, { data: { access_token: "restored-access", expires_in: 3600 } });
+        }
+        return jsonResponse(200, { status: "success", authorization: options.headers.Authorization });
+    };
     try {
-        setAuthSession({ access_token: "access-before-reload", refresh_token: "refresh-before-reload", expires_in: 3600 });
-        assert.equal(values.get("gympulse.refresh-token"), "refresh-before-reload");
-        clearAuthSession();
-        values.set("gympulse.refresh-token", "saved-refresh");
-        globalThis.fetch = async (url, options) => {
-            assert.equal(new URL(url).pathname, "/api/auth/refresh");
-            assert.equal(JSON.parse(options.body).refresh_token, "saved-refresh");
-            return jsonResponse(200, {
-                data: { access_token: "restored-access", refresh_token: "rotated-refresh", expires_in: 3600 }
-            });
-        };
         const session = await restoreAuthSession();
         assert.equal(session.access_token, "restored-access");
-        assert.equal(values.get("gympulse.refresh-token"), "rotated-refresh");
+        assert.equal(refreshRequest.method, "POST");
+        assert.equal(refreshRequest.credentials, "same-origin");
+        assert.equal(refreshRequest.body, undefined);
+        assert.equal(values.has("gympulse.refresh-token"), false);
+        assert.equal((await apiClient.get("/api/members")).authorization, "Bearer restored-access");
     } finally {
         clearAuthSession();
         globalThis.fetch = originalFetch;
         if (originalStorage === undefined) delete globalThis.sessionStorage;
         else globalThis.sessionStorage = originalStorage;
+    }
+});
+
+test("session restore returns null without a saved session and throws for server failures", async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async () => jsonResponse(401, { status: "error", message: "No saved session. Sign in again." });
+        assert.equal(await restoreAuthSession(), null);
+
+        globalThis.fetch = async () => jsonResponse(503, { status: "error", message: "Authentication service is unavailable." });
+        await assert.rejects(restoreAuthSession(), /Authentication service is unavailable/);
+
+        globalThis.fetch = async () => { throw new TypeError("network down"); };
+        await assert.rejects(restoreAuthSession(), /could not reach the server/);
+    } finally {
+        clearAuthSession();
+        globalThis.fetch = originalFetch;
     }
 });

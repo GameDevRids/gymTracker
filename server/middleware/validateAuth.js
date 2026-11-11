@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { clearRefreshCookie, readRefreshCookie } from "./sessionCookie.js";
 
 const credentialsSchema = z.object({
     email: z.string().trim().email().max(254),
@@ -17,10 +18,13 @@ export function validateCredentials(request, response, next) {
     next();
 }
 
+// The refresh token comes only from the HttpOnly cookie, never from the request body.
 export function validateRefreshToken(request, response, next) {
-    const token = request.body?.refresh_token;
-    if (typeof token !== "string" || token.length < 20 || token.length > 4096) {
-        return invalid(response, "A valid refresh token is required.");
+    const token = readRefreshCookie(request);
+    if (!token) return response.status(401).json({ status: "error", message: "No saved session. Sign in again." });
+    if (token.length < 20 || token.length > 4096) {
+        clearRefreshCookie(request, response);
+        return response.status(401).json({ status: "error", message: "Your session has expired. Sign in again." });
     }
     request.refreshToken = token;
     next();
