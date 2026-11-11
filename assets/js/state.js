@@ -1,4 +1,5 @@
 import { loadState, saveState, resetState } from "./storage.js";
+import { cleanMemberName } from "./utils.js";
 import { createEmptyState } from "../../data/demo-data.js";
 import { apiClient } from "./api/apiClient.js";
 import { fetchMembers } from "./api/membersApi.js";
@@ -59,7 +60,7 @@ export function memberFromApiRow(member) {
 
 export function memberToApiPayload(member) {
     const payload = {
-        full_name: member.name || "",
+        full_name: cleanMemberName(member.name),
         phone: member.phone || "",
         email: member.email || null,
         gender: member.gender || null,

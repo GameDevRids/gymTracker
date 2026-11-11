@@ -9,6 +9,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed:demo": "node scripts/seed-demo.js",
+    "check:member-names": "node scripts/find-invalid-member-names.js",
     "check:frontend": "eslint --no-eslintrc --config .eslintrc.json ../assets/js",
     "test": "node --test"
   },

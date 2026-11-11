@@ -1,4 +1,4 @@
-import { escapeHTML, formatDate, memberStatus, statusPill } from "../utils.js";
+import { escapeHTML, formatDate, formatPhone, memberStatus, statusPill } from "../utils.js";
 import { getPlan } from "../state.js";
 
 export function memberTableRow(member, { includeStatus = true } = {}) {
@@ -6,7 +6,7 @@ export function memberTableRow(member, { includeStatus = true } = {}) {
     const status = memberStatus(member);
     return `<tr>
         <td><div class="member-cell"><span class="member-avatar">${escapeHTML(member.name.charAt(0).toUpperCase())}</span><span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.id)}</small></span></div></td>
-        <td>${escapeHTML(member.phone)}</td>
+        <td>${escapeHTML(formatPhone(member.phone))}</td>
         <td>${escapeHTML(plan?.name || "Unassigned")}</td>
         <td>${formatDate(member.expiryDate)}</td>
         ${includeStatus ? `<td>${statusPill(status)}</td>` : ""}

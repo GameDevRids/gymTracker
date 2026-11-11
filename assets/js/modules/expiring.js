@@ -1,4 +1,4 @@
-import { escapeHTML, formatDate } from "../utils.js";
+import { escapeHTML, formatDate, formatPhone } from "../utils.js";
 import { t } from "../i18n.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 
@@ -47,7 +47,7 @@ export function renderExpiring(memberships = [], status = "loading", days = 7, r
                         ? `<a class="button button-secondary button-small" href="https://wa.me/91${phoneDigits}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer" data-remind-key="${escapeHTML(key)}">${escapeHTML(isReminded ? t("reminded") : t("remindWhatsApp"))}</a>`
                         : `<span class="helper-text">Invalid phone</span>`;
                     return `<article class="card expiring-card${isReminded ? " is-reminded" : ""}">
-                        <div class="expiring-member"><span class="member-avatar">${escapeHTML(member.full_name.slice(0, 1))}</span><div><strong>${escapeHTML(member.full_name)}</strong><small>${escapeHTML(member.phone)}</small></div></div>
+                        <div class="expiring-member"><span class="member-avatar">${escapeHTML(member.full_name.slice(0, 1))}</span><div><strong>${escapeHTML(member.full_name)}</strong><small>${escapeHTML(formatPhone(member.phone))}</small></div></div>
                         <div class="expiring-detail"><small>${t("plan")}</small><strong>${escapeHTML(membership.plan_name)}</strong></div>
                         <div class="expiring-detail"><small>${t("expiry")}</small><strong>${formatDate(membership.end_date)}</strong></div>
                         <span class="badge-soft ${membership.days_left < 0 ? "expiry-overdue" : ""}">${escapeHTML(dayLabel)}</span>

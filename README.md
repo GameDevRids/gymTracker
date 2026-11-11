@@ -25,6 +25,8 @@ The default home view lists expired memberships and memberships ending within se
 
 To refill a disposable Supabase demo project, configure `DEMO_SUPABASE_URL`, `DEMO_SUPABASE_SERVICE_ROLE_KEY`, and `DEMO_GYM_ID` in the server environment and run `ALLOW_SEED=true npm run seed:demo` from `server/`. This deletes rows only from that gym before creating fictional replacements. Never point these demo-only variables at a production project.
 
+Member names must be letters in any script, with spaces, dots, apostrophes or hyphens; empty names and email addresses are rejected by the forms, CSV import and the API. To list existing members whose names break that rule, run `npm run check:member-names` from `server/`. It only reads data.
+
 The backend sends text, approved-template and generated membership-card image messages through the official Meta Graph API. Incoming messages and delivery status updates are accepted only from webhook requests with a valid `X-Hub-Signature-256` signature. API acceptance is shown as **Accepted by Meta · awaiting status**; only webhook events update a message to sent, delivered, read or failed. API errors are shown as errors and are never replaced with simulated success.
 
 Chart.js is served locally. If the chart library is unavailable, the rest of the app continues to work and displays a chart fallback.

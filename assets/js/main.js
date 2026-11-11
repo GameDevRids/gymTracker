@@ -37,7 +37,7 @@ import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
 import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleWhatsAppChange } from "./modules/whatsapp.js";
 import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
-import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, setDateFormat, setCurrency } from "./utils.js";
+import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
 import { createDemoState } from "../../data/demo-data.js";
 
@@ -62,6 +62,9 @@ let expiringMemberships = [];
 let expiringStatus = "loading";
 // "loading" until the first members request after sign-in finishes, so the list shows skeletons, not "No members yet".
 let membersStatus = "loading";
+// Total members in the gym, ignoring search and filters; shown on the Members nav badge.
+let gymMemberTotal = null;
+let memberTotalRequest = 0;
 let expiringRequestVersion = 0;
 let activeSession;
 
@@ -171,7 +174,7 @@ function render() {
     document.querySelector('[data-action="mobile-more"]')?.classList.toggle("active", !mobilePrimaryViews.includes(currentView));
     const translatedViews = ["expiring", "overview", "members", "plans", "attendance", "payments", "renewals", "retention", "analytics", "reports", "notifications", "whatsapp", "integrations", "settings"];
     document.querySelector("#current-page").textContent = translatedViews.includes(currentView) ? t(currentView) : viewTitles[currentView] || "Overview";
-    document.querySelector("#member-count").textContent = state.members.length;
+    document.querySelector("#member-count").textContent = gymMemberTotal ?? "";
     document.querySelector("#gym-name-label").textContent = state.gym.name;
     document.querySelector(".gym-avatar").textContent = state.gym.name.trim().slice(0, 1).toUpperCase() || "G";
     const now = new Date();
@@ -211,6 +214,8 @@ async function refreshMembersFromApi({ silent = false, page: requestedPage = mem
         if (requestVersion !== memberRequestVersion) return;
         state.members = members;
         membersStatus = "ready";
+        if (!memberFilters.search && memberFilters.filter !== "suspended") setGymMemberTotal(memberListPagination.total);
+        else refreshMemberTotal();
         if (!silent) render();
     } catch (error) {
         if (requestVersion === memberRequestVersion) {
@@ -220,6 +225,26 @@ async function refreshMembersFromApi({ silent = false, page: requestedPage = mem
             }
             if (!silent) toast(error.message || "Unable to load members from the backend.", "error");
         }
+    }
+}
+
+function setGymMemberTotal(total) {
+    memberTotalRequest += 1;
+    gymMemberTotal = Number(total) || 0;
+    const badge = document.querySelector("#member-count");
+    if (badge) badge.textContent = gymMemberTotal;
+}
+
+// Asks for one row of the unfiltered list just to read its total.
+async function refreshMemberTotal() {
+    const request = ++memberTotalRequest;
+    try {
+        const response = await fetchMembers({ page: 1, limit: 1 });
+        if (request !== memberTotalRequest) return;
+        const total = response?.total ?? response?.data?.pagination?.total;
+        if (total !== undefined) setGymMemberTotal(total);
+    } catch (error) {
+        console.error("GymPulse could not load the member total.", error);
     }
 }
 
@@ -332,7 +357,7 @@ function renderMemberPlanField(status, plans = []) {
 function renderMemberFormBody(member, planStatus = "loading", plans = []) {
     const isEdit = Boolean(member);
     const body = `<form id="member-form" data-mode="${isEdit ? "update" : "create"}" data-id="${escapeHTML(member?.id || "")}" data-plans-state="${isEdit ? "not-needed" : planStatus}" class="form-grid" novalidate>
-            ${setField("name", "Full name", member?.name || "", "text", true)}
+            ${nameField("form", member?.name || "")}
             <div class="field"><label for="form-phone">Phone number *</label><input id="form-phone" name="phone" type="tel" value="${escapeHTML(member?.phone || "")}" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="form-phone-error"><span id="form-phone-error" class="helper-text phone-error" role="alert" hidden>Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.</span></div>
             ${setField("email", "Email address", member?.email || "", "email")}
             ${setField("dob", "Date of birth", member?.dob || "", "date")}
@@ -435,7 +460,7 @@ function openQuickAddMemberForm() {
         title: t("quickAdd"),
         subtitle: t("quickAddSubtitle"),
         body: `<form id="quick-member-form" class="quick-add-form" data-plans-state="loading" novalidate>
-            <div class="field"><label for="quick-name">${t("name")} *</label><input id="quick-name" name="name" autocomplete="name" required maxlength="200" placeholder="Member name"></div>
+            ${nameField("quick", "", t("name"))}
             <div class="field"><label for="quick-phone">${t("phone")} *</label><input id="quick-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="quick-phone-error"><span id="quick-phone-error" class="helper-text phone-error" role="alert" hidden>${t("phoneHelp")}</span></div>
             <div id="quick-plan-field">${renderQuickAddPlanField("loading")}</div>
             <p class="helper-text" id="quick-assignment-error" role="alert" hidden></p>
@@ -445,11 +470,16 @@ function openQuickAddMemberForm() {
     loadQuickAddPlans(document.querySelector("#quick-member-form"));
 }
 
+function nameField(prefix, value, label = "Full name") {
+    return `<div class="field"><label for="${prefix}-name">${escapeHTML(label)} *</label><input id="${prefix}-name" name="name" type="text" value="${escapeHTML(value)}" autocomplete="name" maxlength="200" placeholder="Member name" required aria-describedby="${prefix}-name-error"><span id="${prefix}-name-error" class="helper-text name-error" role="alert" hidden></span></div>`;
+}
+
 async function saveQuickMember(form) {
-    const name = String(form.elements.name.value || "").trim();
+    const name = cleanMemberName(form.elements.name.value);
     const enteredPhone = String(form.elements.phone.value || "").trim();
     const phone = normalizeIndianPhone(enteredPhone);
-    if (!name) throw new Error("Enter the member's name.");
+    const nameIssue = memberNameIssue(name);
+    if (nameIssue) throw new Error(MEMBER_NAME_MESSAGES[nameIssue]);
     if (!isValidIndianPhone(enteredPhone)) throw new Error("Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.");
     if (form.dataset.plansState !== "ready") throw new Error("An active membership plan is required.");
     const planId = form.dataset.createdPlanId || form.elements.planId.value;
@@ -464,6 +494,7 @@ async function saveQuickMember(form) {
         if (duplicate) throw new Error(`This phone number already belongs to ${duplicate.name}.`);
         member = await createMemberOnApi({ name, phone });
         if (!member?.id) throw new Error("The member was not returned by the backend.");
+        refreshMemberTotal();
         form.dataset.createdMemberId = member.id;
         form.dataset.createdPlanId = planId;
         form.dataset.createdStartDate = startDate;
@@ -601,7 +632,7 @@ function printReceipt(paymentId) {
     const rows = [
         ["Receipt", payment.id],
         ["Member", member?.name || "Removed member"],
-        ["Phone", member?.phone || "—"],
+        ["Phone", formatPhone(member?.phone) || "—"],
         ["Date", formatDate(payment.date)],
         ["Method", payment.method],
         ["Amount", formatINR(payment.amount)]
@@ -630,6 +661,7 @@ function handleAction(action, target) {
             (async () => {
                 try {
                     await deleteMemberOnApi(id);
+                    refreshMemberTotal();
                     state.payments = state.payments.filter((payment) => payment.memberId !== id);
                     state.attendance = state.attendance.filter((record) => record.memberId !== id);
                     closeModal();
@@ -746,7 +778,9 @@ async function saveMember(form) {
             ? "No active membership plans available. Create a plan first."
             : "Unable to load membership plans. Please try again.");
     }
-    const name = String(values.get("name") || "").trim();
+    const name = cleanMemberName(values.get("name"));
+    const nameIssue = memberNameIssue(name);
+    if (nameIssue) throw new Error(MEMBER_NAME_MESSAGES[nameIssue]);
     const enteredPhone = String(values.get("phone") || "").trim();
     if (!isValidIndianPhone(enteredPhone)) throw new Error("Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.");
     const phone = normalizeIndianPhone(enteredPhone);
@@ -800,6 +834,7 @@ async function saveMember(form) {
         : await createMemberOnApi(record);
     if (!saved?.id) throw new Error("The member was not returned by the backend.");
     let createdAssignment = null;
+    if (isNewMember && !current) refreshMemberTotal();
     if (isNewMember) {
         form.dataset.createdMemberId = saved.id;
         form.dataset.id = saved.id;
@@ -963,7 +998,7 @@ function renderImportPreview(validCount, invalidCount) {
         wide: true,
         body: `<div class="note-box" style="margin-bottom:12px">Required columns: <strong>name</strong> and <strong>phone</strong>. Supported aliases include full name, mobile, phone number, joining date and membership plan. Rows with an existing or repeated phone are skipped. Rows without a plan are added without a membership.</div>
         <p id="import-progress" role="status" aria-live="polite"></p>
-        <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(row.phone)}</td><td>${escapeHTML(row.planName || "No plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
+        <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(formatPhone(row.phone))}</td><td>${escapeHTML(row.planName || "No plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
         footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-primary" data-action="confirm-import" ${validCount ? "" : "disabled"}>Import ${validCount} members</button>`
     });
 }
@@ -1201,7 +1236,11 @@ async function handleSubmit(event) {
     const handler = handlers[form.id];
     if (!handler) return;
     event.preventDefault();
-    if ((form.id === "member-form" || form.id === "quick-member-form") && !validateMemberPhone(form, true)) return;
+    if (form.id === "member-form" || form.id === "quick-member-form") {
+        const nameValid = validateMemberName(form, true);
+        const phoneValid = validateMemberPhone(form, true);
+        if (!nameValid || !phoneValid) return;
+    }
     if (!form.reportValidity()) return;
     if (form.id === "member-form" || form.id === "quick-member-form") {
         if (memberSaving) return;
@@ -1357,6 +1396,9 @@ document.addEventListener("input", (event) => {
         target.value = target.value.replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "").slice(0, 13);
         validateMemberPhone(target.form, false);
     }
+    if (target.matches('#member-form [name="name"], #quick-member-form [name="name"]')) {
+        validateMemberName(target.form, target.getAttribute("aria-invalid") === "true");
+    }
     if (target.matches("#membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
     if (target.id === "member-search") {
         memberFilters.search = target.value;
@@ -1373,6 +1415,17 @@ document.addEventListener("input", (event) => {
         filterPaymentRows();
     }
 });
+
+function validateMemberName(form, showError) {
+    const input = form?.elements?.name;
+    const error = form?.querySelector(".name-error");
+    if (!input || !error) return true;
+    const issue = memberNameIssue(input.value);
+    error.textContent = issue ? MEMBER_NAME_MESSAGES[issue] : "";
+    error.hidden = !issue || !showError;
+    input.setAttribute("aria-invalid", String(Boolean(issue) && showError));
+    return !issue;
+}
 
 function validateMemberPhone(form, showError) {
     const input = form?.elements?.phone;

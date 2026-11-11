@@ -12,9 +12,32 @@ const indianPhone = z.preprocess(
     (value) => typeof value === "string" && /^\+91[6-9][0-9]{9}$/.test(value) ? value.slice(3) : value,
     z.string().regex(/^[6-9][0-9]{9}$/)
 );
+// Same rule as memberNameIssue in assets/js/utils.js: letters in any script, separated by
+// spaces, dots, apostrophes or hyphens. Email addresses and digits are rejected.
+const MEMBER_NAME_PATTERN = /^[\p{L}\p{M}]+(?:[ .'’-]+[\p{L}\p{M}]+)*\.?$/u;
+const memberNameSchema = z.string()
+    .transform((value) => value.trim().replace(/\s+/g, " "))
+    .superRefine((name, context) => {
+        if (!name) context.addIssue({ code: "custom", message: "Full name is required." });
+        else if (name.includes("@")) context.addIssue({ code: "custom", message: "Full name must be the member's name, not an email address." });
+        else if (name.length > 200) context.addIssue({ code: "custom", message: "Full name must be 200 characters or fewer." });
+        else if (!MEMBER_NAME_PATTERN.test(name)) context.addIssue({ code: "custom", message: "Full name must use letters. Spaces, dots, apostrophes and hyphens are allowed." });
+    });
+
+function nameIssueMessage(result) {
+    const issue = result?.error?.issues[0];
+    return issue?.code === "custom" ? issue.message : "Full name is required.";
+}
+
+/** Returns "" for a valid member name, otherwise the reason it is rejected. */
+export function memberNameProblem(value) {
+    const result = memberNameSchema.safeParse(value);
+    return result.success ? "" : nameIssueMessage(result);
+}
+
 const memberValueSchemas = {
     member_code: z.string().trim().min(1).max(64),
-    full_name: z.string().trim().min(1).max(200),
+    full_name: memberNameSchema,
     phone: indianPhone,
     email: emptyToNull(z.string().trim().max(254).email()).nullable(),
     gender: emptyToNull(z.string().trim().max(32)).nullable(),
@@ -25,8 +48,8 @@ const memberValueSchemas = {
 const editableFields = new Set(Object.keys(memberValueSchemas));
 const memberObjectSchema = z.record(z.string(), z.unknown());
 
-function memberFieldError(field) {
-    if (field === "full_name") return "Full name must be between 1 and 200 characters.";
+function memberFieldError(field, result) {
+    if (field === "full_name") return nameIssueMessage(result);
     if (field === "phone") return "Enter a valid Indian phone number (10 digits starting with 6–9, optionally with +91).";
     if (field === "member_code") return "Member code must be between 1 and 64 characters.";
     if (field === "email") return "Enter a valid email address.";
@@ -63,7 +86,7 @@ export function validateMemberPayload(mode) {
         const member = {};
         for (const [field, value] of Object.entries(body)) {
             const result = memberValueSchemas[field].safeParse(value);
-            if (!result.success) return sendValidationError(response, memberFieldError(field));
+            if (!result.success) return sendValidationError(response, memberFieldError(field, result));
             member[field] = result.data;
         }
 

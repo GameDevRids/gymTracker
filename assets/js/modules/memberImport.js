@@ -1,4 +1,11 @@
-import { isValidIndianPhone, normalizeIndianPhone } from "../utils.js";
+import { cleanMemberName, isValidIndianPhone, memberNameIssue, normalizeIndianPhone } from "../utils.js";
+
+const NAME_IMPORT_ISSUES = {
+    missing: "name is required",
+    email: "name looks like an email address",
+    "too-long": "name is too long",
+    invalid: "name must use letters only"
+};
 
 // CSV import logic kept free of DOM and global state so it can be tested in Node.
 // Headers arrive normalized by parseCSV: lower case with spaces, "_" and "-" removed.
@@ -27,7 +34,7 @@ export function readImportRow({ rowNumber, data }) {
     return {
         rowNumber,
         data,
-        name: pick(data, ["name", "fullname", "membername"]),
+        name: cleanMemberName(pick(data, ["name", "fullname", "membername"])),
         phone: pick(data, ["phone", "phonenumber", "mobile", "mobilenumber"]),
         email: pick(data, ["email", "emailaddress"]),
         dob: pick(data, ["dob", "dateofbirth"]),
@@ -51,7 +58,8 @@ export function validateImportRows(parsedRows, { existingPhones = [], activePlan
         const row = readImportRow(parsed);
         const issues = [];
         const phoneKey = importPhoneKey(row.phone);
-        if (!row.name) issues.push("name is required");
+        const nameIssue = memberNameIssue(row.name);
+        if (nameIssue) issues.push(NAME_IMPORT_ISSUES[nameIssue]);
         if (!isValidIndianPhone(row.phone)) issues.push("valid Indian mobile number is required");
         else if (seen.has(phoneKey)) issues.push("duplicate phone number");
         if (phoneKey) seen.add(phoneKey);

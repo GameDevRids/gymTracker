@@ -75,6 +75,40 @@ export function normalizeIndianPhone(value) {
     return phone.startsWith("+91") ? phone.slice(3) : phone;
 }
 
+/** Shows an Indian mobile number as "+91 98230 12345". Anything else is returned unchanged. */
+export function formatPhone(value) {
+    const raw = String(value ?? "").trim();
+    let digits = raw.replace(/\D/g, "");
+    if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+    else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+    return /^[6-9]\d{9}$/.test(digits) ? `+91 ${digits.slice(0, 5)} ${digits.slice(5)}` : raw;
+}
+
+// Member names: letters in any script (with combining marks for Devanagari), separated by
+// spaces, dots, apostrophes or hyphens. The server applies the same rule in validateMember.js.
+export const MEMBER_NAME_MAX_LENGTH = 200;
+const MEMBER_NAME_PATTERN = /^[\p{L}\p{M}]+(?:[ .'’-]+[\p{L}\p{M}]+)*\.?$/u;
+
+export function cleanMemberName(value) {
+    return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+/** Returns "" for a valid name, otherwise "missing", "email", "too-long" or "invalid". */
+export function memberNameIssue(value) {
+    const name = cleanMemberName(value);
+    if (!name) return "missing";
+    if (name.includes("@")) return "email";
+    if (name.length > MEMBER_NAME_MAX_LENGTH) return "too-long";
+    return MEMBER_NAME_PATTERN.test(name) ? "" : "invalid";
+}
+
+export const MEMBER_NAME_MESSAGES = {
+    missing: "Enter the member's name.",
+    email: "Enter the member's name, not an email address.",
+    "too-long": `Name must be ${MEMBER_NAME_MAX_LENGTH} characters or fewer.`,
+    invalid: "Use letters for the name. Spaces, dots, apostrophes and hyphens are allowed."
+};
+
 export function memberStatus(member) {
     const expiry = daysBetween(member.expiryDate);
     if (member.status === "suspended") return "suspended";
