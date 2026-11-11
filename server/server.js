@@ -29,7 +29,6 @@ const projectDir = path.resolve(currentDir, "..");
 const allowedOrigins = new Set(whatsappConfig.allowedOrigins);
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
-app.use(requireDemoAuth());
 app.use(httpLogger);
 app.use(helmet({
     contentSecurityPolicy: {
@@ -44,6 +43,7 @@ app.use(helmet({
     }
 }));
 app.use(compression());
+app.use(requireDemoAuth());
 app.use("/api", rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 300,

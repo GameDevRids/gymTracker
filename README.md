@@ -38,7 +38,15 @@ Serve GymPulse over HTTPS (or `localhost` for local development), then open it i
 Create a Web Service with **Root Directory** `server`, **Build Command** `npm install`, **Start Command** `npm start`, and **Health Check Path** `/health`. Render supplies `PORT`; set these environment variables:
 
 - Required: `HOST=0.0.0.0`, `NODE_ENV=production`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`.
-- Optional: `SENTRY_DSN` (enables error tracking), `LOG_LEVEL`, `META_GRAPH_API_VERSION` (defaults to `v22.0`), `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, and `WHATSAPP_ALLOWED_ORIGINS`.
+- Optional: `DEMO_PASSWORD` (puts the whole deployment behind a password; see below), `SENTRY_DSN` (enables error tracking), `LOG_LEVEL`, `META_GRAPH_API_VERSION` (defaults to `v22.0`), `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, and `WHATSAPP_ALLOWED_ORIGINS`.
+
+### Demo password and sign-in limits
+
+Set `DEMO_PASSWORD` to put every route except `/health` behind HTTP Basic Auth. The browser asks for a username and password; any username works with the configured password. The password is compared with `crypto.timingSafeEqual`. After a successful prompt the server sets a signed, HttpOnly cookie valid for 12 hours, marked `Secure` over HTTPS. The app needs it because its API calls send their own sign-in token in the same header the browser would use for the password. Changing `DEMO_PASSWORD` invalidates existing cookies. Leave it empty to disable the gate.
+
+The gate also covers `/health/db` and the WhatsApp webhook. Meta cannot send the password, so leave `DEMO_PASSWORD` empty if you use live WhatsApp webhooks.
+
+`POST /api/auth/login` and `POST /api/auth/refresh` each allow 10 requests per 15 minutes per client IP, and return HTTP 429 after that. All other `/api` routes share a looser limit of 300 requests per 15 minutes. Client IPs are read from one trusted proxy hop, which matches Render.
 
 Use only fictional demo data. Keep the WhatsApp Cloud API credentials empty unless you intentionally enable live messaging. Keep the Supabase service-role key private and use a demo-only Supabase project.
 
@@ -52,13 +60,13 @@ Use only fictional demo data. Keep the WhatsApp Cloud API credentials empty unle
 - An optional Express backend with Meta Cloud API sends, media upload for member ID cards, webhook verification and in-memory message status tracking.
 - Browser LocalStorage persistence, English/Hindi/Marathi navigation and form labels, and reset-to-demo-data action.
 
-The fictional CSV import example is in [`data/sample-members.csv`](./data/sample-members.csv). Imports accept `name` and `phone` as required columns, plus optional `email`, `plan`, `joinedAt`, `startDate`, and `expiryDate`. Header matching ignores spaces, underscores, and hyphens; aliases include `fullName`, `mobile`, `phoneNumber`, and `joiningDate`. Optional date columns should use `YYYY-MM-DD`; plan values must match an active plan name, or may be left blank to use the first active plan. Existing or repeated phone numbers and invalid dates/plans are reported and skipped rather than overwritten.
+The fictional CSV import example is in [`data/sample-members.csv`](./data/sample-members.csv). Imports accept `name` and `phone` as required columns, plus optional `email`, `plan`, `joinedAt`, `startDate`, and `expiryDate`. Header matching ignores spaces, underscores, and hyphens; aliases include `fullName`, `mobile`, `phoneNumber`, and `joiningDate`. Aliases also include `membershipPlan`. Optional date columns should use `YYYY-MM-DD`. Plan values must match an active plan name; rows without a plan are added without a membership. Phone numbers that already exist in the gym or repeat within the file, and invalid dates or plans, are reported and skipped rather than overwritten.
 
 ## Important limitations
 
 Demo mode uses fictional data and never sends real messages. Every simulated WhatsApp message is labelled DEMO and is not marked delivered. Live mode requires server-side Meta credentials; never put access tokens or app secrets in frontend files or browser storage. Live messages require the member to be marked as opted in. Template messages must match templates approved by Meta, and free-form messages are subject to Meta's customer-service-window rules.
 
-Owner sign-in uses Supabase Auth through the backend. Access and refresh tokens exist only in page memory; reloading the page requires signing in again. Protected API routes verify the access token, resolve the owner's gym, and scope database operations to that gym. Row Level Security also restricts authenticated Supabase access to linked gyms; the service-role key remains server-only. Signed Meta webhook endpoints remain public and verify Meta's signature.
+Owner sign-in uses Supabase Auth through the backend. Access and refresh tokens exist only in page memory; reloading the page requires signing in again. Protected API routes verify the access token, resolve the owner's gym, and scope database operations to that gym. Row Level Security also restricts authenticated Supabase access to linked gyms; the service-role key remains server-only. Signed Meta webhook endpoints are public unless `DEMO_PASSWORD` is set, and verify Meta's signature.
 
 This remains a prototype, not a production-secure SaaS. Browser-stored settings and demo data are namespaced per signed-in user but are not encrypted; anyone with access to that browser profile can read them. The WhatsApp backend message log is in memory and is lost on restart. Incoming messages are associated with a gym only when the sender phone uniquely matches one gym's member record. Use fictional data, deploy behind HTTPS and a trusted reverse proxy, and do not use it as the sole recordkeeping system for a real gym.
 
