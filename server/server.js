@@ -19,10 +19,10 @@ import { requireDemoAuth } from "./middleware/demoAuth.js";
 import { createAuthRateLimit } from "./middleware/authRateLimit.js";
 import { supabaseClient, supabaseConfigured } from "./config/database.js";
 import { whatsappConfig } from "./config/whatsappConfig.js";
+import { resolveListenAddress } from "./config/listen.js";
 
 export const app = express();
-const port = Number(process.env.PORT) || 3001;
-const host = process.env.HOST || "127.0.0.1";
+const { host, port, hostSource, portSource } = resolveListenAddress();
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const currentFile = fileURLToPath(import.meta.url);
 const projectDir = path.resolve(currentDir, "..");
@@ -125,7 +125,7 @@ app.use((error, _request, response, _next) => {
 
 function startServer() {
     const server = app.listen(port, host, () => {
-        logger.info({ host, port }, "GymPulse server listening.");
+        logger.info({ host, port, hostSource, portSource }, `GymPulse server listening on ${host}:${port}.`);
     });
     let shuttingDown = false;
     const shutdown = (signal) => {
