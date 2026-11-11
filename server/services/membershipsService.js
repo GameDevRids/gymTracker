@@ -192,7 +192,7 @@ export async function listExpiringMemberships({ days, gymId }, client = supabase
             const member = membership.members;
             const daysLeft = Math.floor((new Date(`${membership.end_date}T00:00:00.000Z`) - todayDate) / 86400000);
             return {
-                ...withEffectiveStatus(membership),
+                ...membership,
                 member: {
                     id: member.id,
                     full_name: member.full_name,
