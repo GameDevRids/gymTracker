@@ -28,6 +28,9 @@ export class MembersServiceError extends Error {
 }
 
 function throwDatabaseError(error, operation) {
+    if (operation === "payments" && ["PGRST205", "42P01", "42703"].includes(error?.code)) {
+        throw new MembersServiceError(503, "Payments are unavailable. Run migration 006_create_payments.sql in Supabase SQL Editor.");
+    }
     if (error?.code === "23505") {
         throw new MembersServiceError(409, "Member code already exists.");
     }
@@ -70,30 +73,74 @@ function withoutMembershipDates(member) {
 
 const currentMembershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at,updated_at";
 
+// PostgREST returns at most 1000 rows per request, so read in pages until a short page arrives.
+const READ_PAGE_SIZE = 1000;
+
+async function readAllRows(buildQuery, operation) {
+    const rows = [];
+    for (let from = 0; ; from += READ_PAGE_SIZE) {
+        const { data, error } = await buildQuery().range(from, from + READ_PAGE_SIZE - 1);
+        if (error) throwDatabaseError(error, operation);
+        rows.push(...(data || []));
+        if (!data || data.length < READ_PAGE_SIZE) return rows;
+    }
+}
+
+function toMoney(value) {
+    return Math.round(Number(value || 0) * 100) / 100;
+}
+
+// Billed = fees of every non-cancelled membership; paid = every recorded payment. Both come from the database.
+export function memberBilling(memberships, payments) {
+    const billed = toMoney(memberships
+        .filter((membership) => membership.status !== "cancelled")
+        .reduce((sum, membership) => sum + Number(membership.total_fees ?? membership.price ?? 0), 0));
+    const paid = toMoney(payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+    return { billed, paid, outstanding: Math.max(0, toMoney(billed - paid)) };
+}
+
 async function addCurrentMemberships(members, gymId, client) {
     if (!members.length) return members;
-    const { data, error } = await client
-        .from("member_memberships")
-        .select(currentMembershipColumns)
-        .in("member_id", members.map((member) => member.id))
-        .eq("gym_id", gymId)
-        .order("created_at", { ascending: false })
-        .order("start_date", { ascending: false });
-    if (error) throwDatabaseError(error, "membership-history");
+    const memberIds = members.map((member) => member.id);
+    const [data, payments] = await Promise.all([
+        readAllRows(() => client
+            .from("member_memberships")
+            .select(currentMembershipColumns)
+            .in("member_id", memberIds)
+            .eq("gym_id", gymId)
+            .order("created_at", { ascending: false })
+            .order("start_date", { ascending: false })
+            .order("id", { ascending: false }), "membership-history"),
+        readAllRows(() => client
+            .from("payments")
+            .select("id,member_id,amount")
+            .in("member_id", memberIds)
+            .eq("gym_id", gymId)
+            .order("id", { ascending: true }), "payments")
+    ]);
+
+    const paymentsByMember = new Map();
+    for (const payment of payments) {
+        const list = paymentsByMember.get(payment.member_id) || [];
+        list.push(payment);
+        paymentsByMember.set(payment.member_id, list);
+    }
 
     const membershipsByMember = new Map();
-    for (const membership of data || []) {
+    for (const membership of data) {
         const history = membershipsByMember.get(membership.member_id) || [];
         history.push(membership);
         membershipsByMember.set(membership.member_id, history);
     }
 
     return members.map((member) => {
-        const currentMembership = selectCurrentMembership(membershipsByMember.get(member.id) || []);
+        const history = membershipsByMember.get(member.id) || [];
+        const currentMembership = selectCurrentMembership(history);
         return {
             ...member,
             current_membership: currentMembership,
-            membership_status: currentMembership?.effective_status || "unassigned"
+            membership_status: currentMembership?.effective_status || "unassigned",
+            billing: memberBilling(history, paymentsByMember.get(member.id) || [])
         };
     });
 }

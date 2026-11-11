@@ -5,6 +5,7 @@ import {
     getPlan,
     getMember,
     memberBalance,
+    addPaidAmount,
     memberListPagination,
     initializationWarning,
     loadMembersFromApi,
@@ -119,6 +120,7 @@ function startAuthenticatedApp(session) {
     document.querySelector(".top-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
     document.querySelector(".profile-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
     state.gym.name = session.gym.name;
+    state.gym.isDemo = session.gym.is_demo === true;
     render();
     refreshMembersFromApi();
     loadExpiringMemberships();
@@ -209,7 +211,6 @@ async function refreshMembersFromApi({ silent = false, page: requestedPage = mem
         if (requestVersion !== memberRequestVersion) return;
         state.members = members;
         membersStatus = "ready";
-        await Promise.all(members.map((member) => loadMemberPaymentsFromApi(member.id, { silent: true })));
         if (!silent) render();
     } catch (error) {
         if (requestVersion === memberRequestVersion) {
@@ -341,7 +342,9 @@ function renderMemberFormBody(member, planStatus = "loading", plans = []) {
             ${isEdit
                 ? `${setField("startDate", "Membership start date", member.startDate || "", "date", false, 'readonly aria-readonly="true"')}${setField("expiryDate", "Membership expiry date", member.expiryDate || "", "date", false, 'readonly aria-readonly="true"')}`
                 : `${setField("assignmentStartDate", "Membership start date", localISODate(), "date", true)}${setField("assignmentEndDate", "Calculated membership expiry", "", "date", false, 'readonly aria-readonly="true"')}<p class="helper-text field full">The assignment service calculates and saves the membership expiry date.</p>`}
-            ${setField("totalFees", "Total billed fees (₹)", member?.totalFees ?? "", "number", true, 'min="0" step="1"')}
+            ${isEdit
+                ? `<div class="field"><span class="field-label">Total billed fees</span><p class="readonly-value">${formatINR(member.totalFees || 0)}</p><span class="helper-text">Fees are saved with each plan assignment and cannot be edited here.</span></div>`
+                : setField("totalFees", "Membership fee (₹)", "", "number", true, 'min="0" step="1"')}
             ${!isEdit ? setField("initialPayment", "Amount collected now (₹)", 0, "number", false, 'min="0" step="1"') : ""}
             ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
             <p class="helper-text field full" id="member-assignment-error" role="alert" hidden></p>
@@ -655,7 +658,7 @@ function handleAction(action, target) {
         case "receipt": openReceipt(id); break;
         case "print-receipt": printReceipt(id); break;
         case "reset-demo": resetDemoData(); break;
-        case "load-sample-data": loadSampleData(); break;
+        case "load-sample-data": if (state.gym.isDemo) loadSampleData(); break;
         default: break;
     }
 }
@@ -761,7 +764,7 @@ async function saveMember(form) {
     const plan = isNewMember
         ? { id: planId, name: selectedOption?.dataset.name || "", price: Number(selectedOption?.dataset.price) }
         : null;
-    const totalFees = Number(values.get("totalFees"));
+    const totalFees = isNewMember ? Number(values.get("totalFees")) : Number(current?.totalFees || 0);
     if (!Number.isFinite(totalFees) || totalFees < 0) throw new Error("Membership fees must be zero or more.");
     const initialPayment = Number(values.get("initialPayment") || 0);
     if (!Number.isFinite(initialPayment) || initialPayment < 0 || initialPayment > totalFees) throw new Error("Initial payment must be between zero and the membership fee.");
@@ -859,6 +862,7 @@ async function saveMember(form) {
         });
         if (!payment) throw new Error("The payments API did not return the initial payment.");
         const mappedPayment = mapPayment(payment);
+        addPaidAmount(saved.id, mappedPayment.amount);
         state.apiMemberPayments[saved.id] = [
             mappedPayment,
             ...(state.apiMemberPayments[saved.id] || []).filter((item) => item.id !== mappedPayment.id)
@@ -885,6 +889,7 @@ async function savePayment(form) {
     });
     if (!saved) throw new Error("The payments API did not return the saved record.");
     const mapped = mapPayment(saved);
+    if (member.memberCode) addPaidAmount(member.id, mapped.amount);
     state.apiMemberPayments[member.id] = [mapped, ...(state.apiMemberPayments[member.id] || []).filter((item) => item.id !== mapped.id)];
     closeModal();
     safePersist("Payment recorded successfully.");

@@ -84,9 +84,31 @@ test("gym onboarding claims the unowned default workspace through the atomic RPC
             return { data: [{ id: gymId, name: "Gym A" }], error: null };
         }
     };
-    assert.deepEqual(await createGym("Gym A", user.id, client), { id: gymId, name: "Gym A" });
+    assert.deepEqual(await createGym("Gym A", user.id, client), { id: gymId, name: "Gym A", is_demo: false });
     assert.deepEqual(rpcCall, {
         name: "gympulse_create_or_claim_gym",
         args: { p_name: "Gym A", p_owner_user_id: user.id }
     });
+});
+
+test("only gyms listed in DEMO_GYM_IDS are flagged as demo accounts", async () => {
+    const { isDemoGym } = await import("../services/authService.js");
+    assert.equal(isDemoGym(gymId, {}), false);
+    assert.equal(isDemoGym(gymId, { DEMO_GYM_IDS: "other-gym" }), false);
+    assert.equal(isDemoGym(gymId, { DEMO_GYM_IDS: ` other-gym , ${gymId} ` }), true);
+    assert.equal(isDemoGym("", { DEMO_GYM_IDS: "," }), false);
+
+    const originalFetch = globalThis.fetch;
+    const original = process.env.DEMO_GYM_IDS;
+    globalThis.fetch = async () => jsonResponse({ access_token: "access", refresh_token: "refresh", expires_in: 3600, user });
+    try {
+        delete process.env.DEMO_GYM_IDS;
+        assert.equal((await login({ email: user.email, password: "passphrase" }, mockDatabase())).gym.is_demo, false);
+        process.env.DEMO_GYM_IDS = gymId;
+        assert.equal((await refresh("refresh-token-value-at-least-twenty", mockDatabase())).gym.is_demo, true);
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (original === undefined) delete process.env.DEMO_GYM_IDS;
+        else process.env.DEMO_GYM_IDS = original;
+    }
 });

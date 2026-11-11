@@ -42,7 +42,9 @@ export function memberFromApiRow(member) {
         startDate: currentMembership?.start_date || "",
         expiryDate: currentMembership?.end_date || "",
         status: member.status === "suspended" ? "suspended" : "active",
-        totalFees: Number(currentMembership?.total_fees ?? currentMembership?.price ?? 0),
+        // Lifetime totals calculated by the server from memberships and recorded payments.
+        totalFees: Number(member.billing?.billed ?? currentMembership?.total_fees ?? currentMembership?.price ?? 0),
+        paidTotal: Number(member.billing?.paid ?? 0),
         charges: [],
         amountPaid: 0,
         emergencyContact: "",
@@ -129,10 +131,15 @@ export function getMemberPayments(memberId) {
     return state.payments.filter((payment) => payment.memberId === memberId);
 }
 export function memberBalance(member) {
-    const payments = member.memberCode
-        ? state.apiMemberPayments[member.id] || []
-        : state.payments.filter((payment) => payment.memberId === member.id);
+    if (member.memberCode) return Math.max(0, Number(member.totalFees || 0) - Number(member.paidTotal || 0));
+    const payments = state.payments.filter((payment) => payment.memberId === member.id);
     return Math.max(0, Number(member.totalFees || 0) - payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+}
+
+// Keeps the database totals current after this browser records a payment, until the next reload.
+export function addPaidAmount(memberId, amount) {
+    const member = getMember(memberId);
+    if (member) member.paidTotal = Number(member.paidTotal || 0) + Number(amount || 0);
 }
 export function activeMembers() {
     const date = new Date();

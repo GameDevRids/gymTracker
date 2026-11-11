@@ -36,6 +36,12 @@ async function authRequest(path, body, token) {
     return { data };
 }
 
+// Demo gyms are listed by ID in DEMO_GYM_IDS; only they may load fictional sample data.
+export function isDemoGym(gymId, environment = process.env) {
+    if (!gymId) return false;
+    return String(environment.DEMO_GYM_IDS || "").split(",").map((id) => id.trim()).filter(Boolean).includes(gymId);
+}
+
 async function getGym(userId, client) {
     const { data, error } = await client
         .from("gym_users")
@@ -43,7 +49,7 @@ async function getGym(userId, client) {
         .eq("user_id", userId)
         .maybeSingle();
     if (error) throw new AuthServiceError(503, "Gym membership could not be loaded.");
-    return data?.gyms ? { id: data.gyms.id, name: data.gyms.name } : null;
+    return data?.gyms ? { id: data.gyms.id, name: data.gyms.name, is_demo: isDemoGym(data.gyms.id) } : null;
 }
 
 function authFailure(error) {
@@ -95,7 +101,7 @@ export async function createGym(name, ownerUserId, client = supabaseClient) {
     }
     const gym = Array.isArray(data) ? data[0] : data;
     if (!gym?.id) throw new AuthServiceError(500, "The database did not return the created gym.");
-    return { id: gym.id, name: gym.name };
+    return { id: gym.id, name: gym.name, is_demo: isDemoGym(gym.id) };
 }
 
 export async function logout(accessToken, client = supabaseClient) {

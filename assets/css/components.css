@@ -76,3 +76,7 @@
     :is(button, .button):not(:disabled):active { transform: none; }
     .skeleton-item::after { animation: none; opacity: 0; }
 }
+
+/* Read-only values inside forms, such as calculated expiry and billed fees. */
+.field .field-label { color: var(--ink, #35443a); font-size: 14px; font-weight: 600; }
+.field .readonly-value { min-height: var(--control-height); margin: 0; padding: 9px 0; color: var(--ink, #293a30); font-size: 15px; font-weight: 600; }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createMember, deleteMember, getMember, listMembers, updateMember } from "../services/membersService.js";
+import { createMember, deleteMember, getMember, listMembers, memberBilling, updateMember } from "../services/membersService.js";
 
 function mockSupabase(result) {
     const calls = [];
@@ -63,7 +63,7 @@ function mockSupabaseError(error) {
     return { client, calls };
 }
 
-function mockMembershipReads(members, memberships) {
+function mockMembershipReads(members, memberships, payments = []) {
     const calls = [];
     const client = {
         from(table) {
@@ -81,7 +81,7 @@ function mockMembershipReads(members, memberships) {
                 error: null
             });
             query.then = (resolve, reject) => Promise.resolve({
-                data: table === "members" ? members : memberships,
+                data: table === "members" ? members : table === "payments" ? payments : memberships,
                 count: members.length,
                 error: null
             }).then(resolve, reject);
@@ -178,6 +178,65 @@ test("member list attaches current membership from one batched history query", a
             .find(([method]) => method === "in"),
         ["in", "member_id", memberRows.map((entry) => entry.id)]
     );
+});
+
+test("member list balances use every non-cancelled membership fee and every recorded payment", async () => {
+    const memberRows = [
+        { id: "renewed", full_name: "Renewed", status: "active" },
+        { id: "unpaid", full_name: "Unpaid", status: "active" }
+    ];
+    const historyRows = [
+        { id: "first", member_id: "renewed", status: "assigned", price: 1800, total_fees: 1800, start_date: "2026-08-01", end_date: "2026-08-30", created_at: "2026-08-01" },
+        { id: "second", member_id: "renewed", status: "assigned", price: 1800, total_fees: 1500, start_date: "2026-09-01", end_date: "2026-09-30", created_at: "2026-09-01" },
+        { id: "cancelled", member_id: "renewed", status: "cancelled", price: 4800, total_fees: 4800, start_date: "2026-10-01", end_date: "2026-12-29", created_at: "2026-10-01" },
+        { id: "third", member_id: "unpaid", status: "assigned", price: 1800, total_fees: 1800, start_date: "2026-11-01", end_date: "2026-11-30", created_at: "2026-11-01" }
+    ];
+    const paymentRows = [
+        { id: "p1", member_id: "renewed", amount: "1800.00" },
+        { id: "p2", member_id: "renewed", amount: "500.50" }
+    ];
+    const mock = mockMembershipReads(memberRows, historyRows, paymentRows);
+
+    const result = await listMembers({ page: 1, limit: 20, gymId }, mock.client);
+
+    assert.deepEqual(result.members.map((entry) => entry.billing), [
+        { billed: 3300, paid: 2300.5, outstanding: 999.5 },
+        { billed: 1800, paid: 0, outstanding: 1800 }
+    ]);
+    const paymentsQuery = mock.calls.find((call) => call.table === "payments");
+    assert.ok(paymentsQuery.operations.some(([method, field, value]) => method === "eq" && field === "gym_id" && value === gymId));
+    assert.deepEqual(paymentsQuery.operations.find(([method]) => method === "in"), ["in", "member_id", ["renewed", "unpaid"]]);
+});
+
+test("billing never reports a negative outstanding balance and falls back to the plan price", () => {
+    assert.deepEqual(memberBilling([{ status: "assigned", price: 1000 }], [{ amount: 1200 }]), { billed: 1000, paid: 1200, outstanding: 0 });
+    assert.deepEqual(memberBilling([], []), { billed: 0, paid: 0, outstanding: 0 });
+});
+
+test("member list reads payments past the 1000-row API page limit", async () => {
+    const memberRows = [{ id: "busy", full_name: "Busy", status: "active" }];
+    const pages = [Array.from({ length: 1000 }, (_, index) => ({ id: `a${index}`, member_id: "busy", amount: 1 })), [{ id: "last", member_id: "busy", amount: 5 }]];
+    const ranges = [];
+    const client = {
+        from(table) {
+            const query = {};
+            for (const method of ["select", "order", "eq", "or", "in", "is"]) query[method] = () => query;
+            let start = 0;
+            query.range = (from, to) => {
+                if (table === "payments") ranges.push([from, to]);
+                start = from;
+                return query;
+            };
+            query.then = (resolve, reject) => {
+                const data = table === "members" ? memberRows : table === "payments" ? pages[start / 1000] || [] : [];
+                return Promise.resolve({ data, count: memberRows.length, error: null }).then(resolve, reject);
+            };
+            return query;
+        }
+    };
+    const result = await listMembers({ page: 1, limit: 20, gymId }, client);
+    assert.deepEqual(ranges, [[0, 999], [1000, 1999]]);
+    assert.equal(result.members[0].billing.paid, 1005);
 });
 
 test("member list can include archived rows when explicitly requested", async () => {

@@ -38,7 +38,7 @@ Serve GymPulse over HTTPS (or `localhost` for local development), then open it i
 Create a Web Service with **Root Directory** `server`, **Build Command** `npm install`, **Start Command** `npm start`, and **Health Check Path** `/health`. Render supplies `PORT`; set these environment variables:
 
 - Required: `HOST=0.0.0.0`, `NODE_ENV=production`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`.
-- Optional: `DEMO_PASSWORD` (puts the whole deployment behind a password; see below), `SENTRY_DSN` (enables error tracking), `LOG_LEVEL`, `META_GRAPH_API_VERSION` (defaults to `v22.0`), `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, and `WHATSAPP_ALLOWED_ORIGINS`.
+- Optional: `DEMO_PASSWORD` (puts the whole deployment behind a password; see below), `DEMO_GYM_IDS` (comma-separated gym IDs that may load fictional sample data from Settings; other gyms never see that option), `SENTRY_DSN` (enables error tracking), `LOG_LEVEL`, `META_GRAPH_API_VERSION` (defaults to `v22.0`), `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, and `WHATSAPP_ALLOWED_ORIGINS`.
 
 ### Demo password and sign-in limits
 
@@ -58,7 +58,8 @@ Use only fictional demo data. Keep the WhatsApp Cloud API credentials empty unle
 - Follow-up recommendations, analytics, report exports, notification previews, integrations status cards and workspace settings.
 - A WhatsApp-style inbox with fictional Demo conversations, editable click-to-chat expiry reminders, member ID card sends, editable Meta templates, manual live messaging and opt-in-gated inactive-member follow-ups.
 - An optional Express backend with Meta Cloud API sends, media upload for member ID cards, webhook verification and in-memory message status tracking.
-- Browser LocalStorage persistence, English/Hindi/Marathi navigation and form labels, and reset-to-demo-data action.
+- Outstanding balances come from the database: the fees of every non-cancelled membership minus every recorded payment, so they match on any device.
+- Browser LocalStorage persistence, English/Hindi/Marathi navigation and form labels, and loading or clearing fictional sample data for demo accounts listed in `DEMO_GYM_IDS`.
 
 The fictional CSV import example is in [`data/sample-members.csv`](./data/sample-members.csv). Imports accept `name` and `phone` as required columns, plus optional `email`, `plan`, `joinedAt`, `startDate`, and `expiryDate`. Header matching ignores spaces, underscores, and hyphens; aliases include `fullName`, `mobile`, `phoneNumber`, and `joiningDate`. Aliases also include `membershipPlan`. Optional date columns should use `YYYY-MM-DD`. Plan values must match an active plan name; rows without a plan are added without a membership. Phone numbers that already exist in the gym or repeat within the file, and invalid dates or plans, are reported and skipped rather than overwritten.
 
