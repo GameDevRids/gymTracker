@@ -11,7 +11,7 @@ export function requireAuth({ allowNoGym = false, client = supabaseClient } = {}
             if (error || !user) return response.status(401).json({ status: "error", message: "Access token is invalid or expired." });
             const { data: membership, error: gymError } = await client
                 .from("gym_users")
-                .select("gym_id,gyms(id,name)")
+                .select("gym_id,role,gyms(id,name)")
                 .eq("user_id", user.id)
                 .maybeSingle();
             if (gymError) {
@@ -26,6 +26,7 @@ export function requireAuth({ allowNoGym = false, client = supabaseClient } = {}
             request.authUser = user;
             request.gymId = membership?.gym_id || null;
             request.gym = membership?.gyms || null;
+            request.gymRole = membership?.role || null;
             next();
         } catch (error) {
             next(error);

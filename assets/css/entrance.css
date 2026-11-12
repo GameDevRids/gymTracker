@@ -1,0 +1,108 @@
+/* The entrance poster page: one small screen on the member's phone, GymPulse colours,
+   light or dark following the phone. System fonts only, so it opens fast on mobile data. */
+:root {
+    --bg: #F2F4F5;
+    --surface: #FFFFFF;
+    --ink: #1E2D3A;
+    --ink-2: #5E6C77;
+    --line: #C9D2D9;
+    --accent: #F4A51C;
+    --accent-ink: #1E2D3A;
+    --green: #1D7A4F;
+    --amber: #F4A51C;
+    --red: #B83A26;
+    --grey: #4A5862;
+    --focus: rgba(244, 165, 28, .6);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg: #121B22;
+        --surface: #1E2D3A;
+        --ink: #F2F4F5;
+        --ink-2: #B7C2CA;
+        --line: #3A4F60;
+        --green: #23915F;
+        --red: #C9472F;
+        --grey: #56656F;
+    }
+}
+:root[data-theme="dark"] {
+    --bg: #121B22;
+    --surface: #1E2D3A;
+    --ink: #F2F4F5;
+    --ink-2: #B7C2CA;
+    --line: #3A4F60;
+    --green: #23915F;
+    --red: #C9472F;
+    --grey: #56656F;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+    margin: 0;
+    min-height: 100dvh;
+    color: var(--ink);
+    background: var(--bg);
+    font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Devanagari", sans-serif;
+}
+.entry { width: min(100%, 460px); margin: 0 auto; padding: 20px 16px 40px; }
+header { padding: 6px 0 18px; border-top: 6px solid var(--accent); }
+.gym { margin: 14px 0 0; color: var(--ink-2); font-size: 15px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; overflow-wrap: anywhere; }
+h1 { margin: 2px 0 0; font-size: 30px; line-height: 1.15; }
+h2 { margin: 0; font-size: 24px; line-height: 1.2; overflow-wrap: anywhere; }
+.hello { font-size: 30px; }
+p { margin: 0; }
+.muted { color: var(--ink-2); }
+.small { font-size: 14px; }
+.stack { display: grid; gap: 14px; }
+label { font-weight: 700; }
+input {
+    width: 100%;
+    min-height: 56px;
+    padding: 0 16px;
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    color: var(--ink);
+    background: var(--surface);
+    font: inherit;
+    font-size: 22px;
+    letter-spacing: .04em;
+}
+input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--focus); }
+button, .button-link {
+    display: inline-flex;
+    width: 100%;
+    min-height: 52px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 12px;
+    font: inherit;
+    font-weight: 800;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+}
+button:focus-visible, .button-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+button:disabled { opacity: .65; cursor: progress; }
+.primary { color: var(--accent-ink); background: var(--accent); }
+.huge { min-height: 132px; font-size: 32px; border-radius: 20px; }
+.big { min-height: 72px; font-size: 22px; }
+.choices { display: grid; gap: 10px; }
+.link { min-height: 48px; color: var(--ink); background: transparent; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.code { font-size: 56px; font-weight: 800; letter-spacing: .18em; font-variant-numeric: tabular-nums; text-align: center; }
+.notice { padding: 10px 12px; border-radius: 10px; background: var(--surface); border-left: 5px solid var(--accent); }
+.notice.error { border-left-color: var(--red); }
+.result { display: grid; gap: 10px; padding: 24px 20px; border-radius: 18px; color: #fff; }
+.result h2 { font-size: 28px; }
+.result .big-line { font-size: 22px; font-weight: 700; }
+.result-green { background: var(--green); }
+.result-amber { color: #1E2D3A; background: var(--amber); }
+.result-red { background: var(--red); }
+.result-grey { background: var(--grey); }
+.renew { display: grid; gap: 10px; margin-top: 6px; padding: 14px; border-radius: 14px; color: var(--ink); background: var(--surface); }
+.renew .muted { color: var(--ink-2); }
+.qr-box { width: min(100%, 240px); margin: 4px auto 0; padding: 8px; border-radius: 12px; background: #fff; }
+.qr { display: block; width: 100%; height: auto; }

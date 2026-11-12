@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v12";
+const CACHE_NAME = "gympulse-shell-v13";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -41,6 +41,10 @@ const APP_SHELL = [
     "/assets/js/modules/attendance.js",
     "/assets/js/modules/cardCanvas.js",
     "/assets/js/modules/upiPayments.js",
+    "/assets/js/modules/checkinMethod.js",
+    "/assets/js/modules/checkinSettingsUi.js",
+    "/assets/js/entrance.js",
+    "/assets/css/entrance.css",
     "/data/demo-data.js",
     "/assets/icons/gympulse-192.png",
     "/assets/icons/gympulse-512.png"
@@ -63,6 +67,9 @@ self.addEventListener("fetch", (event) => {
     const request = event.request;
     const url = new URL(request.url);
     if (request.method !== "GET" || url.origin !== self.location.origin) return;
+    // The entrance poster page is per phone and per poster: always from the network, never cached
+    // (and never stored as the app's /index.html).
+    if (url.pathname === "/c" || url.pathname.startsWith("/c/")) return;
 
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
         event.respondWith(fetch(new Request(request, { cache: "no-store" })));

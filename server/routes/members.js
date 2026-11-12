@@ -21,6 +21,7 @@ import { assignMemberPlan, getMemberMemberships } from "../controllers/membershi
 import { validateAssignmentPayload } from "../middleware/validateMembership.js";
 import { validateMessageListQuery, validateMessagePayload } from "../middleware/validateWhatsAppMessage.js";
 import { listMemberAttendance, reissueQrToken } from "../services/attendanceService.js";
+import { listMemberDevices } from "../services/entranceService.js";
 
 const router = express.Router();
 
@@ -45,6 +46,12 @@ router.get("/:id/attendance", validateMemberId, (request, response, next) => {
 router.post("/:id/qr-token/reissue", validateMemberId, (request, response, next) => {
     reissueQrToken(request.params.id, request.gymId)
         .then((member) => response.json({ status: "success", data: member }))
+        .catch(next);
+});
+// Phones linked to the entrance poster for this member (approved and waiting).
+router.get("/:id/devices", validateMemberId, (request, response, next) => {
+    listMemberDevices(request.params.id, request.gymId)
+        .then((rows) => response.json({ status: "success", data: rows }))
         .catch(next);
 });
 router.use(membersErrorHandler);

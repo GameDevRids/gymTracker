@@ -45,11 +45,11 @@ export function isDemoGym(gymId, environment = process.env) {
 async function getGym(userId, client) {
     const { data, error } = await client
         .from("gym_users")
-        .select("gym_id,gyms(id,name)")
+        .select("gym_id,role,gyms(id,name)")
         .eq("user_id", userId)
         .maybeSingle();
     if (error) throw new AuthServiceError(503, "Gym membership could not be loaded.");
-    return data?.gyms ? { id: data.gyms.id, name: data.gyms.name, is_demo: isDemoGym(data.gyms.id) } : null;
+    return data?.gyms ? { id: data.gyms.id, name: data.gyms.name, is_demo: isDemoGym(data.gyms.id), role: data.role || "owner" } : null;
 }
 
 function authFailure(error) {

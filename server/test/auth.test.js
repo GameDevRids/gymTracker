@@ -25,7 +25,7 @@ function mockClient({ user, gym, authError, gymError } = {}) {
             assert.equal(table, "gym_users");
             return {
                 select(columns) {
-                    assert.equal(columns, "gym_id,gyms(id,name)");
+                    assert.equal(columns, "gym_id,role,gyms(id,name)");
                     return this;
                 },
                 eq(field, value) {

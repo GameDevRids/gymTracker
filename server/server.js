@@ -15,6 +15,8 @@ import paymentsRouter from "./routes/payments.js";
 import messageTemplatesRouter from "./routes/messageTemplates.js";
 import gymSettingsRouter from "./routes/gymSettings.js";
 import attendanceRouter from "./routes/attendance.js";
+import memberDevicesRouter from "./routes/memberDevices.js";
+import { createEntranceRouter } from "./routes/entrance.js";
 import whatsappRouter from "./routes/whatsapp.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
@@ -92,6 +94,9 @@ app.use("/api/payments", requireAuth(), paymentsRouter);
 app.use("/api/message-templates", requireAuth(), messageTemplatesRouter);
 app.use("/api/gym-settings", requireAuth(), gymSettingsRouter);
 app.use("/api/attendance", requireAuth(), attendanceRouter);
+app.use("/api/member-devices", requireAuth(), memberDevicesRouter);
+// The public entrance poster page and its check-in calls (no login; own rate limits).
+app.use("/c", createEntranceRouter());
 app.use("/api/whatsapp", (request, response, next) => {
     if (request.path === "/webhook" || request.path.startsWith("/webhook/")) return next();
     return requireAuth()(request, response, next);

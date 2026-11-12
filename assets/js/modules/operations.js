@@ -7,6 +7,7 @@ import { renderWelcomeTemplateSettings } from "./welcomeUi.js";
 import { methodLabel, paymentsPage, renderUpiTestQr } from "./upiPayments.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { renderVisitsPage } from "./attendance.js";
+import { renderAttendanceSettings } from "./checkinSettingsUi.js";
 
 const pageHeading = (title, description, actions = "") =>
     `<div class="page-heading"><div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`;
@@ -296,7 +297,7 @@ function renderNotifications() {
 
 function renderIntegrations() {
     const integrations = [
-        ["QR check-in", "Members show the QR on their member card; staff scan it at the entrance.", "Built in", "scan"],
+        ["Check-in", "Member QR cards scanned by staff, or a QR poster members scan with their phone. Choose one in Settings › Attendance.", "Built in", "scan"],
         ["WhatsApp Cloud API", "Demo inbox is ready; live mode uses the official Meta Cloud API.", "Open inbox", "whatsapp-inbox"],
         ["CSV imports", "Map a CSV export and preview records before importing.", "Available", "import-csv"],
         ["Gym management software", "External system APIs are not connected.", "Coming soon", ""],
@@ -304,7 +305,7 @@ function renderIntegrations() {
     ];
     return `${pageHeading("Integrations", "Connect GymPulse to your gym's existing workflows over time.")}
         <div class="note-box" style="margin-bottom:15px">This prototype does not connect to external systems. Check with each vendor for official API or SDK availability for your specific product and device model.</div>
-        <div class="grid integration-grid">${integrations.map(([name, description, status, action]) => `<article class="card integration-card"><div style="display:flex;justify-content:space-between;gap:8px"><h3>${escapeHTML(name)}</h3><span class="badge-soft">${escapeHTML(status)}</span></div><p>${escapeHTML(description)}</p>${action ? `<button class="button button-secondary button-small" ${action === "whatsapp-inbox" ? `data-view="whatsapp"` : action === "scan" ? `data-view="scan"` : action === "import-csv" ? `data-action="import-csv"` : `data-action="${action}"`}>${action === "scan" ? "Open scanner" : action === "notifications" ? "View message previews" : action === "whatsapp-inbox" ? "Open WhatsApp inbox" : "Import CSV"}</button>` : ""}</article>`).join("")}</div>`;
+        <div class="grid integration-grid">${integrations.map(([name, description, status, action]) => `<article class="card integration-card"><div style="display:flex;justify-content:space-between;gap:8px"><h3>${escapeHTML(name)}</h3><span class="badge-soft">${escapeHTML(status)}</span></div><p>${escapeHTML(description)}</p>${action ? `<button class="button button-secondary button-small" ${action === "whatsapp-inbox" ? `data-view="whatsapp"` : action === "scan" ? `data-view="scan"` : action === "import-csv" ? `data-action="import-csv"` : `data-action="${action}"`}>${action === "scan" ? "Open check-in" : action === "notifications" ? "View message previews" : action === "whatsapp-inbox" ? "Open WhatsApp inbox" : "Import CSV"}</button>` : ""}</article>`).join("")}</div>`;
 }
 
 function renderSettings() {
@@ -326,6 +327,7 @@ function renderSettings() {
             <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="inactivityReminders" ${preferences.inactivityReminders !== false ? "checked" : ""}> Preview inactive-member reminders</label></div>
             <div class="field full"><button class="button button-primary" type="submit">Save settings</button></div>
         </form></section>
+        ${renderAttendanceSettings()}
         ${renderWelcomeTemplateSettings()}
         <section class="card settings-section"><h2>Membership preferences</h2><p class="helper-text">Membership expiry is evaluated by calendar date. Renewals default to start after the current expiry date when the membership is still valid.</p></section></div>
         ${renderSampleDataCard(gym)}</div>`;

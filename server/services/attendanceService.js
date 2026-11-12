@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { supabaseClient } from "../config/database.js";
 import { selectCurrentMembership } from "./membershipsService.js";
-import { QR_TOKEN_PATTERN, daysLeft, indiaDate } from "../../assets/js/checkin.js";
+import { CheckinSettingsError, loadGymCheckin } from "./checkinSettingsService.js";
+import { QR_TOKEN_PATTERN, checkInOutcome, checkInStatus, daysLeft, indiaDate } from "../../assets/js/checkin.js";
 
-const attendanceColumns = "id,gym_id,member_id,check_in_date,checked_in_at,method,membership_status_at_check_in,recorded_by,created_at";
+const attendanceColumns = "id,gym_id,member_id,check_in_date,checked_in_at,method,membership_status_at_check_in,recorded_by,member_device_id,created_at";
 const memberCheckinColumns = "id,full_name,member_code,phone,whatsapp_opt_in";
 const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,price,total_fees,start_date,end_date,status,created_at";
 const PAGE_SIZE = 1000;
@@ -23,24 +24,25 @@ function requireContext(client, gymId) {
 
 function databaseError(error) {
     if (["PGRST205", "42P01", "PGRST204", "42703"].includes(error?.code)) {
-        throw new AttendanceError(503, "Attendance is unavailable. Run migration 012_add_qr_checkin_attendance.sql in Supabase SQL Editor.");
+        throw new AttendanceError(503, "Attendance is unavailable. Run migrations 012 and 013 in Supabase SQL Editor.");
     }
     if (error?.code === "23503") throw new AttendanceError(404, "Member not found.");
     throw new AttendanceError(500, "The database could not complete the attendance request.");
+}
+
+export async function gymCheckin(gymId, client) {
+    try {
+        return await loadGymCheckin(gymId, client);
+    } catch (error) {
+        if (error instanceof CheckinSettingsError) throw new AttendanceError(error.status, error.message);
+        throw error;
+    }
 }
 
 function chunks(list, size = ID_CHUNK) {
     const result = [];
     for (let index = 0; index < list.length; index += size) result.push(list.slice(index, index + size));
     return result;
-}
-
-/** active, expired or none (no plan, not started yet, or cancelled). */
-export function checkInStatus(membership) {
-    if (!membership) return "none";
-    if (membership.effective_status === "active") return "active";
-    if (membership.effective_status === "expired") return "expired";
-    return "none";
 }
 
 async function membershipsOf(memberIds, gymId, client) {
@@ -51,6 +53,17 @@ async function membershipsOf(memberIds, gymId, client) {
         rows.push(...(data || []));
     }
     return rows;
+}
+
+// What a renewal costs: the plan's current price while the plan is still offered, otherwise
+// what the member paid last time.
+async function renewalPrice(membership, gymId, client) {
+    if (!membership) return null;
+    if (membership.plan_id) {
+        const { data } = await client.from("membership_plans").select("id,price,is_active").eq("id", membership.plan_id).eq("gym_id", gymId).maybeSingle();
+        if (data?.is_active && Number(data.price) > 0) return Number(data.price);
+    }
+    return Number(membership.price) > 0 ? Number(membership.price) : null;
 }
 
 function describe(member, membership, today) {
@@ -68,41 +81,73 @@ function describe(member, membership, today) {
     };
 }
 
-const resultFor = { active: "checked_in", expired: "expired", none: "no_membership" };
-
-// Records today's check-in, or reports the one already recorded. The unique index on
-// (gym, member, IST day) decides, so two scanners at once cannot both record it.
-async function recordCheckIn(member, method, gymId, userId, client, now) {
-    const today = indiaDate(now);
-    const membership = selectCurrentMembership(await membershipsOf([member.id], gymId, client), today);
-    const status = checkInStatus(membership);
-    const details = describe(member, membership, today);
+async function todaysCheckIn(memberId, gymId, today, client) {
     const { data, error } = await client
         .from("attendance")
-        .insert({ gym_id: gymId, member_id: member.id, method, membership_status_at_check_in: status, recorded_by: userId, checked_in_at: now.toISOString() })
+        .select(attendanceColumns)
+        .eq("gym_id", gymId)
+        .eq("member_id", memberId)
+        .eq("check_in_date", today)
+        .maybeSingle();
+    if (error) databaseError(error);
+    return data;
+}
+
+/**
+ * The one path every check-in takes (member QR, entrance poster, manual). It applies the gym's
+ * grace days and expired-member policy, then records today's check-in, or reports the one
+ * already recorded. The unique index on (gym, member, IST day) decides, so two check-ins at
+ * the same moment cannot both be recorded. Blocked check-ins are not stored.
+ */
+export async function recordCheckIn(member, method, gym, { userId = null, deviceId = null, client = supabaseClient, now = new Date() } = {}) {
+    const gymId = gym.id;
+    const today = indiaDate(now);
+    const membership = selectCurrentMembership(await membershipsOf([member.id], gymId, client), today);
+    const { status, graceDaysLeft } = checkInStatus(membership, today, gym.expiry_grace_days || 0);
+    const outcome = checkInOutcome(status, gym.expired_checkin_policy);
+    const details = {
+        ...describe(member, membership, today),
+        status,
+        grace_days_left: graceDaysLeft ?? null,
+        renewal_price: ["active", "upcoming"].includes(status) ? null : await renewalPrice(membership, gymId, client)
+    };
+    if (outcome.blocked) {
+        const existing = await todaysCheckIn(member.id, gymId, today, client);
+        if (existing) return { result: "already_checked_in", recorded: false, blocked: false, attendance: existing, ...details };
+        return { result: outcome.result, recorded: false, blocked: true, attendance: null, ...details };
+    }
+    const { data, error } = await client
+        .from("attendance")
+        .insert({
+            gym_id: gymId,
+            member_id: member.id,
+            method,
+            membership_status_at_check_in: status,
+            recorded_by: userId,
+            member_device_id: deviceId,
+            checked_in_at: now.toISOString()
+        })
         .select(attendanceColumns)
         .single();
     if (error?.code === "23505") {
-        const existing = await client
-            .from("attendance")
-            .select(attendanceColumns)
-            .eq("gym_id", gymId)
-            .eq("member_id", member.id)
-            .eq("check_in_date", today)
-            .maybeSingle();
-        if (existing.error) databaseError(existing.error);
-        return { result: "already_checked_in", status, attendance: existing.data, ...details };
+        const existing = await todaysCheckIn(member.id, gymId, today, client);
+        return { result: "already_checked_in", recorded: false, blocked: false, attendance: existing, ...details };
     }
     if (error) databaseError(error);
-    return { result: resultFor[status], status, attendance: data, ...details };
+    return { result: outcome.result, recorded: true, blocked: false, attendance: data, ...details };
 }
+
+export const METHOD_OFF_MESSAGE = "Member QR cards are switched off for this gym: members check in with the entrance poster. The owner can change this in Settings.";
 
 /**
  * Checks in the member whose QR token this is, in this gym only. An unknown token and a token
  * from another gym get the same "not_found" answer, so nothing about other gyms is revealed.
+ * Refused when the gym uses the entrance poster instead.
  */
 export async function scanCheckIn(token, gymId, userId = null, client = supabaseClient, now = new Date()) {
     requireContext(client, gymId);
+    const gym = await gymCheckin(gymId, client);
+    if (gym.checkin_method !== "member_qr") throw new AttendanceError(409, METHOD_OFF_MESSAGE);
     if (!QR_TOKEN_PATTERN.test(String(token || ""))) return { result: "not_found" };
     const { data: member, error } = await client
         .from("members")
@@ -113,11 +158,13 @@ export async function scanCheckIn(token, gymId, userId = null, client = supabase
         .maybeSingle();
     if (error) databaseError(error);
     if (!member) return { result: "not_found" };
-    return recordCheckIn(member, "qr", gymId, userId, client, now);
+    return recordCheckIn(member, "member_qr", gym, { userId, client, now });
 }
 
+/** Staff check a member in by hand. Works with either method; the gym's policy still applies. */
 export async function manualCheckIn(memberId, gymId, userId = null, client = supabaseClient, now = new Date()) {
     requireContext(client, gymId);
+    const gym = await gymCheckin(gymId, client);
     const { data: member, error } = await client
         .from("members")
         .select(memberCheckinColumns)
@@ -127,7 +174,89 @@ export async function manualCheckIn(memberId, gymId, userId = null, client = sup
         .maybeSingle();
     if (error) databaseError(error);
     if (!member) throw new AttendanceError(404, "Member not found.");
-    return recordCheckIn(member, "manual", gymId, userId, client, now);
+    return recordCheckIn(member, "manual", gym, { userId, client, now });
+}
+
+// ---------- "Can't scan? Check in manually" ----------
+
+const USUAL_WINDOW_MIN = 60;
+const USUAL_LOOKBACK_DAYS = 30;
+const USUAL_MIN_VISITS = 2;
+const SEARCH_LIMIT = 12;
+
+function minutesOfIndiaDay(date) {
+    return Math.floor(((date.getTime() + 330 * 60000) % 86400000) / 60000);
+}
+
+function minutesApart(a, b) {
+    const gap = Math.abs(a - b);
+    return Math.min(gap, 1440 - gap);
+}
+
+// A quoted value inside a PostgREST or() filter.
+function orPattern(text) {
+    return `"%${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}%"`;
+}
+
+/**
+ * Members for the manual check-in list. Up to 4 digits match the end of the phone number
+ * ("3210", typed left to right), more digits match anywhere in it, and text matches the
+ * name or member ID. Members who usually check in around this time of day come first; with
+ * no search text, only they are listed.
+ */
+export async function searchCheckInMembers(text, gymId, client = supabaseClient, now = new Date()) {
+    requireContext(client, gymId);
+    const query = String(text || "").trim();
+    const digits = query.replace(/[\s-]/g, "");
+    let candidates = null;
+    if (query) {
+        let request = client.from("members").select("id,full_name,member_code,phone_last4").eq("gym_id", gymId).is("archived_at", null);
+        if (/^\d{1,4}$/.test(digits)) request = request.like("phone_last4", `${digits}%`);
+        else if (/^\d{5,10}$/.test(digits)) request = request.like("phone_last10", `%${digits}%`);
+        else request = request.or(`full_name.ilike.${orPattern(query)},member_code.ilike.${orPattern(query)}`);
+        const { data, error } = await request.order("full_name", { ascending: true }).range(0, 49);
+        if (error) databaseError(error);
+        candidates = data || [];
+        if (!candidates.length) return [];
+    }
+
+    const since = indiaDate(new Date(now.getTime() - USUAL_LOOKBACK_DAYS * 86400000));
+    let visits = client.from("attendance").select("member_id,checked_in_at,check_in_date").eq("gym_id", gymId).gte("check_in_date", since);
+    if (candidates) visits = visits.in("member_id", candidates.map((member) => member.id));
+    const { data: rows, error } = await visits.order("checked_in_at", { ascending: false }).range(0, 4999);
+    if (error) databaseError(error);
+    const nowMinutes = minutesOfIndiaDay(now);
+    const today = indiaDate(now);
+    const usual = new Map();
+    const checkedToday = new Set();
+    for (const row of rows || []) {
+        if (row.check_in_date === today) checkedToday.add(row.member_id);
+        else if (minutesApart(minutesOfIndiaDay(new Date(row.checked_in_at)), nowMinutes) <= USUAL_WINDOW_MIN) {
+            usual.set(row.member_id, (usual.get(row.member_id) || 0) + 1);
+        }
+    }
+
+    if (!candidates) {
+        const ids = [...usual.entries()].filter(([, count]) => count >= USUAL_MIN_VISITS).map(([id]) => id);
+        if (!ids.length) return [];
+        const { data, error: membersError } = await client.from("members").select("id,full_name,member_code,phone_last4").eq("gym_id", gymId).is("archived_at", null).in("id", ids.slice(0, 50));
+        if (membersError) databaseError(membersError);
+        candidates = data || [];
+    }
+    return candidates
+        .map((member) => ({
+            id: member.id,
+            full_name: member.full_name,
+            member_code: member.member_code,
+            phone_last4: member.phone_last4 || "",
+            usually_now: (usual.get(member.id) || 0) >= USUAL_MIN_VISITS,
+            checked_in_today: checkedToday.has(member.id),
+            visits_around_now: usual.get(member.id) || 0
+        }))
+        .sort((a, b) => Number(b.usually_now) - Number(a.usually_now)
+            || b.visits_around_now - a.visits_around_now
+            || a.full_name.localeCompare(b.full_name))
+        .slice(0, SEARCH_LIMIT);
 }
 
 async function withMemberNames(rows, gymId, client) {
@@ -228,7 +357,7 @@ export async function importAttendance(records, gymId, userId = null, client = s
         const key = `${record.member_id}:${day}`;
         const current = perDay.get(key);
         if (!current || at < new Date(current.checked_in_at)) {
-            const status = checkInStatus(selectCurrentMembership(byMember.get(record.member_id) || [], day));
+            const status = checkInStatus(selectCurrentMembership(byMember.get(record.member_id) || [], day), day).status;
             perDay.set(key, { gym_id: gymId, member_id: record.member_id, checked_in_at: at.toISOString(), method: "manual", membership_status_at_check_in: status, recorded_by: userId });
         }
     }

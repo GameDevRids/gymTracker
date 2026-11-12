@@ -8,6 +8,7 @@ import { getLanguage } from "../i18n.js";
 import { formatDate, formatINR } from "../utils.js";
 import { CARD_COLORS, cardFontFamilies, cardFontsReady, drawQr, fitTextBlock, roundedRect, setFont, shareImageFile, truncateToWidth } from "./cardCanvas.js";
 import { memberQrText } from "../checkin.js";
+import { usesMemberQr, usesPoster } from "./checkinMethod.js";
 
 export { cardFontFamilies, fitTextBlock, fontHasGlyph } from "./cardCanvas.js";
 import {
@@ -211,9 +212,9 @@ export function sendWelcome(member, { membership, gym, payments, language = welc
 export const CARD_WIDTH = 1080;
 export const CARD_HEIGHT = 1350;
 const CARD_LABELS = {
-    en: { welcome: "Welcome,", memberCard: "Member card", plan: "Plan", start: "Starts", expiry: "Valid until", fee: "Fee", paid: "Paid", balance: "Balance due", paidInFull: "Paid in full", code: "MEMBER ID", scan: "Show this QR at the front desk to check in" },
-    hi: { welcome: "स्वागत है,", memberCard: "सदस्य कार्ड", plan: "योजना", start: "शुरुआत", expiry: "वैध तिथि", fee: "शुल्क", paid: "भुगतान", balance: "बकाया", paidInFull: "पूरा भुगतान", code: "सदस्य आईडी", scan: "चेक-इन के लिए यह QR रिसेप्शन पर दिखाएँ" },
-    mr: { welcome: "स्वागत आहे,", memberCard: "सदस्य कार्ड", plan: "योजना", start: "सुरुवात", expiry: "वैध तारीख", fee: "शुल्क", paid: "भरले", balance: "बाकी", paidInFull: "पूर्ण भरले", code: "सदस्य आयडी", scan: "चेक-इनसाठी हा QR रिसेप्शनवर दाखवा" }
+    en: { welcome: "Welcome,", memberCard: "Member card", plan: "Plan", start: "Starts", expiry: "Valid until", fee: "Fee", paid: "Paid", balance: "Balance due", paidInFull: "Paid in full", code: "MEMBER ID", scan: "Show this QR at the front desk to check in", poster: "Scan the poster at the entrance to check in" },
+    hi: { welcome: "स्वागत है,", memberCard: "सदस्य कार्ड", plan: "योजना", start: "शुरुआत", expiry: "वैध तिथि", fee: "शुल्क", paid: "भुगतान", balance: "बकाया", paidInFull: "पूरा भुगतान", code: "सदस्य आईडी", scan: "चेक-इन के लिए यह QR रिसेप्शन पर दिखाएँ", poster: "चेक-इन के लिए प्रवेश द्वार पर लगा QR पोस्टर स्कैन करें" },
+    mr: { welcome: "स्वागत आहे,", memberCard: "सदस्य कार्ड", plan: "योजना", start: "सुरुवात", expiry: "वैध तारीख", fee: "शुल्क", paid: "भरले", balance: "बाकी", paidInFull: "पूर्ण भरले", code: "सदस्य आयडी", scan: "चेक-इनसाठी हा QR रिसेप्शनवर दाखवा", poster: "चेक-इनसाठी प्रवेशद्वारावरील QR पोस्टर स्कॅन करा" }
 };
 
 /** The member's check-in QR token; lists do not carry it, so it is fetched once when missing. */
@@ -255,12 +256,14 @@ function cardRows(labels, values, payment) {
 }
 
 /**
- * Draws the 1080x1350 welcome card (or, with variant "member", the member card) with the
- * member's check-in QR, and resolves to a PNG file. The gym phone is not shown.
+ * Draws the 1080x1350 welcome card (or, with variant "member", the member card) and resolves
+ * to a PNG file. The member's check-in QR is on it only when the gym uses member QR cards;
+ * poster gyms get a line about the entrance poster instead. The gym phone is not shown.
  */
 export async function createWelcomeCard(member, { membership = member?.currentMembership, gym = state.gym, payments, language = welcomeMessageLanguage(), variant = "welcome" } = {}) {
     const labels = CARD_LABELS[welcomeLanguage(language)];
-    const token = await ensureQrToken(member);
+    const showQr = variant === "member" || usesMemberQr();
+    const token = showQr ? await ensureQrToken(member) : "";
     const qrText = token ? memberQrText(token) : "";
     const values = welcomeValues(member, { membership, gym, payments });
     // The member card shows the plan and dates only; fees belong on the welcome card.
@@ -300,7 +303,8 @@ export async function createWelcomeCard(member, { membership = member?.currentMe
         return { ...row, labelWidth, value, height };
     });
     const panelHeight = laidOut.length ? panelPad * 2 + laidOut.reduce((sum, row) => sum + row.height, 0) + rowGap * (laidOut.length - 1) : 0;
-    let panelBottom = qrText ? qrTop - 32 : footerTop - 28;
+    const posterLine = !qrText && variant !== "member" && usesPoster();
+    let panelBottom = qrText ? qrTop - 32 : posterLine ? captionBaseline - 64 : footerTop - 28;
     let panelTop = panelBottom - panelHeight;
 
     let y = 64;
@@ -371,6 +375,15 @@ export async function createWelcomeCard(member, { membership = member?.currentMe
         context.fill();
         drawQr(context, qrText, (CARD_WIDTH - qrBox) / 2 + 12, qrTop + 12, qrBox - 24);
         const caption = fitTextBlock(context, labels.scan, { weight: 500, family: fonts.body, max: 32, min: 22, width });
+        context.fillStyle = CARD_COLORS.soft;
+        setFont(context, 500, caption.size, fonts.body);
+        context.textAlign = "center";
+        context.fillText(caption.lines[0], CARD_WIDTH / 2, captionBaseline);
+        context.textAlign = "left";
+    }
+
+    if (posterLine) {
+        const caption = fitTextBlock(context, labels.poster, { weight: 500, family: fonts.body, max: 34, min: 22, width });
         context.fillStyle = CARD_COLORS.soft;
         setFont(context, 500, caption.size, fonts.body);
         context.textAlign = "center";

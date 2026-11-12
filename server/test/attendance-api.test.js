@@ -10,89 +10,18 @@ import {
     scanCheckIn
 } from "../services/attendanceService.js";
 import { createScanRateLimit, validateAttendanceQuery, validateScan } from "../middleware/validateAttendance.js";
-import { CHECKIN_PREFIX, daysLeft, indiaDate, memberQrText, parseCheckinQr } from "../../assets/js/checkin.js";
+import { CHECKIN_PREFIX, daysLeft, memberQrText, parseCheckinQr } from "../../assets/js/checkin.js";
+import { fakeCheckinDb, gymA, gymB, ids, owner } from "./helpers/fakeCheckinDb.js";
 
-const gymA = "00000000-0000-4000-8000-0000000000a1";
-const gymB = "00000000-0000-4000-8000-0000000000b1";
-const owner = "00000000-0000-4000-8000-00000000000a";
-const ids = { riya: "00000000-0000-4000-8000-000000000001", dev: "00000000-0000-4000-8000-000000000002", aisha: "00000000-0000-4000-8000-000000000003", neha: "00000000-0000-4000-8000-000000000004" };
-const tokens = { riya: newQrToken(), dev: newQrToken(), aisha: newQrToken(), neha: newQrToken() };
 // 07:42 IST on 12 Nov 2026.
 const morning = new Date("2026-11-12T02:12:00Z");
 
-/** A small in-memory stand-in for the Supabase client, with the one-per-IST-day rule. */
-function fakeDb() {
-    const tables = {
-        members: [
-            { id: ids.riya, gym_id: gymA, full_name: "Riya Shah", member_code: "GP-1", phone: "9876543210", whatsapp_opt_in: true, qr_token: tokens.riya, archived_at: null },
-            { id: ids.dev, gym_id: gymA, full_name: "Dev Rao", member_code: "GP-2", phone: "9876543211", whatsapp_opt_in: false, qr_token: tokens.dev, archived_at: null },
-            { id: ids.neha, gym_id: gymA, full_name: "Neha Joshi", member_code: "GP-4", phone: "9876543213", whatsapp_opt_in: false, qr_token: tokens.neha, archived_at: null },
-            { id: ids.aisha, gym_id: gymB, full_name: "Aisha Khan", member_code: "GP-3", phone: "9876543212", whatsapp_opt_in: true, qr_token: tokens.aisha, archived_at: null }
-        ],
-        member_memberships: [
-            { id: "ms-riya", gym_id: gymA, member_id: ids.riya, plan_name: "Monthly", price: 1100, start_date: "2026-11-01", end_date: "2026-11-30", status: "assigned", created_at: "2026-11-01" },
-            { id: "ms-dev", gym_id: gymA, member_id: ids.dev, plan_name: "Monthly", price: 1100, start_date: "2026-10-01", end_date: "2026-11-09", status: "assigned", created_at: "2026-10-01" },
-            { id: "ms-aisha", gym_id: gymB, member_id: ids.aisha, plan_name: "Annual", price: 9000, start_date: "2026-01-01", end_date: "2026-12-31", status: "assigned", created_at: "2026-01-01" }
-        ],
-        attendance: []
-    };
-    const calls = [];
-    const withDay = (row) => ({ ...row, check_in_date: indiaDate(new Date(row.checked_in_at)) });
-    const duplicate = (row) => tables.attendance.some((saved) => saved.gym_id === row.gym_id && saved.member_id === row.member_id && saved.check_in_date === row.check_in_date);
-    return {
-        tables,
-        calls,
-        from(table) {
-            const op = { table, filters: [], action: "select", payload: null };
-            calls.push(op);
-            const query = {};
-            query.select = () => query;
-            for (const method of ["eq", "is", "in", "gte", "lte"]) query[method] = (field, value) => { op.filters.push([method, field, value]); return query; };
-            query.order = () => query;
-            query.range = () => query;
-            query.insert = (row) => { op.action = "insert"; op.payload = row; return query; };
-            query.update = (row) => { op.action = "update"; op.payload = row; return query; };
-            query.upsert = (rows) => { op.action = "upsert"; op.payload = rows; return query; };
-            const matches = (row) => op.filters.every(([method, field, value]) => (
-                method === "eq" ? row[field] === value
-                    : method === "is" ? (row[field] ?? null) === value
-                        : method === "in" ? value.includes(row[field])
-                            : method === "gte" ? row[field] >= value
-                                : row[field] <= value));
-            const run = () => {
-                const list = tables[table];
-                if (op.action === "insert") {
-                    const row = withDay(op.payload);
-                    if (duplicate(row)) return { data: null, error: { code: "23505" } };
-                    const saved = { id: `att-${list.length + 1}`, ...row };
-                    list.push(saved);
-                    return { data: [saved], error: null };
-                }
-                if (op.action === "upsert") {
-                    const inserted = [];
-                    for (const raw of op.payload) {
-                        const row = withDay(raw);
-                        if (duplicate(row)) continue;
-                        const saved = { id: `att-${list.length + 1}`, ...row };
-                        list.push(saved);
-                        inserted.push(saved);
-                    }
-                    return { data: inserted, error: null };
-                }
-                if (op.action === "update") {
-                    const hits = list.filter(matches);
-                    hits.forEach((row) => Object.assign(row, op.payload));
-                    return { data: hits, error: null };
-                }
-                return { data: list.filter(matches), error: null };
-            };
-            query.single = () => { const result = run(); return Promise.resolve(result.error ? result : { data: result.data[0], error: null }); };
-            query.maybeSingle = () => { const result = run(); return Promise.resolve({ data: result.data?.[0] || null, error: result.error }); };
-            query.then = (resolve, reject) => Promise.resolve(run()).then(resolve, reject);
-            return query;
-        }
-    };
+/** The shared fake database; member QR tokens are read from its rows. */
+function fakeDb(options) {
+    return fakeCheckinDb(options);
 }
+const tokenOf = (db, id) => db.tables.members.find((member) => member.id === id).qr_token;
+const tokens = new Proxy({}, { get: (_target, name) => tokenOf(fakeCheckinDb(), ids[name]) });
 
 // ---------- The QR text ----------
 
@@ -119,7 +48,7 @@ test("a scan checks in the member of this gym, with plan and days left", async (
     assert.equal(result.member.full_name, "Riya Shah");
     assert.deepEqual([result.membership.plan_name, result.membership.end_date, result.membership.days_left], ["Monthly", "2026-11-30", 18]);
     assert.deepEqual(db.tables.attendance.map((row) => [row.member_id, row.method, row.membership_status_at_check_in, row.check_in_date, row.recorded_by]),
-        [[ids.riya, "qr", "active", "2026-11-12", owner]]);
+        [[ids.riya, "member_qr", "active", "2026-11-12", owner]]);
     const lookup = db.calls.find((call) => call.table === "members");
     assert.ok(lookup.filters.some(([method, field, value]) => method === "eq" && field === "gym_id" && value === gymA), "token lookup is limited to the gym");
 });

@@ -45,7 +45,9 @@ import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker 
 import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, paymentsPage, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel } from "./modules/upiPayments.js";
 import { upiIdProblem, UTR_PATTERN } from "./upi.js";
 import { welcomePayment } from "./welcomeMessage.js";
-import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, manualCheckIn, openCheckInByName, renderScanPage, searchCheckInMembers, selectVisitsDay, startScanner, stopScanner } from "./modules/attendance.js";
+import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
+import { handleCheckinSettingsAction, loadCheckinSettings, saveAttendanceSettings } from "./modules/checkinSettingsUi.js";
+import { usesMemberQr } from "./modules/checkinMethod.js";
 import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
 import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
 import { loadState, setStorageUser } from "./storage.js";
@@ -55,7 +57,7 @@ const page = document.querySelector("#page-content");
 const viewTitles = {
     expiring: "Expiring soon", overview: "Overview", members: "Members", plans: "Membership plans", attendance: "Attendance", payments: "Payments",
     renewals: "Renewals", retention: "Retention", analytics: "Analytics", reports: "Reports",
-    notifications: "Notifications", whatsapp: "WhatsApp inbox", integrations: "Integrations", settings: "Settings", profile: "Member profile", scan: "Scan check-in"
+    notifications: "Notifications", whatsapp: "WhatsApp inbox", integrations: "Integrations", settings: "Settings", profile: "Member profile", scan: "Check-in"
 };
 let currentView = "expiring";
 let profileId = "";
@@ -142,6 +144,11 @@ function startAuthenticatedApp(session) {
     // Loaded early so the "Member added" dialog can open WhatsApp without waiting.
     loadWelcomeTemplates();
     loadAttendanceFeed(rerenderAttendanceViews);
+    // The gym's one check-in method decides what the Check-in screen, profile and cards show.
+    loadCheckinSettings().then(() => {
+        rerenderForCheckinMethod();
+        watchApprovals(() => { if (["scan", "profile"].includes(currentView)) render(); });
+    });
     // Gym phone, address and UPI details live in the database.
     loadGymSettings().then(() => { if (currentView === "settings") render(); });
     loadAllMemberships(() => {
@@ -214,9 +221,11 @@ function render() {
     } else if (currentView === "profile") {
         page.innerHTML = renderProfile(profileId);
     } else if (currentView === "scan") {
-        // The camera keeps running across re-renders; only draw the page once.
-        if (!page.querySelector("#scanner-root")) page.innerHTML = renderScanPage();
-        startScanner();
+        // The camera keeps running across re-renders, so the member-QR page is drawn once;
+        // the poster front desk is redrawn whenever approvals or today's check-ins change.
+        const cameraPage = usesMemberQr() && !state.sampleDataLoaded;
+        if (!cameraPage || !page.querySelector("#scanner-root")) page.innerHTML = renderCheckInPage();
+        startCheckInScreen(rerenderCheckIn);
     } else {
         page.innerHTML = renderOperationsPage(currentView);
         if (currentView === "analytics") drawAnalyticsCharts();
@@ -276,11 +285,27 @@ async function refreshMemberTotal() {
 // Pages that read check-ins redraw when the database feed arrives.
 function rerenderAttendanceViews() {
     if (["attendance", "overview", "retention", "analytics", "notifications", "profile"].includes(currentView)) render();
+    else if (currentView === "scan") rerenderCheckIn();
+}
+
+function rerenderCheckIn() {
+    if (currentView === "scan") render();
+}
+
+// After the check-in method loads or changes: a running camera stops if the gym no longer
+// uses member QR cards, and every page drops what belongs to the other method.
+function rerenderForCheckinMethod() {
+    if (currentView === "scan") {
+        stopCheckInScreen();
+        page.innerHTML = "";
+    }
+    render();
+    if (currentView === "profile" && profileId) loadMemberDevices(profileId, () => { if (currentView === "profile") render(); });
 }
 
 function navigate(view) {
     if (!viewTitles[view]) return;
-    if (currentView === "scan" && view !== "scan") stopScanner();
+    if (currentView === "scan" && view !== "scan") stopCheckInScreen();
     currentView = view;
     if (view !== "profile") profileId = "";
     render();
@@ -290,6 +315,7 @@ function navigate(view) {
         const renderSettings = () => { if (currentView === "settings") render(); };
         loadWelcomeTemplates({ force: true }).then(renderSettings);
         loadGymSettings().then(renderSettings);
+        loadCheckinSettings().then(renderSettings);
     }
     if (view === "attendance") loadAttendanceFeed(rerenderAttendanceViews);
     if (view === "payments" && !state.sampleDataLoaded) loadPaymentsPage(() => { if (currentView === "payments") render(); });
@@ -299,6 +325,7 @@ function navigate(view) {
         loadProfileConsent(profileId);
         loadProfileWelcome(profileId);
         const visitsFor = profileId;
+        loadMemberDevices(visitsFor, () => { if (currentView === "profile" && profileId === visitsFor) render(); });
         loadMemberAttendance(visitsFor, () => { if (currentView === "profile" && profileId === visitsFor) render(); });
     }
     if (initializationWarning) toast(initializationWarning, "error");
@@ -731,16 +758,16 @@ function onPaymentFormEdit(target) {
     return true;
 }
 
-function openCheckInForm(memberId = "", source = "manual") {
+function openCheckInForm(memberId = "") {
     const member = memberId ? getMember(memberId) : null;
     const choices = state.members.map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)} · ${escapeHTML(item.id)}</option>`).join("");
     openModal({
-        title: source === "fingerprint" ? "Fingerprint scan simulation" : source === "qr" ? "QR check-in demo" : "Check in a member",
-        subtitle: source === "fingerprint" ? "Simulation only — no biometric data or device connection is used." : "Select a member to record an attendance event.",
-        body: `<form id="checkin-form" data-source="${escapeHTML(source)}"><div class="field"><label for="form-memberId">Member *</label><select id="form-memberId" name="memberId" required><option value="">Select a member</option>${choices}</select></div>
-            <div class="note-box" style="margin-top:13px">${source === "fingerprint" ? "A successful simulated match records a normal attendance event. No fingerprint image or template is captured or stored." : "A second check-in for the same member on the same day will be prevented."}</div>
+        title: "Check in a member",
+        subtitle: "Select a member to record an attendance event.",
+        body: `<form id="checkin-form"><div class="field"><label for="form-memberId">Member *</label><select id="form-memberId" name="memberId" required><option value="">Select a member</option>${choices}</select></div>
+            <div class="note-box" style="margin-top:13px">A second check-in for the same member on the same day will be prevented.</div>
             <div id="checkin-warning" class="helper-text" style="margin-top:9px"></div></form>`,
-        footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-primary" type="submit" form="checkin-form">${source === "fingerprint" ? "Simulate successful scan" : "Record check-in"}</button>`
+        footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-primary" type="submit" form="checkin-form">Record check-in</button>`
     });
 }
 
@@ -1164,9 +1191,8 @@ function recordCheckIn(form) {
     if (memberStatus(member) === "expired" && !window.confirm(`${member.name}'s membership is expired. Record this check-in anyway?`)) return;
     const today = localISODate();
     if (state.attendance.some((record) => record.memberId === member.id && record.checkedInAt.slice(0, 10) === today)) throw new Error("This member already has a check-in recorded today.");
-    const source = form.dataset.source || "manual";
-    state.attendance.unshift({ id: uid("AT"), memberId: member.id, checkedInAt: new Date().toISOString(), checkedOutAt: "", source });
-    closeModal(); safePersist(source === "fingerprint" ? "Simulated scan matched. Attendance recorded." : "Check-in recorded.");
+    state.attendance.unshift({ id: uid("AT"), memberId: member.id, checkedInAt: new Date().toISOString(), checkedOutAt: "", source: "manual" });
+    closeModal(); safePersist("Check-in recorded.");
 }
 
 async function openImportPreview() {
@@ -1342,7 +1368,7 @@ function confirmReset() {
         resetDemo();
         memberFilters = { search: "", filter: "all", sort: "name" };
         currentView = "overview";
-        closeModal(); render(); refreshMembersFromApi({ page: 1 }); loadAttendanceFeed(rerenderAttendanceViews); toast("Local sample data cleared.");
+        closeModal(); render(); refreshMembersFromApi({ page: 1 }); loadAttendanceFeed(rerenderAttendanceViews); loadCheckinSettings().then(rerenderForCheckinMethod); toast("Local sample data cleared.");
     } catch (error) {
         toast(error.message || "Could not reset demo data.", "error");
     }
@@ -1444,6 +1470,11 @@ async function handleSubmit(event) {
     if (form.id === "welcome-template-form") {
         event.preventDefault();
         await handleWelcomeTemplateSubmit(form);
+        return;
+    }
+    if (form.id === "attendance-settings-form") {
+        event.preventDefault();
+        await saveAttendanceSettings(form, rerenderForCheckinMethod);
         return;
     }
     if (form.id === "whatsapp-compose" || form.id === "whatsapp-template-form" || form.id === "whatsapp-click-template-form") {
@@ -1559,6 +1590,7 @@ document.addEventListener("click", (event) => {
         // Synchronous up to window.open / navigator.share, so phones treat it as the user's tap.
         if (handleUpiPaymentAction(action.dataset.action, action)) return;
         if (handleAttendanceAction(action.dataset.action, action, rerenderAttendanceViews)) return;
+        if (handleCheckinSettingsAction(action.dataset.action, action, rerenderForCheckinMethod)) return;
         if (action.dataset.action === "open-upi-settings") {
             closeModal();
             navigate("settings");
@@ -1795,10 +1827,10 @@ async function registerServiceWorker() {
 }
 
 registerServiceWorker();
-// The camera is released whenever the app is hidden, and comes back on the scan page.
+// The camera is released whenever the app is hidden, and comes back on the Check-in screen.
 document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopScanner();
-    else if (currentView === "scan") startScanner();
+    if (document.hidden) stopCheckInScreen();
+    else if (currentView === "scan") startCheckInScreen(rerenderCheckIn);
 });
 setUnauthorizedHandler(() => {
     clearAuthSession();

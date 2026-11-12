@@ -8,6 +8,7 @@ import {
     validateManualCheckIn,
     validateScan
 } from "../middleware/validateAttendance.js";
+import { validateCheckinSearch } from "../middleware/validateCheckin.js";
 
 const router = express.Router();
 const scanRateLimit = createScanRateLimit();
@@ -27,6 +28,13 @@ router.post("/manual", validateManualCheckIn, (request, response, next) => {
 router.post("/import", validateAttendanceImport, (request, response, next) => {
     attendance.importAttendance(request.importRecords, request.gymId, request.authUser?.id || null)
         .then((result) => response.json({ status: "success", data: result }))
+        .catch(next);
+});
+
+// "Can't scan? Check in manually": last 4 digits of the phone, or part of the name.
+router.get("/search", validateCheckinSearch, (request, response, next) => {
+    attendance.searchCheckInMembers(request.checkinSearch, request.gymId)
+        .then((rows) => response.json({ status: "success", data: rows }))
         .catch(next);
 });
 
