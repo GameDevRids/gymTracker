@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { supabaseClient } from "../config/database.js";
 import { selectCurrentMembership } from "./membershipsService.js";
+import { removePhotoBeforeArchive } from "./memberPhotosService.js";
 
 const memberColumns = [
     "id",
@@ -20,6 +21,11 @@ const memberColumns = [
     "whatsapp_opt_in",
     "whatsapp_opt_in_at",
     "whatsapp_opt_out_at",
+    // Photo state only (migration 014); the storage path never leaves the server.
+    "photo_status",
+    "photo_updated_at",
+    "photo_consent",
+    "photo_consent_at",
     "created_at",
     "updated_at",
     "archived_at"
@@ -49,7 +55,7 @@ function throwDatabaseError(error, operation) {
         throw new MembersServiceError(409, "Member has related records and cannot be deleted.");
     }
     if (error?.code === "PGRST204" || error?.code === "42703") {
-        throw new MembersServiceError(503, "The members table is missing required columns. Run migration 009_add_member_contact_and_whatsapp_consent.sql in Supabase SQL Editor.");
+        throw new MembersServiceError(503, "The members table is missing required columns. Run the latest migrations (up to 014_add_member_photos.sql) in Supabase SQL Editor.");
     }
     if (error?.code === "PGRST205" || error?.code === "42P01") {
         throw new MembersServiceError(503, "Membership history is unavailable. Run migration 004_create_member_memberships.sql in Supabase SQL Editor.");
@@ -301,10 +307,14 @@ export async function listConsentEvents(memberId, gymId, client = supabaseClient
 export async function deleteMember(id, gymId, client = supabaseClient) {
     requireSupabaseClient(client);
     if (!gymId) throw new MembersServiceError(403, "Gym is required.");
+    // The photo file is deleted first; the archive then clears the photo columns with it.
+    // If the file cannot be deleted, the member is not archived and staff can try again.
+    const photoPath = await removePhotoBeforeArchive(id, gymId, client);
     const archivedAt = new Date().toISOString();
+    const photoCleared = photoPath ? { photo_path: null, photo_status: "none", photo_device_id: null, photo_updated_at: archivedAt } : {};
     const { data, error } = await client
         .from("members")
-        .update({ archived_at: archivedAt, updated_at: archivedAt })
+        .update({ archived_at: archivedAt, updated_at: archivedAt, ...photoCleared })
         .eq("id", id)
         .eq("gym_id", gymId)
         .is("archived_at", null)

@@ -16,6 +16,7 @@ import messageTemplatesRouter from "./routes/messageTemplates.js";
 import gymSettingsRouter from "./routes/gymSettings.js";
 import attendanceRouter from "./routes/attendance.js";
 import memberDevicesRouter from "./routes/memberDevices.js";
+import memberPhotosRouter from "./routes/memberPhotos.js";
 import { createEntranceRouter } from "./routes/entrance.js";
 import whatsappRouter from "./routes/whatsapp.js";
 import authRouter from "./routes/auth.js";
@@ -32,6 +33,17 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const currentFile = fileURLToPath(import.meta.url);
 const projectDir = path.resolve(currentDir, "..");
 const allowedOrigins = new Set(whatsappConfig.allowedOrigins);
+
+/** The Supabase project's origin, where member photos' signed URLs point; "" if not configured. */
+export function photoImageOrigin(value = process.env.SUPABASE_URL) {
+    try {
+        const url = new URL(String(value || "").trim());
+        return ["https:", "http:"].includes(url.protocol) ? url.origin : "";
+    } catch {
+        return "";
+    }
+}
+
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(httpLogger);
@@ -42,7 +54,8 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             styleSrcAttr: ["'unsafe-inline'"],
             fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            imgSrc: ["'self'", "data:", "blob:"],
+            // Member photos are shown from short-lived signed Supabase Storage URLs.
+            imgSrc: ["'self'", "data:", "blob:", ...(photoImageOrigin() ? [photoImageOrigin()] : [])],
             connectSrc: ["'self'"]
         }
     }
@@ -95,6 +108,7 @@ app.use("/api/message-templates", requireAuth(), messageTemplatesRouter);
 app.use("/api/gym-settings", requireAuth(), gymSettingsRouter);
 app.use("/api/attendance", requireAuth(), attendanceRouter);
 app.use("/api/member-devices", requireAuth(), memberDevicesRouter);
+app.use("/api/member-photos", requireAuth(), memberPhotosRouter);
 // The public entrance poster page and its check-in calls (no login; own rate limits).
 app.use("/c", createEntranceRouter());
 app.use("/api/whatsapp", (request, response, next) => {

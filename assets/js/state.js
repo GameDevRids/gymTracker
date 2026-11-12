@@ -81,6 +81,12 @@ export function memberFromApiRow(member) {
         whatsappOptInAt: member.whatsapp_opt_in_at || "",
         whatsappOptOutAt: member.whatsapp_opt_out_at || "",
         notes: member.notes || "",
+        // Photo state only; the image itself is loaded from a short-lived signed URL kept in
+        // memory (modules/memberPhotos.js), never stored with the member.
+        photoStatus: ["pending", "approved"].includes(member.photo_status) ? member.photo_status : "none",
+        photoConsent: member.photo_consent === true,
+        photoConsentAt: member.photo_consent_at || "",
+        photoUpdatedAt: member.photo_updated_at || "",
         // Only single-member responses carry the check-in QR token.
         ...(member.qr_token ? { qrToken: member.qr_token } : {}),
         followUpStatus: member.follow_up_status || "pending",

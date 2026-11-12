@@ -2,6 +2,7 @@ import express from "express";
 import { approveDevice, listPendingDevices, rejectDevice, revokeDevice } from "../services/entranceService.js";
 import { validateDeviceId } from "../middleware/validateCheckin.js";
 import { membersErrorHandler } from "../controllers/membersController.js";
+import { rejectPhotosFromDevice } from "../services/memberPhotosService.js";
 
 // Front desk: phones waiting for approval, and revoking a linked phone. Any login of the gym.
 const router = express.Router();
@@ -21,9 +22,13 @@ router.post("/:id/approve", validateDeviceId, (request, response, next) => {
         .catch(next);
 });
 
+// Rejecting a phone also rejects (deletes) any photo that phone sent from the poster page.
 router.post("/:id/reject", validateDeviceId, (request, response, next) => {
     rejectDevice(request.params.id, request.gymId)
-        .then((row) => response.json({ status: "success", data: row }))
+        .then(async (row) => {
+            await rejectPhotosFromDevice(request.params.id, request.gymId, request.authUser?.id || null);
+            response.json({ status: "success", data: row });
+        })
         .catch(next);
 });
 

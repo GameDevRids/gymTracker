@@ -73,6 +73,9 @@ test("frontend HTML and static assets load with the expected content security po
     assert.match(policy, /script-src 'self'/);
     assert.match(policy, /'unsafe-inline'/);
     assert.match(policy, /https:\/\/fonts\.googleapis\.com/);
+    // Signed member-photo URLs come only from the gym's own Supabase project.
+    const imgSrc = policy.split(";").find((directive) => directive.startsWith("img-src"));
+    assert.equal(imgSrc, `img-src 'self' data: blob: ${new URL(process.env.SUPABASE_URL).origin}`);
 
     const html = await response.text();
     assert.match(html, /src="\/assets\/vendor\/chart\.umd\.min\.js"/);
@@ -90,7 +93,9 @@ test("frontend HTML and static assets load with the expected content security po
     const workerResponse = await fetch(`${baseUrl}/sw.js`);
     assert.equal(workerResponse.status, 200);
     const workerSource = await workerResponse.text();
-    assert.match(workerSource, /gympulse-shell-v13/);
+    assert.match(workerSource, /gympulse-shell-v14/);
+    // Member photos (signed Storage URLs and the photo API) are never cached by the worker.
+    assert.match(workerSource, /if \(isMemberPhoto\(url\)\) return;/);
     assert.match(workerSource, /fetch\(new Request\(request, \{ cache: "no-cache" \}\)\)[\s\S]*?cache\.put\(url\.pathname, copy\)/);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-192.png`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-512.png`)).status, 200);

@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v13";
+const CACHE_NAME = "gympulse-shell-v14";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -44,6 +44,8 @@ const APP_SHELL = [
     "/assets/js/modules/checkinMethod.js",
     "/assets/js/modules/checkinSettingsUi.js",
     "/assets/js/entrance.js",
+    "/assets/js/photoCapture.js",
+    "/assets/js/modules/memberPhotos.js",
     "/assets/css/entrance.css",
     "/data/demo-data.js",
     "/assets/icons/gympulse-192.png",
@@ -63,9 +65,18 @@ self.addEventListener("activate", (event) => {
     self.clients.claim();
 });
 
+/** Signed photo URLs from Supabase Storage, and the app's own photo endpoints. */
+function isMemberPhoto(url) {
+    return url.pathname.includes("/storage/v1/object/")
+        || url.pathname.startsWith("/api/member-photos")
+        || /^\/api\/members\/[^/]+\/photo/.test(url.pathname);
+}
+
 self.addEventListener("fetch", (event) => {
     const request = event.request;
     const url = new URL(request.url);
+    // Member photos (signed Supabase Storage URLs) and the photo API are never cached here.
+    if (isMemberPhoto(url)) return;
     if (request.method !== "GET" || url.origin !== self.location.origin) return;
     // The entrance poster page is per phone and per poster: always from the network, never cached
     // (and never stored as the app's /index.html).

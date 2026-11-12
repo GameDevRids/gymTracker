@@ -15,8 +15,12 @@ import {
     entranceCheckIn,
     entranceState,
     newDeviceSecret,
+    pendingLinksForSecret,
     requestLink
 } from "../services/entranceService.js";
+import { MemberPhotoError, posterPhotoUpload } from "../services/memberPhotosService.js";
+import { PhotoFileError } from "../services/photoFile.js";
+import { photoBody } from "../middleware/photoBody.js";
 import { normalizeIndianMobile } from "../../assets/js/checkin.js";
 
 // The public entrance poster page: /c/<entrance_token>. No login. Members link their phone once
@@ -29,6 +33,8 @@ const DEVICE_COOKIE_PATH = "/c";
 const DEVICE_COOKIE_DAYS = 400; // The longest browsers keep a cookie.
 // Every link request takes at least this long, member's number or not.
 export const LINK_MIN_MS = 700;
+// A photo upload always takes at least this long, saved or not (storing a file takes time).
+export const PHOTO_MIN_MS = 1500;
 export const NOT_ACTIVE = "This check-in link is not active";
 
 function cookie(request, name, value, { path, maxAgeSeconds }) {
@@ -77,6 +83,7 @@ export function createEntranceRouter({
     limits = createEntranceLimits(),
     lockout = createNumberLockout(),
     minLinkMs = LINK_MIN_MS,
+    minPhotoMs = PHOTO_MIN_MS,
     now = () => new Date()
 } = {}) {
     const router = express.Router();
@@ -149,6 +156,34 @@ export function createEntranceRouter({
         }
     });
 
+    // "Add your photo" while the phone waits for approval. Saved only as 'pending', only when this
+    // phone is linking to exactly one member with no photo yet; staff approve it. The answer, and
+    // the minimum time it takes, are the same whether or not anything was saved.
+    router.post("/:token/photo", requireSameOrigin, limits.linkIp, limits.linkPoster, (request, _response, next) => {
+        request.deviceSecret = deviceSecret(request);
+        next();
+    }, limits.photoPhone, photoBody, async (request, response, next) => {
+        const started = Date.now();
+        const settle = () => wait(Math.max(0, minPhotoMs - (Date.now() - started)));
+        try {
+            if (request.get("X-Photo-Consent") !== "agreed") {
+                return response.status(400).json({ status: "error", message: "Tap \"I agree\" before sending your photo." });
+            }
+            const gym = await activeGym(request);
+            if (!gym) {
+                await settle();
+                return inactive(response);
+            }
+            const rows = request.deviceSecret ? await pendingLinksForSecret(gym, request.deviceSecret, client, now()) : [];
+            await posterPhotoUpload(gym, rows, request.body, client);
+            await settle();
+            response.json({ status: "success", data: { state: "photo_sent" } });
+        } catch (error) {
+            await settle();
+            next(error);
+        }
+    });
+
     router.post("/:token/checkin", requireSameOrigin, limits.checkinIp, (request, _response, next) => {
         request.deviceSecret = deviceSecret(request);
         next();
@@ -165,7 +200,12 @@ export function createEntranceRouter({
     });
 
     router.use((error, _request, response, _next) => {
-        const known = error instanceof EntranceError || error instanceof CheckinSettingsError;
+        if (error instanceof MemberPhotoError) {
+            // Never says more than "not sent", so the page still reveals nothing about the number.
+            logger.error({ err: error }, "Entrance photo upload failed.");
+            return response.status(503).json({ status: "error", message: "Your photo could not be sent. You can add it at the front desk." });
+        }
+        const known = error instanceof EntranceError || error instanceof CheckinSettingsError || error instanceof PhotoFileError;
         const status = known && Number.isInteger(error.status) ? error.status : 500;
         if (status === 500) logger.error({ err: error }, "Entrance check-in request failed.");
         response.status(status).json({

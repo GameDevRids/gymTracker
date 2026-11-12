@@ -6,6 +6,7 @@ import { getCurrentMembership } from "./memberMemberships.js";
 import { renderWelcomeSection } from "./welcomeUi.js";
 import { renderLinkedPhones, renderMemberVisits } from "./attendance.js";
 import { usesMemberQr } from "./checkinMethod.js";
+import { avatarHtml, profilePhotoHtml, renderPhotoSection } from "./memberPhotos.js";
 
 export function renderMembers({ search = "", filter = "all", sort = "name", pagination = { page: 1, limit: 25, total: state.members.length }, loading = false } = {}) {
     const query = search.trim().toLowerCase();
@@ -31,7 +32,7 @@ function memberRow(member) {
     const planName = membership?.plan_name || "Unassigned";
     const expiryDate = membership?.end_date || "";
     const membershipStatus = membership?.effective_status || "unassigned";
-    return `<tr><td data-label="Member"><button class="text-button member-cell" data-action="profile" data-id="${escapeHTML(member.id)}"><span class="member-avatar">${escapeHTML(member.name.charAt(0))}</span><span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.memberCode || member.id)}</small></span></button></td><td data-label="Phone">${escapeHTML(formatPhone(member.phone))}</td><td data-label="Plan">${escapeHTML(planName)}</td><td data-label="Expires">${formatDate(expiryDate)}</td><td data-label="Status">${statusPill(membershipStatus)}</td><td data-label="Actions"><div class="inline-actions"><button class="text-button" data-action="assign-member-plan" data-id="${escapeHTML(member.id)}">Assign plan</button><button class="text-button" data-action="edit-member" data-id="${escapeHTML(member.id)}">Edit</button><button class="text-button" data-action="record-payment" data-id="${escapeHTML(member.id)}">Payment</button></div></td></tr>`;
+    return `<tr><td data-label="Member"><button class="text-button member-cell" data-action="profile" data-id="${escapeHTML(member.id)}">${avatarHtml(member)}<span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.memberCode || member.id)}</small></span></button></td><td data-label="Phone">${escapeHTML(formatPhone(member.phone))}</td><td data-label="Plan">${escapeHTML(planName)}</td><td data-label="Expires">${formatDate(expiryDate)}</td><td data-label="Status">${statusPill(membershipStatus)}</td><td data-label="Actions"><div class="inline-actions"><button class="text-button" data-action="assign-member-plan" data-id="${escapeHTML(member.id)}">Assign plan</button><button class="text-button" data-action="edit-member" data-id="${escapeHTML(member.id)}">Edit</button><button class="text-button" data-action="record-payment" data-id="${escapeHTML(member.id)}">Payment</button></div></td></tr>`;
 }
 
 export function renderProfile(memberId) {
@@ -44,7 +45,7 @@ export function renderProfile(memberId) {
     const balance = memberBalance(member);
     return `<div class="page-heading"><div><button class="text-button" data-view="members">← All members</button><h1 class="profile-page-title">Member profile</h1><p>Membership details, attendance and payment history.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="edit-member" data-id="${escapeHTML(member.id)}">Edit profile</button><button class="button button-primary" data-action="assign-member-plan" data-id="${escapeHTML(member.id)}">Assign Plan</button></div></div>
         <div class="profile-layout"><div>
-            <section class="card"><div class="card-body"><div class="profile-hero"><span class="profile-large">${escapeHTML(member.name.charAt(0))}</span><div><h2>${escapeHTML(member.name)}</h2><p>${escapeHTML(member.memberCode || member.id)} · Account ${statusPill(member.status === "suspended" ? "suspended" : "active")}</p></div><span class="toolbar-spacer"></span><button class="button button-secondary button-small" data-action="record-payment" data-id="${escapeHTML(member.id)}">＋ Record payment</button></div></div><div class="card-body profile-fields">
+            <section class="card"><div class="card-body"><div class="profile-hero">${profilePhotoHtml(member)}<div><h2>${escapeHTML(member.name)}</h2><p>${escapeHTML(member.memberCode || member.id)} · Account ${statusPill(member.status === "suspended" ? "suspended" : "active")}</p></div><span class="toolbar-spacer"></span><button class="button button-secondary button-small" data-action="record-payment" data-id="${escapeHTML(member.id)}">＋ Record payment</button></div></div><div class="card-body profile-fields">
                 ${detail("Phone", formatPhone(member.phone) || "—")}${detail("Email", member.email || "—")}${detail("Date of birth", formatDate(member.dob))}${detail("Gender", member.gender || "—")}${detail("Emergency contact", member.emergencyContact || "—")}${detail("Joined", formatDate(member.joinedAt))}
             </div></section>
             <section class="card profile-section"><div class="card-header"><div><h2>Current membership</h2><p>Current assignment snapshot</p></div></div><div class="card-body" id="member-current-membership" data-member-id="${escapeHTML(member.id)}"><div class="empty-state">Loading membership details…</div></div></section>
@@ -54,6 +55,7 @@ export function renderProfile(memberId) {
             ${member.memberCode ? renderMemberVisits(member) : `<section class="card profile-section"><div class="card-header"><div><h2>Attendance history</h2><p>Recent recorded check-ins</p></div><button class="text-button" data-view="attendance">View attendance</button></div><div class="table-wrap"><table><thead><tr><th>Check-in</th><th>Check-out</th><th>Source</th></tr></thead><tbody>${visits.slice(0, 8).map((visit) => `<tr><td>${new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedInAt))}</td><td>${visit.checkedOutAt ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedOutAt)) : "—"}</td><td>${escapeHTML(visit.source)}</td></tr>`).join("") || emptyRow(3, "No check-ins recorded for this member yet.")}</tbody></table></div></section>`}
         </div><aside>
             <section class="card"><div class="card-header"><h2>Membership</h2></div><div class="card-body profile-fields membership-fields">${detail("Plan", planName)}${detail("Membership period", `${formatDate(membership?.start_date)} – ${formatDate(membership?.end_date)}`)}${detail("Status", membership?.effective_status || "unassigned")}${detail("Total fees", formatINR(member.totalFees))}${detail("Amount paid", formatINR(member.totalFees - balance))}${detail("Outstanding", formatINR(balance))}</div><div class="card-body profile-card-actions"><button class="button button-primary button-full" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew membership</button></div></section>
+            ${renderPhotoSection(member)}
             ${renderConsentSection(member)}
             ${renderWelcomeSection(member)}
             <section class="card profile-section"><div class="card-header"><h2>Renewal history</h2></div><div class="activity-list">${member.renewals?.length ? member.renewals.slice().reverse().map((renewal) => `<div class="activity-row"><span class="activity-dot"></span><span><p>Renewed to <strong>${escapeHTML(getPlan(renewal.planId)?.name || "Membership")}</strong></p><small>${formatDate(renewal.date)} · until ${formatDate(renewal.expiryDate)}</small></span></div>`).join("") : `<div class="empty-state">No renewals recorded yet.</div>`}</div></section>
@@ -73,11 +75,13 @@ export function renderConsentSection(member) {
         ? `<span class="status status-active">Opted in</span><small>since ${escapeHTML(consentDate(member.whatsappOptInAt))}</small>`
         : `<span class="status status-inactive">No consent</span>${member.whatsappOptOutAt ? `<small>withdrawn ${escapeHTML(consentDate(member.whatsappOptOutAt))}</small>` : ""}`;
     const history = consentHistory[member.id];
+    // The history also holds photo consent (shown in the Photo section); only WhatsApp here.
+    const events = (history?.events || []).filter((event) => (event.channel || "whatsapp") === "whatsapp");
     let list;
     if (!history || history.status === "loading") list = `<div class="empty-state" role="status">Loading consent history…</div>`;
     else if (history.status === "error") list = `<div class="empty-state" role="alert"><p>${escapeHTML(history.message)}</p><button class="button button-secondary" data-action="retry-consent-history" data-id="${escapeHTML(member.id)}">Try again</button></div>`;
-    else if (!history.events.length) list = `<div class="empty-state">No consent recorded yet. Reminders are not sent without consent.</div>`;
-    else list = history.events.map((event) => `<div class="activity-row consent-event"><span class="activity-dot consent-${escapeHTML(event.action)}"></span><span><p><strong>${event.action === "granted" ? "Granted" : "Withdrawn"}</strong> · ${escapeHTML(CONSENT_SOURCES[event.source] || event.source)}</p><small>${escapeHTML(consentDate(event.created_at))}</small></span></div>`).join("");
+    else if (!events.length) list = `<div class="empty-state">No consent recorded yet. Reminders are not sent without consent.</div>`;
+    else list = events.map((event) => `<div class="activity-row consent-event"><span class="activity-dot consent-${escapeHTML(event.action)}"></span><span><p><strong>${event.action === "granted" ? "Granted" : "Withdrawn"}</strong> · ${escapeHTML(CONSENT_SOURCES[event.source] || event.source)}</p><small>${escapeHTML(consentDate(event.created_at))}</small></span></div>`).join("");
     return `<section class="card profile-section" id="member-consent"><div class="card-header"><div><h2>WhatsApp consent</h2><p class="consent-current">${current}</p></div></div><div class="activity-list">${list}</div></section>`;
 }
 

@@ -278,3 +278,51 @@
     .device-row .button-row { width: 100%; }
     .device-row .button-row .button { flex: 1; min-height: 44px; }
 }
+
+/* ---------- Member photos (inside the app only) ---------- */
+.photo-avatar { position: relative; overflow: hidden; flex: none; border-radius: 50%; }
+.photo-avatar img, .profile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.photo-avatar.has-photo, .profile-photo.has-photo { color: transparent; }
+.profile-photo { position: relative; overflow: visible; width: 96px; height: 96px; border-radius: 50%; font-size: 30px; }
+.profile-photo img { border-radius: 50%; }
+.photo-badge { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); padding: 1px 8px; border-radius: 999px; color: var(--slate, #1E2D3A); background: var(--marigold, #F4A51C); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.today-list li { grid-template-columns: 72px 28px minmax(0, 1fr) auto; }
+.today-list .member-avatar { width: 28px; height: 28px; font-size: 11px; }
+
+.scan-with-photo { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.scan-text { display: grid; gap: 10px; justify-items: center; }
+.scan-photo { display: grid; flex: none; width: clamp(130px, 34vw, 210px); aspect-ratio: 1; overflow: hidden; place-items: center; border: 4px solid rgba(255, 255, 255, .85); border-radius: 50%; background: rgba(0, 0, 0, .18); }
+.scan-photo img { width: 100%; height: 100%; object-fit: cover; }
+.scan-photo-empty { gap: 6px; align-content: center; padding: 10px; border-style: dashed; font-size: 14px; font-weight: 700; }
+.scan-photo-empty .button { min-height: 40px; }
+@media (min-width: 760px) {
+    .scan-result.desk-result .scan-with-photo { flex-direction: row; justify-content: center; text-align: left; }
+    .scan-result.desk-result .scan-text { justify-items: start; }
+}
+
+.pending-photo { display: flex; flex-basis: 100%; gap: 12px; align-items: center; padding: 10px; border-radius: var(--radius-md, 10px); background: var(--slate-soft, #E6EBEF); }
+.pending-photo img, .pending-photo .member-avatar { flex: none; width: 88px; height: 88px; border-radius: 50%; object-fit: cover; }
+.pending-photo > div { display: grid; gap: 6px; }
+
+.photo-field [data-photo-slot] { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.form-photo-preview { display: block; width: 72px; height: 72px; overflow: hidden; border-radius: 50%; }
+.form-photo-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+.photo-flow { display: grid; gap: 12px; justify-items: start; width: 100%; }
+.photo-flow-consent { margin: 0; padding: 12px 14px; border-left: 4px solid var(--leaf, #1D7A4F); border-radius: 10px; color: var(--ink, #1E2D3A); background: var(--leaf-tint, #E2F2E9); font-size: 16px; line-height: 1.5; }
+.photo-flow-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.photo-flow-actions .button { min-height: 44px; }
+.photo-flow-status, .photo-flow-error { margin: 0; font-size: 14px; }
+.photo-flow-error { color: var(--danger, #B42318); }
+.photo-flow-status[hidden], .photo-flow-error[hidden] { display: none; }
+.photo-crop { position: relative; max-width: 100%; aspect-ratio: 1; overflow: hidden; border-radius: 12px; background: #000; touch-action: none; }
+.photo-crop canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.photo-crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0, 0, 0, .45); pointer-events: none; }
+.photo-zoom { display: flex; gap: 10px; align-items: center; width: min(280px, 100%); }
+.photo-zoom input { flex: 1; }
+
+@media (max-width: 640px) {
+    .today-list li { grid-template-columns: 62px 28px minmax(0, 1fr); }
+    .today-meta { grid-column: 3; }
+    .profile-photo { width: 80px; height: 80px; }
+}

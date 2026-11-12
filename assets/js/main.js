@@ -45,8 +45,9 @@ import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker 
 import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, paymentsPage, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel } from "./modules/upiPayments.js";
 import { upiIdProblem, UTR_PATTERN } from "./upi.js";
 import { welcomePayment } from "./welcomeMessage.js";
-import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
+import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, pauseCheckinForPhoto, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
 import { handleCheckinSettingsAction, loadCheckinSettings, saveAttendanceSettings } from "./modules/checkinSettingsUi.js";
+import { handlePhotoAction, hydratePhotos, loadProfilePhoto, mountFormPhoto, photoFormField, saveFormPhoto } from "./modules/memberPhotos.js";
 import { usesMemberQr } from "./modules/checkinMethod.js";
 import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
 import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
@@ -233,6 +234,20 @@ function render() {
     if (state.sampleDataLoaded) {
         page.insertAdjacentHTML("afterbegin", `<div class="note-box" role="status"><strong>DEMO SAMPLE DATA</strong> — fictional browser-only records; not stored in your gym database.</div>`);
     }
+    // Member photos load after the page is drawn, from short-lived signed URLs.
+    hydratePhotos(page);
+}
+
+// After a photo is added, changed, removed, approved or rejected.
+function rerenderAfterPhoto(memberId) {
+    if (currentView === "profile" && profileId === memberId) {
+        loadProfilePhoto(memberId, () => { if (currentView === "profile" && profileId === memberId) render(); });
+        loadProfileConsent(memberId);
+    } else if (currentView === "scan") {
+        rerenderCheckIn();
+    } else {
+        render();
+    }
 }
 
 async function refreshMembersFromApi({ silent = false, page: requestedPage = memberFilters.page } = {}) {
@@ -324,6 +339,8 @@ function navigate(view) {
         loadMemberPaymentsFromApi(profileId);
         loadProfileConsent(profileId);
         loadProfileWelcome(profileId);
+        const photoFor = profileId;
+        loadProfilePhoto(photoFor, () => { if (currentView === "profile" && profileId === photoFor) render(); });
         const visitsFor = profileId;
         loadMemberDevices(visitsFor, () => { if (currentView === "profile" && profileId === visitsFor) render(); });
         loadMemberAttendance(visitsFor, () => { if (currentView === "profile" && profileId === visitsFor) render(); });
@@ -470,6 +487,7 @@ function renderMemberFormBody(member, planStatus = "loading", plans = []) {
             ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
             <p class="helper-text field full" id="member-assignment-error" role="alert" hidden></p>
             <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member agrees to receive WhatsApp updates</label><span class="helper-text">${member?.whatsappOptIn && member.whatsappOptInAt ? `Consent recorded on ${escapeHTML(formatDate(member.whatsappOptInAt.slice(0, 10)))}. ` : ""}Only tick this when the member has agreed. Every change is kept in their consent history, and reminders skip members without consent.</span></div>
+            ${!isEdit ? photoFormField("form") : ""}
             <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes">${escapeHTML(member?.notes || "")}</textarea></div>
             <p class="helper-text field full">Phone numbers must be unique. For imports, use columns: name, phone, email, plan, joinedAt, startDate, expiryDate.</p>
         </form>`;
@@ -515,7 +533,10 @@ function openMemberForm(memberId = "") {
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit" form="member-form" ${isEdit ? "" : "disabled"}>${isEdit ? "Save changes" : "Add member"}</button>`
     });
     const form = document.querySelector("#member-form");
-    if (!isEdit) loadMemberFormPlans(form);
+    if (!isEdit) {
+        loadMemberFormPlans(form);
+        mountFormPhoto(form);
+    }
 }
 
 const EXPIRY_PLACEHOLDER = "Choose a plan to see the expiry date";
@@ -567,11 +588,13 @@ function openQuickAddMemberForm() {
             <div class="field"><label for="quick-phone">${t("phone")} *</label><input id="quick-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="quick-phone-error"><span id="quick-phone-error" class="helper-text phone-error" role="alert" hidden>${t("phoneHelp")}</span></div>
             <div id="quick-plan-field">${renderQuickAddPlanField("loading")}</div>
             ${consentField()}
+            ${photoFormField("quick")}
             <p class="helper-text" id="quick-assignment-error" role="alert" hidden></p>
         </form>`,
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">${t("cancel")}</button><button class="button button-primary" type="submit" form="quick-member-form" disabled>${t("addAssign")}</button>`
     });
     loadQuickAddPlans(document.querySelector("#quick-member-form"));
+    mountFormPhoto(document.querySelector("#quick-member-form"));
 }
 
 function consentField() {
@@ -651,6 +674,7 @@ async function saveQuickMember(form) {
     const index = state.members.findIndex((item) => item.id === member.id);
     if (index >= 0) state.members[index] = updatedMember;
     await recordFormConsent(member.id, form.elements.whatsappOptIn.checked);
+    await saveFormPhoto(form, member.id);
     const error = form.querySelector("#quick-assignment-error");
     if (error) error.hidden = true;
     await finishMemberSave(member.id, "Member added and plan assigned.");
@@ -1097,6 +1121,7 @@ async function saveMember(form) {
 
     // Consent changes go through their own endpoint so the database records them in the history.
     await recordFormConsent(saved.id, record.whatsappOptIn);
+    if (isNewMember) await saveFormPhoto(form, saved.id);
 
     if (initialPayment > 0) {
         const payment = await createPayment({
@@ -1589,6 +1614,10 @@ document.addEventListener("click", (event) => {
         }
         // Synchronous up to window.open / navigator.share, so phones treat it as the user's tap.
         if (handleUpiPaymentAction(action.dataset.action, action)) return;
+        // "Add photo" on a check-in card pauses the card and the scanner camera first.
+        if (handlePhotoAction(action.dataset.action, action, rerenderAfterPhoto, {
+            beforeAdd: (element) => (element.dataset.context === "checkin" ? pauseCheckinForPhoto() : () => {})
+        })) return;
         if (handleAttendanceAction(action.dataset.action, action, rerenderAttendanceViews)) return;
         if (handleCheckinSettingsAction(action.dataset.action, action, rerenderForCheckinMethod)) return;
         if (action.dataset.action === "open-upi-settings") {

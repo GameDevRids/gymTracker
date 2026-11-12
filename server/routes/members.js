@@ -22,8 +22,52 @@ import { validateAssignmentPayload } from "../middleware/validateMembership.js";
 import { validateMessageListQuery, validateMessagePayload } from "../middleware/validateWhatsAppMessage.js";
 import { listMemberAttendance, reissueQrToken } from "../services/attendanceService.js";
 import { listMemberDevices } from "../services/entranceService.js";
+import {
+    approvePendingPhoto,
+    deleteMemberPhoto,
+    memberPhoto,
+    rejectPendingPhoto,
+    setPhotoConsent,
+    uploadMemberPhoto
+} from "../services/memberPhotosService.js";
+import { photoBody } from "../middleware/photoBody.js";
 
 const router = express.Router();
+
+function reply(promise, response, next) {
+    promise
+        .then((data) => {
+            response.set("Cache-Control", "no-store");
+            response.json({ status: "success", data });
+        })
+        .catch(next);
+}
+
+// ---------- Member photo (migration 014). Own gym only; the member must agree first. ----------
+// The member taps "I agree" (agree: true), or withdraws (agree: false, which deletes the photo).
+router.post("/:id/photo-consent", validateMemberId, (request, response, next) => {
+    const agree = request.body?.agree;
+    if (typeof agree !== "boolean" || Object.keys(request.body || {}).length !== 1) {
+        return response.status(400).json({ status: "error", message: "Send agree as true or false." });
+    }
+    reply(setPhotoConsent(request.params.id, request.gymId, { agree, source: "desk", recordedBy: request.authUser?.id || null }), response, next);
+});
+router.get("/:id/photo", validateMemberId, (request, response, next) => {
+    reply(memberPhoto(request.params.id, request.gymId), response, next);
+});
+// The photo itself is the request body (JPEG or WebP, at most 300 KB).
+router.put("/:id/photo", validateMemberId, photoBody, (request, response, next) => {
+    reply(uploadMemberPhoto(request.params.id, request.gymId, request.body), response, next);
+});
+router.delete("/:id/photo", validateMemberId, (request, response, next) => {
+    reply(deleteMemberPhoto(request.params.id, request.gymId), response, next);
+});
+router.post("/:id/photo/approve", validateMemberId, (request, response, next) => {
+    reply(approvePendingPhoto(request.params.id, request.gymId), response, next);
+});
+router.post("/:id/photo/reject", validateMemberId, (request, response, next) => {
+    reply(rejectPendingPhoto(request.params.id, request.gymId, request.authUser?.id || null), response, next);
+});
 
 router.get("/:memberId/memberships", validateMemberId, getMemberMemberships);
 router.post("/:memberId/memberships", validateMemberId, validateAssignmentPayload, assignMemberPlan);

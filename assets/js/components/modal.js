@@ -1,7 +1,20 @@
 const root = document.querySelector("#modal-root");
 let returnFocusTarget = null;
+let closeCallbacks = [];
+
+function runCloseCallbacks() {
+    const callbacks = closeCallbacks;
+    closeCallbacks = [];
+    callbacks.forEach((callback) => callback());
+}
+
+/** Runs once when the dialog that is open now closes or is replaced by another dialog. */
+export function onModalClose(callback) {
+    closeCallbacks.push(callback);
+}
 
 export function openModal({ title, subtitle = "", body, footer = "", wide = false }) {
+    runCloseCallbacks();
     returnFocusTarget = document.activeElement;
     root.innerHTML = `
         <section class="modal ${wide ? "modal-wide" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -17,6 +30,7 @@ export function openModal({ title, subtitle = "", body, footer = "", wide = fals
 
 export function closeModal() {
     root.replaceChildren();
+    runCloseCallbacks();
     if (returnFocusTarget instanceof HTMLElement && returnFocusTarget.isConnected) returnFocusTarget.focus();
     returnFocusTarget = null;
 }
