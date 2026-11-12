@@ -54,8 +54,9 @@ function escapeHTML(value) {
 
 export function entrancePage(gym) {
     const title = gym ? `Check in · ${gym.name}` : "Check-in link not active";
+    const logo = `<img class="logo logo-on-light" src="/assets/icons/mark-on-light.svg" alt=""><img class="logo logo-on-dark" src="/assets/icons/mark-on-dark.svg" alt="">`;
     const body = gym
-        ? `<main class="entry" id="entry" data-gym="${escapeHTML(gym.name)}"><header><p class="gym">${escapeHTML(gym.name)}</p><h1>Check in</h1></header><section id="panel" aria-live="polite"><p class="muted">Loading…</p></section></main>
+        ? `<main class="entry" id="entry" data-gym="${escapeHTML(gym.name)}"><header>${logo}<p class="gym">${escapeHTML(gym.name)}</p><h1>Check in</h1></header><section id="panel" aria-live="polite"><p class="muted">Loading…</p></section></main>
 <noscript><p class="entry">Turn on JavaScript to check in, or ask at the front desk.</p></noscript>
 <script src="/assets/vendor/qrcode-generator-1.4.4.js" defer></script>
 <script type="module" src="/assets/js/entrance.js"></script>`
@@ -67,6 +68,11 @@ export function entrancePage(gym) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1E2D3A">
+<link rel="icon" href="/assets/icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/assets/icons/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <title>${escapeHTML(title)}</title>
 <link rel="stylesheet" href="/assets/css/entrance.css">
 </head>

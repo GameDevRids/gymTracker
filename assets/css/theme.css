@@ -93,7 +93,6 @@ textarea:focus-visible, [tabindex]:focus-visible {
 
 /* ---------- Brand, login ---------- */
 .brand { font-weight: 800; letter-spacing: -.3px; }
-.brand-mark { color: var(--slate); background: var(--marigold); }
 .brand-light, .auth-brand .brand-light { color: var(--marigold); }
 /* Bug fix: the sidebar's white brand colour made "Gym" invisible on the login card */
 .brand.auth-brand { color: var(--slate); }

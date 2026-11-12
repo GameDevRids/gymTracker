@@ -59,7 +59,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     width: 252px; padding: 22px 15px 14px; color: #dce7e0; background: var(--forest);
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 9px 22px; color: white; text-decoration: none; font: 800 20px Manrope, sans-serif; letter-spacing: -.7px; }
-.brand-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 10px; color: var(--forest); background: var(--lime); font-size: 19px; }
 .brand-light { color: #b8f36b; }
 .gym-switcher { display: flex; align-items: center; gap: 10px; padding: 11px 10px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,.13); border-radius: 11px; background: rgba(255,255,255,.055); }
 .gym-avatar, .profile-avatar, .top-avatar { display: grid; flex: 0 0 auto; place-items: center; border-radius: 50%; font-weight: 700; }
@@ -321,3 +320,8 @@ body.whatsapp-fullscreen { overflow: hidden; }
     .inline-actions { flex-wrap: wrap; }
     .inline-actions .text-button { min-width: 44px; }
 }
+
+/* GymPulse logo mark next to the name (decorative; the name is written beside it) */
+.brand-logo { display: block; flex: none; width: auto; height: 32px; }
+.brand-logo-large { height: 48px; }
+.auth-brand { gap: 14px; }

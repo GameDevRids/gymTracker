@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v14";
+const CACHE_NAME = "gympulse-shell-v15";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -48,8 +48,15 @@ const APP_SHELL = [
     "/assets/js/modules/memberPhotos.js",
     "/assets/css/entrance.css",
     "/data/demo-data.js",
-    "/assets/icons/gympulse-192.png",
-    "/assets/icons/gympulse-512.png"
+    "/assets/icons/icon-192.png",
+    "/assets/icons/icon-512.png",
+    "/assets/icons/icon-maskable-512.png",
+    "/assets/icons/apple-touch-icon.png",
+    "/assets/icons/favicon.svg",
+    "/assets/icons/favicon-32.png",
+    "/assets/icons/favicon-16.png",
+    "/assets/icons/mark-on-dark.svg",
+    "/assets/icons/mark-on-light.svg"
 ];
 
 self.addEventListener("install", (event) => {

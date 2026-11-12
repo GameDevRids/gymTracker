@@ -93,12 +93,12 @@ test("frontend HTML and static assets load with the expected content security po
     const workerResponse = await fetch(`${baseUrl}/sw.js`);
     assert.equal(workerResponse.status, 200);
     const workerSource = await workerResponse.text();
-    assert.match(workerSource, /gympulse-shell-v14/);
+    assert.match(workerSource, /gympulse-shell-v15/);
     // Member photos (signed Storage URLs and the photo API) are never cached by the worker.
     assert.match(workerSource, /if \(isMemberPhoto\(url\)\) return;/);
     assert.match(workerSource, /fetch\(new Request\(request, \{ cache: "no-cache" \}\)\)[\s\S]*?cache\.put\(url\.pathname, copy\)/);
-    assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-192.png`)).status, 200);
-    assert.equal((await fetch(`${baseUrl}/assets/icons/gympulse-512.png`)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/assets/icons/icon-192.png`)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/assets/icons/icon-512.png`)).status, 200);
 });
 
 test("the service worker pre-caches every frontend module so the app can start offline", async () => {
