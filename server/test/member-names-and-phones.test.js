@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { memberNameProblem, validateMemberPayload } from "../middleware/validateMember.js";
 import { cleanMemberName, formatPhone, formatPlanDuration, memberNameIssue } from "../../assets/js/utils.js";
-import { validateImportRows } from "../../assets/js/modules/memberImport.js";
+import { readImportRows } from "../../assets/js/modules/memberImport.js";
 
 const goodNames = ["Riya Shah", "Rhea D'Souza", "Anne-Marie Joseph", "S. Kumar", "Jr.", "प्रिया देशमुख", "सई", "José Álvarez", "O’Brien", "  Kabir   Mehta  "];
 const badNames = ["", "   ", "riya@example.com", "owner@gym", "Riya123", "9876543210", "Riya_Shah", "-Riya", "<script>", "a".repeat(201)];
@@ -38,18 +38,20 @@ test("member create and update reject an email as the name and collapse extra sp
     assert.equal(request.validatedMember.full_name, "Kabir Mehta");
 });
 
-test("CSV import flags empty and email-like names per row", () => {
-    const { valid, invalid } = validateImportRows([
-        { rowNumber: 2, data: { name: "Riya Shah", phone: "9876543210" } },
-        { rowNumber: 3, data: { name: "riya@example.com", phone: "9876543211" } },
-        { rowNumber: 4, data: { name: "", phone: "9876543212" } },
-        { rowNumber: 5, data: { name: "R2D2", phone: "9876543213" } }
-    ]);
-    assert.deepEqual(valid.map((row) => row.rowNumber), [2]);
-    assert.deepEqual(invalid.map((row) => row.issues), [
+test("member import flags empty and email-like names per row", () => {
+    const text = (...values) => values.map((value) => ({ text: value }));
+    const rows = readImportRows([
+        text("Name", "Phone"),
+        text("Riya Shah", "9876543210"),
+        text("riya@example.com", "9876543211"),
+        text("", "9876543212"),
+        text("R2D2", "9876543213")
+    ], 0, { name: 0, phone: 1, plan: -1, startDate: -1, endDate: -1, amountPaid: -1, notes: -1 });
+    assert.deepEqual(rows.map((row) => row.problems), [
+        [],
         ["name looks like an email address"],
-        ["name is required"],
-        ["name must use letters only"]
+        ["name is missing"],
+        ["name must use letters (spaces, dots, apostrophes and hyphens are fine)"]
     ]);
 });
 

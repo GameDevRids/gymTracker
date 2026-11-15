@@ -33,16 +33,18 @@ async function post(path, ip) {
     });
 }
 
-for (const path of ["/api/auth/login", "/api/auth/refresh"]) {
-    test(`${path} allows 10 requests per IP per 15 minutes, then returns a JSON 429`, async () => {
+// Password sign-in is strict; restoring a session (one per page load) has more room because
+// several staff phones on one gym Wi-Fi share an IP.
+for (const [path, limit] of [["/api/auth/login", 10], ["/api/auth/refresh", 60]]) {
+    test(`${path} allows ${limit} requests per IP per 15 minutes, then returns a JSON 429`, async () => {
         const ip = path.endsWith("login") ? "203.0.113.10" : "203.0.113.20";
         const statuses = [];
-        for (let index = 0; index < 10; index += 1) statuses.push((await post(path, ip)).status);
+        for (let index = 0; index < limit; index += 1) statuses.push((await post(path, ip)).status);
         assert.ok(statuses.every((status) => status !== 429), `unexpected 429 within limit: ${statuses}`);
 
         const limited = await post(path, ip);
         assert.equal(limited.status, 429);
-        assert.equal(limited.headers.get("ratelimit-limit"), "10");
+        assert.equal(limited.headers.get("ratelimit-limit"), String(limit));
         assert.deepEqual(await limited.json(), {
             status: "error",
             message: "Too many sign-in attempts. Please wait 15 minutes and try again."

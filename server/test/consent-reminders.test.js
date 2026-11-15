@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { listExpiringMemberships } from "../services/membershipsService.js";
-import { importMembers, validateImportRows } from "../../assets/js/modules/memberImport.js";
+import { guessColumns, planImport, readImportRows } from "../../assets/js/modules/memberImport.js";
 
 // The expiring renderer translates labels through i18n, which reads the saved language.
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
@@ -60,35 +60,13 @@ test("members without consent are skipped by expiry reminders", () => {
     assert.match(html, /data-total="1"/, "the reminder count includes only members who can be reminded");
 });
 
-test("CSV import records consent only for rows explicitly marked yes", async () => {
-    const parsed = [
-        { rowNumber: 2, data: { name: "Riya Shah", phone: "9876543210", whatsappoptin: "yes" } },
-        { rowNumber: 3, data: { name: "Dev Rao", phone: "9876543211", whatsappoptin: "no" } },
-        { rowNumber: 4, data: { name: "Aisha Khan", phone: "9876543212" } },
-        { rowNumber: 5, data: { name: "Kabir Mehta", phone: "9876543213", whatsappoptin: "maybe" } }
-    ];
-    const { valid, invalid } = validateImportRows(parsed);
-    assert.deepEqual(invalid.map((row) => [row.rowNumber, row.issues]), [[5, ["WhatsApp consent must be yes or no"]]]);
-
-    const consents = [];
-    const result = await importMembers(valid, {
-        today: "2026-11-11",
-        createMember: async (member) => ({ id: `id-${member.phone}` }),
-        assignPlan: async () => ({}),
-        recordConsent: async (...args) => { consents.push(args); }
-    });
-    assert.deepEqual(consents, [["id-9876543210", true, "csv_import"]]);
-    assert.deepEqual(result.errors, []);
-});
-
-test("a failed consent recording during import is reported for that row, not silently dropped", async () => {
-    const { valid } = validateImportRows([{ rowNumber: 2, data: { name: "Riya Shah", phone: "9876543210", whatsappconsent: "Y" } }]);
-    const result = await importMembers(valid, {
-        today: "2026-11-11",
-        createMember: async () => ({ id: "x" }),
-        assignPlan: async () => ({}),
-        recordConsent: async () => { throw new Error("Network down."); }
-    });
-    assert.equal(result.imported, 1);
-    assert.deepEqual(result.errors, [{ rowNumber: 2, message: "Member was created, but WhatsApp consent was not recorded: Network down. Record it from the member's profile." }]);
+test("imported members never get WhatsApp consent, whatever the file says", () => {
+    const text = (...values) => values.map((value) => ({ text: value }));
+    const rows = readImportRows([
+        text("Name", "Phone", "WhatsApp opt in"),
+        text("Riya Shah", "9876543210", "yes")
+    ], 0, guessColumns(text("Name", "Phone", "WhatsApp opt in")));
+    const { payload } = planImport(rows);
+    assert.equal(payload.rows.length, 1);
+    assert.deepEqual(Object.keys(payload.rows[0]).sort(), ["amount_paid", "end_date", "full_name", "notes", "phone", "plan", "row", "start_date"]);
 });

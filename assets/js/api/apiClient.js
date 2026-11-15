@@ -109,7 +109,7 @@ export function setUnauthorizedHandler(handler) {
 }
 
 export const apiClient = {
-    async request(path, { method = "GET", body, params = {}, headers = {}, timeoutMs = 15000 } = {}) {
+    async request(path, { method = "GET", body, params = {}, headers = {}, timeoutMs = 15000, responseType = "json" } = {}) {
         const url = new URL(path, `${API_BASE_URL.replace(/\/$/, "")}/`);
         for (const [key, value] of Object.entries(params)) {
             if (value === undefined || value === null || value === "") continue;
@@ -133,6 +133,11 @@ export const apiClient = {
             });
 
             const contentType = response.headers.get("content-type") || "";
+            // A file download (for example the gym's Excel export): the bytes and the file name.
+            if (responseType === "blob" && response.ok) {
+                const disposition = response.headers.get("content-disposition") || "";
+                return { blob: await response.blob(), filename: /filename="([^"]+)"/.exec(disposition)?.[1] || "" };
+            }
             const payload = contentType.includes("application/json") ? await response.json() : {};
             if (response.status === 401 && url.origin === new URL(API_BASE_URL).origin
                 && !retry && accessToken && !isAuthEndpoint(path)) {
@@ -147,7 +152,8 @@ export const apiClient = {
             }
             if (!response.ok) {
                 const message = payload?.message || payload?.error || `The API request failed with status ${response.status}.`;
-                throw new Error(message);
+                // The server already knows about these, so the error reporter skips them.
+                throw Object.assign(new Error(message), { status: response.status, isApiError: true });
             }
             return payload;
         };

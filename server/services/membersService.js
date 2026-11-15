@@ -41,9 +41,15 @@ export class MembersServiceError extends Error {
     }
 }
 
+// The unique index from migration 015: one current member per phone number in a gym.
+const isPhoneConflict = (error) => error?.code === "23505" && /members_gym_phone_key/.test(`${error.message || ""} ${error.details || ""}`);
+
 function throwDatabaseError(error, operation) {
     if (operation === "payments" && ["PGRST205", "42P01", "42703"].includes(error?.code)) {
         throw new MembersServiceError(503, "Payments are unavailable. Run migration 006_create_payments.sql in Supabase SQL Editor.");
+    }
+    if (isPhoneConflict(error)) {
+        throw new MembersServiceError(409, "This phone number already belongs to another member.");
     }
     if (error?.code === "23505") {
         throw new MembersServiceError(409, "Member code already exists.");
@@ -221,7 +227,7 @@ export async function createMember(member, gymId, client = supabaseClient) {
             .single();
 
         if (!error) return data;
-        if (error.code === "23505" && !hasSuppliedCode && attempt < 2) continue;
+        if (error.code === "23505" && !isPhoneConflict(error) && !hasSuppliedCode && attempt < 2) continue;
         throwDatabaseError(error, "create");
     }
     throw new MembersServiceError(500, "Could not generate a unique member code.");
@@ -245,6 +251,28 @@ export async function updateMember(id, member, gymId, client = supabaseClient) {
     if (error) throwDatabaseError(error, "update");
     if (!data) throw new MembersServiceError(404, "Member not found.");
     return data;
+}
+
+/**
+ * Refuses a phone number another current member of this gym already has. The browser used to be
+ * the only check, and only against the members it had loaded. Migration 015's unique index is
+ * the final guard; this gives the owner the other member's name.
+ */
+export async function assertPhoneAvailable(phone, gymId, { exceptId = null } = {}, client = supabaseClient) {
+    requireSupabaseClient(client);
+    if (!phone) return;
+    const digits = String(phone).replace(/\D/g, "").slice(-10);
+    let query = client
+        .from("members")
+        .select("id,full_name")
+        .eq("gym_id", gymId)
+        .is("archived_at", null)
+        .in("phone", [digits, `+91${digits}`, `91${digits}`])
+        .limit(1);
+    if (exceptId) query = query.neq("id", exceptId);
+    const { data, error } = await query;
+    if (error) throwDatabaseError(error, "get");
+    if (data?.length) throw new MembersServiceError(409, `This phone number already belongs to ${data[0].full_name}.`);
 }
 
 const CONSENT_SOURCES = new Set(["staff_form", "csv_import", "member_reply_stop"]);

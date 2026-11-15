@@ -356,7 +356,8 @@ test("photos never appear in the welcome card, member card, receipts, WhatsApp m
         "../../assets/js/modules/cardCanvas.js",
         "../../assets/js/welcomeMessage.js",
         "../../assets/js/modules/upiPayments.js", // payment QR and receipt images
-        "../../assets/js/modules/whatsapp.js",
+        "../../assets/js/modules/expiryReminder.js", // WhatsApp expiry reminders
+        "../../assets/js/reminderMessage.js",
         "../services/paymentsService.js",
         "../services/whatsappMessagesService.js",
         "../routes/whatsapp.js"

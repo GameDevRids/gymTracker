@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { requireAuth } from "../middleware/requireAuth.js";
+import { GYM_COLUMNS, requireAuth } from "../middleware/requireAuth.js";
 
 const userId = "00000000-0000-4000-8000-000000000001";
 const gymId = "00000000-0000-4000-8000-000000000002";
@@ -25,7 +25,7 @@ function mockClient({ user, gym, authError, gymError } = {}) {
             assert.equal(table, "gym_users");
             return {
                 select(columns) {
-                    assert.equal(columns, "gym_id,role,gyms(id,name)");
+                    assert.equal(columns, GYM_COLUMNS);
                     return this;
                 },
                 eq(field, value) {

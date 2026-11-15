@@ -54,14 +54,48 @@
                 <input id="login-password" name="password" type="password" autocomplete="current-password" required>
                 <p class="auth-error" id="auth-error" role="alert" hidden></p>
                 <button class="button button-primary" type="submit">Sign in</button>
+                <button class="text-button auth-link" type="button" id="forgot-password-link">Forgot password?</button>
+            </form>
+            <form id="forgot-password-form" class="auth-form" hidden novalidate>
+                <label for="forgot-email">Email</label>
+                <input id="forgot-email" name="email" type="email" autocomplete="username" required>
+                <p class="auth-error" id="forgot-error" role="alert" hidden></p>
+                <button class="button button-primary" type="submit">Send reset link</button>
+                <button class="text-button auth-link" type="button" data-auth-back>Back to sign in</button>
+            </form>
+            <form id="reset-password-form" class="auth-form" hidden novalidate>
+                <label for="reset-password">New password</label>
+                <input id="reset-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+                <label for="reset-password-confirm">New password again</label>
+                <input id="reset-password-confirm" name="confirm_password" type="password" autocomplete="new-password" required>
+                <p class="auth-error" id="reset-error" role="alert" hidden></p>
+                <button class="button button-primary" type="submit">Save new password</button>
+                <button class="text-button auth-link" type="button" data-auth-back>Back to sign in</button>
             </form>
             <form id="create-gym-form" class="auth-form" hidden>
                 <label for="new-gym-name">Gym name</label>
                 <input id="new-gym-name" name="name" maxlength="120" required>
                 <p class="auth-error" id="gym-error" role="alert" hidden></p>
                 <button class="button button-primary" type="submit">Create gym</button>
-                <button class="button button-secondary" type="button" id="sign-out-onboarding">Sign out</button>
+                <button class="button button-secondary" type="button" id="sign-out-onboarding" data-sign-out>Sign out</button>
             </form>
+            <form id="terms-form" class="auth-form" hidden novalidate>
+                <p>Please read the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and the <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>. They explain what GymPulse stores, who can see it, and your gym's responsibilities for members' data.</p>
+                <label class="auth-check"><input type="checkbox" name="agree" required> I have read and agree to the Terms of Service and Privacy Policy.</label>
+                <p class="auth-error" id="terms-error" role="alert" hidden></p>
+                <button class="button button-primary" type="submit">Agree and continue</button>
+                <button class="button button-secondary" type="button" data-sign-out>Sign out</button>
+            </form>
+            <div id="deletion-pending" class="auth-form" hidden>
+                <p id="deletion-pending-text"></p>
+                <p class="auth-error" id="deletion-error" role="alert" hidden></p>
+                <div class="auth-form" id="deletion-owner-actions">
+                    <button class="button button-secondary" type="button" data-action="download-workbook">↓ Download all data (Excel)</button>
+                    <button class="button button-primary" type="button" id="cancel-deletion">Cancel deletion and keep my gym</button>
+                </div>
+                <button class="button button-secondary" type="button" data-sign-out>Sign out</button>
+            </div>
+            <p class="auth-legal"><a href="/terms" target="_blank" rel="noopener">Terms</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy</a></p>
         </section>
     </main>
     <div class="app-shell" id="app-shell" hidden>
@@ -90,7 +124,6 @@
                     <button class="nav-link" data-view="analytics"><span class="nav-icon"><svg><use href="#icon-analytics"/></svg></span><span class="nav-label">Analytics</span></button>
                     <button class="nav-link" data-view="reports"><span class="nav-icon"><svg><use href="#icon-reports"/></svg></span><span class="nav-label">Reports</span></button>
                     <button class="nav-link" data-view="notifications"><span class="nav-icon"><svg><use href="#icon-notifications"/></svg></span><span class="nav-label">Notifications</span></button>
-                    <button class="nav-link" data-view="whatsapp"><span class="nav-icon"><svg><use href="#icon-whatsapp"/></svg></span><span class="nav-label">WhatsApp inbox</span></button>
                     <button class="nav-link" data-view="integrations"><span class="nav-icon"><svg><use href="#icon-integrations"/></svg></span><span class="nav-label">Integrations</span></button>
                 </div>
             </nav>
@@ -116,7 +149,7 @@
                 </div>
             </header>
             <section class="page-content" id="page-content" tabindex="-1"></section>
-            <footer class="app-footer">GymPulse <span>·</span> Members, plans, memberships and payments are saved to your gym's database. Attendance, renewals, gym settings and WhatsApp history are saved only in this browser.</footer>
+            <footer class="app-footer">GymPulse <span>·</span> Your gym's data is saved in its own private database and is the same on every device you sign in on.</footer>
         </main>
     </div>
     <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
@@ -128,7 +161,7 @@
     </nav>
     <div class="modal-root" id="modal-root" aria-live="polite"></div>
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
+    <input type="file" id="import-file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
     <script src="/assets/vendor/chart.umd.min.js"></script>
     <script src="/assets/vendor/qrcode-generator-1.4.4.js"></script>
     <script type="module" src="assets/js/main.js"></script>

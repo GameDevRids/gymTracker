@@ -46,22 +46,20 @@ const dictionaries = {
     }
 };
 
-const storageKey = "gympulse.language";
+// One language per gym, saved in the database (Settings) and applied after sign-in. It is used
+// for the screens and for WhatsApp messages; nothing is kept in browser storage.
 let selectedLanguage = "en";
 
 export function getLanguage() {
-    const saved = localStorage.getItem(storageKey);
-    selectedLanguage = Object.hasOwn(dictionaries, saved) ? saved : selectedLanguage;
     return selectedLanguage;
 }
 
+export function isSupportedLanguage(language) {
+    return Object.hasOwn(dictionaries, language);
+}
+
 export function setLanguage(language) {
-    if (!Object.hasOwn(dictionaries, language)) throw new Error("Choose English, Hindi, or Marathi.");
-    try {
-        localStorage.setItem(storageKey, language);
-    } catch (error) {
-        throw new Error(`Language preference could not be saved: ${error.message}`);
-    }
+    if (!isSupportedLanguage(language)) throw new Error("Choose English, Hindi, or Marathi.");
     selectedLanguage = language;
 }
 

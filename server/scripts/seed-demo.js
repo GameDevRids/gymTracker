@@ -48,14 +48,28 @@ function shiftDate(date, offset) {
 }
 
 async function clearDemo(client, gymId) {
-    // Payments cannot be deleted directly (receipt numbers must stay complete); this database
-    // function empties the demo gym's payments and restarts its receipt numbers.
-    const { error: paymentsError } = await client.rpc("gympulse_reset_demo_payments", { p_gym_id: gymId });
-    if (paymentsError) throw new Error(`Could not clear demo payments: ${paymentsError.message}`);
-    for (const table of ["member_memberships", "members", "membership_plans"]) {
-        const { error } = await client.from(table).delete().eq("gym_id", gymId);
-        if (error) throw new Error(`Could not clear demo ${table}: ${error.message}`);
-    }
+    // Visitors leave check-ins, linked phones, WhatsApp logs and consent history, which ordinary
+    // deletes refuse; this database function (migration 018) empties the demo gym in one go and
+    // restarts its receipt numbers. The gym, its settings and sign-in accounts stay.
+    const { error } = await client.rpc("gympulse_reset_demo_gym", { p_gym_id: gymId, p_confirm: `RESET DEMO ${gymId}` });
+    if (error) throw new Error(`Could not clear the demo gym (run migration 018 in the demo project): ${error.message}`);
+}
+
+// Check-ins over the last 30 days for members whose plan is current, so the Overview, Visits and
+// Retention pages have something to show. Times are in the morning and evening, India time.
+export function demoVisits(members, today) {
+    const visits = [];
+    members.forEach(({ id, startDate, endDate }, index) => {
+        if (index % 7 === 3) return; // a few members have not been in lately
+        for (let daysAgo = 0; daysAgo < 30; daysAgo += 1) {
+            if ((index + daysAgo) % (2 + (index % 3)) !== 0) continue;
+            const day = shiftDate(today, -daysAgo);
+            if (day < startDate || day > endDate) continue;
+            const hour = (index + daysAgo) % 2 ? 6 + (index % 3) : 18 + (index % 3);
+            visits.push({ member_id: id, checked_in_at: `${day}T${String(hour).padStart(2, "0")}:${String((index * 7) % 60).padStart(2, "0")}:00+05:30` });
+        }
+    });
+    return visits;
 }
 
 async function seedDemo(client) {
@@ -69,6 +83,7 @@ async function seedDemo(client) {
     if (planError) throw new Error(`Could not create demo plans: ${planError.message}`);
 
     const payments = [];
+    const seeded = [];
     for (let index = 0; index < demoNames.length; index += 1) {
         const plan = plans[index % plans.length];
         const endDate = shiftDate(today, expiryOffsets[index % expiryOffsets.length]);
@@ -102,6 +117,7 @@ async function seedDemo(client) {
                 plan_name: plan.name,
                 duration_days: plan.duration_days,
                 price: plan.price,
+                total_fees: plan.price,
                 start_date: startDate,
                 end_date: endDate,
                 status: "assigned"
@@ -109,6 +125,7 @@ async function seedDemo(client) {
             .select("id")
             .single();
         if (membershipError) throw new Error(`Could not create membership for ${memberCode}: ${membershipError.message}`);
+        seeded.push({ id: member.id, startDate, endDate });
 
         if (index % 4 !== 0) {
             payments.push({
@@ -124,6 +141,11 @@ async function seedDemo(client) {
     }
     const { error: paymentError } = await client.from("payments").insert(payments);
     if (paymentError) throw new Error(`Could not create demo payments: ${paymentError.message}`);
+
+    const visits = demoVisits(seeded, today).map((visit) => ({ ...visit, gym_id: gymId, method: "manual", membership_status_at_check_in: "active" }));
+    const { error: visitError } = await client.from("attendance").insert(visits);
+    if (visitError) throw new Error(`Could not create demo check-ins: ${visitError.message}`);
+    return { members: seeded.length, payments: payments.length, visits: visits.length };
 }
 
 async function main() {
@@ -131,8 +153,8 @@ async function main() {
     const client = createClient(process.env.DEMO_SUPABASE_URL, process.env.DEMO_SUPABASE_SERVICE_ROLE_KEY, {
         auth: { autoRefreshToken: false, persistSession: false }
     });
-    await seedDemo(client);
-    console.log("Demo project seeded with 40 fictional members, 4 plans, memberships, and payments.");
+    const counts = await seedDemo(client);
+    console.log(`Demo gym filled with ${counts.members} fictional members, 4 plans, ${counts.payments} payments and ${counts.visits} check-ins.`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

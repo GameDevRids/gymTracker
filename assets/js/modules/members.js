@@ -1,30 +1,60 @@
 import { escapeHTML, formatINR, formatDate, formatPhone, statusPill } from "../utils.js";
-import { state, getMember, getPlan, memberBalance, getMemberPayments, consentHistory } from "../state.js";
+import { state, getMember, memberBalance, getMemberPayments, consentHistory } from "../state.js";
 import { emptyRow } from "../components/tables.js";
 import { renderSkeletonList } from "../components/skeleton.js";
-import { getCurrentMembership } from "./memberMemberships.js";
+import { getCurrentMembership, planNameFor } from "./memberMemberships.js";
 import { renderWelcomeSection } from "./welcomeUi.js";
 import { renderLinkedPhones, renderMemberVisits } from "./attendance.js";
 import { usesMemberQr } from "./checkinMethod.js";
 import { avatarHtml, profilePhotoHtml, renderPhotoSection } from "./memberPhotos.js";
+import { canImportMembers } from "./memberImportUi.js";
 
-export function renderMembers({ search = "", filter = "all", sort = "name", pagination = { page: 1, limit: 25, total: state.members.length }, loading = false } = {}) {
+export const MEMBERS_PAGE_SIZE = 50;
+
+/**
+ * Every member of the gym is loaded, so search, filters and sorting cover the whole gym.
+ * Status filters use the current membership; "Suspended" is the account status.
+ */
+export function filterMembers({ search = "", filter = "all", sort = "name" } = {}) {
     const query = search.trim().toLowerCase();
-    const members = [...state.members].filter((member) => {
-        const matches = !query || [member.name, member.phone, member.email, member.memberCode || member.id, member.id].some((value) => String(value || "").toLowerCase().includes(query));
+    const digits = query.replace(/\D/g, "");
+    const members = state.members.filter((member) => {
+        const matches = !query
+            || [member.name, member.email, member.memberCode].some((value) => String(value || "").toLowerCase().includes(query))
+            || (digits.length >= 3 && String(member.phone || "").replace(/\D/g, "").includes(digits));
         const membershipStatus = getCurrentMembership(member.id)?.effective_status || "unassigned";
         const matchesFilter = filter === "all"
             || (filter === "suspended" ? member.status === "suspended" : membershipStatus === filter);
         return matches && matchesFilter;
     });
-    members.sort((a, b) => sort === "expiry" ? a.expiryDate.localeCompare(b.expiryDate) : sort === "joined" ? b.joinedAt.localeCompare(a.joinedAt) : a.name.localeCompare(b.name));
-    return `<div class="page-heading"><div><h1>Members</h1><p>Manage your gym community and membership details.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="import-csv">↑ Import CSV</button><button class="button button-secondary" data-action="export-members">↓ Export CSV</button><button class="button button-secondary" data-action="quick-add-member">Quick add</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>
-        <div class="toolbar"><input class="search-field" id="member-search" type="search" placeholder="Search name, phone or ID…" value="${escapeHTML(search)}" aria-label="Search members">
+    const expiry = (member) => getCurrentMembership(member.id)?.end_date || member.expiryDate || "9999-12-31";
+    return members.sort((a, b) => sort === "expiry" ? expiry(a).localeCompare(expiry(b))
+        : sort === "joined" ? String(b.joinedAt || "").localeCompare(String(a.joinedAt || ""))
+            : a.name.localeCompare(b.name));
+}
+
+export function renderMembers({ search = "", filter = "all", sort = "name", page = 1, loading = false } = {}) {
+    return `<div class="page-heading"><div><h1>Members</h1><p>Manage your gym community and membership details.</p></div><div class="heading-actions">${canImportMembers() ? `<button class="button button-secondary" data-action="import-csv">↑ Import members</button>` : ""}<button class="button button-secondary" data-action="export-members">↓ Export CSV</button><button class="button button-secondary" data-action="quick-add-member">Quick add</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>
+        <div class="toolbar"><input class="search-field" id="member-search" type="search" placeholder="Search name, phone or member code…" value="${escapeHTML(search)}" aria-label="Search members" aria-controls="members-results">
             <select class="field-control" id="member-filter" aria-label="Filter members"><option value="all" ${filter === "all" ? "selected" : ""}>All statuses</option><option value="active" ${filter === "active" ? "selected" : ""}>Active</option><option value="upcoming" ${filter === "upcoming" ? "selected" : ""}>Upcoming</option><option value="expired" ${filter === "expired" ? "selected" : ""}>Expired</option><option value="cancelled" ${filter === "cancelled" ? "selected" : ""}>Cancelled</option><option value="unassigned" ${filter === "unassigned" ? "selected" : ""}>Unassigned</option><option value="suspended" ${filter === "suspended" ? "selected" : ""}>Suspended</option></select>
-            <select class="field-control" id="member-sort" aria-label="Sort members"><option value="name" ${sort === "name" ? "selected" : ""}>Name A–Z</option><option value="expiry" ${sort === "expiry" ? "selected" : ""}>Expiry date</option><option value="joined" ${sort === "joined" ? "selected" : ""}>Recently joined</option></select><span class="toolbar-spacer"></span>${loading ? "" : `<span class="helper-text">Showing ${members.length} of ${pagination.total} member${pagination.total === 1 ? "" : "s"}</span>`}
+            <select class="field-control" id="member-sort" aria-label="Sort members"><option value="name" ${sort === "name" ? "selected" : ""}>Name A–Z</option><option value="expiry" ${sort === "expiry" ? "selected" : ""}>Expiry date</option><option value="joined" ${sort === "joined" ? "selected" : ""}>Recently joined</option></select>
         </div>
-        ${loading ? `<section class="card skeleton-section">${renderSkeletonList({ count: 5, label: "Loading members…" })}</section>` : `<section class="card table-card"><div class="table-wrap"><table class="members-table"><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead><tbody>${members.length ? members.map((member) => memberRow(member)).join("") : emptyRow(6, state.members.length ? "No members match these filters." : "No members yet. Add your first member to get started.")}</tbody></table></div></section>`}
-        ${pagination.total > pagination.limit ? `<div class="toolbar" aria-label="Member pagination"><span class="toolbar-spacer"></span><button class="button button-secondary" data-action="previous-members-page" ${pagination.page <= 1 ? "disabled" : ""}>Previous</button><span class="helper-text">Page ${pagination.page} of ${Math.ceil(pagination.total / pagination.limit)}</span><button class="button button-secondary" data-action="next-members-page" ${pagination.page >= Math.ceil(pagination.total / pagination.limit) ? "disabled" : ""}>Next</button></div>` : ""}`;
+        <div id="members-results" aria-live="polite">${loading ? `<section class="card skeleton-section">${renderSkeletonList({ count: 5, label: "Loading members…" })}</section>` : renderMemberResults({ search, filter, sort, page })}</div>`;
+}
+
+/** The count, table and page buttons; redrawn on their own while typing in the search box. */
+export function renderMemberResults({ search = "", filter = "all", sort = "name", page = 1 } = {}) {
+    const members = filterMembers({ search, filter, sort });
+    const pages = Math.max(1, Math.ceil(members.length / MEMBERS_PAGE_SIZE));
+    const current = Math.min(Math.max(1, page), pages);
+    const shown = members.slice((current - 1) * MEMBERS_PAGE_SIZE, current * MEMBERS_PAGE_SIZE);
+    const total = state.members.length;
+    const count = members.length === total
+        ? `${total} member${total === 1 ? "" : "s"}`
+        : `${members.length} of ${total} member${total === 1 ? "" : "s"} match`;
+    return `<p class="helper-text members-count">${count}</p>
+        <section class="card table-card"><div class="table-wrap"><table class="members-table"><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead><tbody>${shown.length ? shown.map((member) => memberRow(member)).join("") : emptyRow(6, total ? "No members match these filters." : "No members yet. Add your first member to get started.")}</tbody></table></div></section>
+        ${pages > 1 ? `<div class="toolbar" aria-label="Member pages"><span class="toolbar-spacer"></span><button class="button button-secondary" data-action="previous-members-page" ${current <= 1 ? "disabled" : ""}>Previous</button><span class="helper-text">Page ${current} of ${pages}</span><button class="button button-secondary" data-action="next-members-page" ${current >= pages ? "disabled" : ""}>Next</button></div>` : ""}`;
 }
 
 function memberRow(member) {
@@ -39,7 +69,7 @@ export function renderProfile(memberId) {
     const member = getMember(memberId);
     if (!member) return `<div class="page-heading"><div><h1>Member not found</h1><p>This member may have been removed.</p></div><button class="button button-secondary" data-view="members">← Back to members</button></div>`;
     const membership = getCurrentMembership(member.id);
-    const planName = membership?.plan_name || getPlan(member.planId)?.name || "Unassigned";
+    const planName = planNameFor(member) || "Unassigned";
     const payments = getMemberPayments(member.id).sort((a, b) => b.date.localeCompare(a.date));
     const visits = state.attendance.filter((record) => record.memberId === member.id).sort((a, b) => b.checkedInAt.localeCompare(a.checkedInAt));
     const balance = memberBalance(member);
@@ -58,7 +88,6 @@ export function renderProfile(memberId) {
             ${renderPhotoSection(member)}
             ${renderConsentSection(member)}
             ${renderWelcomeSection(member)}
-            <section class="card profile-section"><div class="card-header"><h2>Renewal history</h2></div><div class="activity-list">${member.renewals?.length ? member.renewals.slice().reverse().map((renewal) => `<div class="activity-row"><span class="activity-dot"></span><span><p>Renewed to <strong>${escapeHTML(getPlan(renewal.planId)?.name || "Membership")}</strong></p><small>${formatDate(renewal.date)} · until ${formatDate(renewal.expiryDate)}</small></span></div>`).join("") : `<div class="empty-state">No renewals recorded yet.</div>`}</div></section>
             <section class="card profile-section"><div class="card-header"><h2>Member actions</h2></div><div class="card-body profile-action-list"><button class="button button-secondary" data-action="check-in" data-id="${escapeHTML(member.id)}">Record check-in</button>${member.memberCode && usesMemberQr() ? `<button class="button button-secondary" data-action="member-card" data-id="${escapeHTML(member.id)}">Member card</button><button class="button button-secondary" data-action="member-qr-reissue" data-id="${escapeHTML(member.id)}">Reissue QR</button>` : ""}<button class="button button-secondary" data-action="delete-member" data-id="${escapeHTML(member.id)}">Archive member</button></div></section>
         </aside></div>`;
 }

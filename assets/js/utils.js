@@ -2,14 +2,10 @@ export const escapeHTML = (value = "") => String(value).replace(/[&<>"']/g, (cha
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[char]);
 
+// The gym's date format, saved in the database (Settings) and set after sign-in.
 let configuredDateFormat = "DD MMM YYYY";
-let configuredCurrency = "INR";
 export function setDateFormat(format) {
-    configuredDateFormat = format;
-}
-
-export function setCurrency(currency) {
-    configuredCurrency = currency;
+    configuredDateFormat = format === "DD/MM/YYYY" ? format : "DD MMM YYYY";
 }
 
 export function uid(prefix = "ID") {
@@ -31,6 +27,13 @@ export function indiaISODate(date = new Date()) {
     }).format(date);
 }
 
+/** A check-in's gym day (India time): the database's check_in_date, or worked out from the time. */
+export function visitDay(record) {
+    if (record?.checkInDate) return record.checkInDate;
+    const time = new Date(record?.checkedInAt || "");
+    return Number.isNaN(time.getTime()) ? "" : indiaISODate(time);
+}
+
 export function addDays(dateString, days) {
     const date = new Date(`${dateString}T12:00:00`);
     date.setDate(date.getDate() + Number(days));
@@ -50,12 +53,6 @@ export function formatDate(dateString, format = configuredDateFormat) {
     if (Number.isNaN(date.getTime())) return "—";
     if (format === "DD/MM/YYYY") return new Intl.DateTimeFormat("en-IN").format(date);
     return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(date);
-}
-
-export function formatCurrency(amount, currency = configuredCurrency) {
-    return new Intl.NumberFormat("en-IN", {
-        style: "currency", currency, maximumFractionDigits: 0
-    }).format(Number(amount) || 0);
 }
 
 export function formatINR(amount) {
@@ -129,10 +126,31 @@ export function statusPill(status) {
     return `<span class="status status-${escapeHTML(status || "inactive")}">${escapeHTML(label)}</span>`;
 }
 
+/**
+ * A CSV cell. Text starting with = + - @ (or a tab or carriage return) gets a leading
+ * apostrophe so spreadsheet apps show it as text instead of running it as a formula.
+ * Numbers are left alone, so negative amounts stay numbers.
+ */
+export function csvCell(value) {
+    const text = String(value ?? "");
+    const safe = typeof value === "string" && /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
+}
+
+/** Saves bytes or text as a file on this device (for example an .xlsx from spreadsheet.js). */
+export function downloadFile(filename, content, type = "application/octet-stream") {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function downloadCSV(filename, rows) {
     if (!rows.length) throw new Error("There are no records to export.");
     const headers = Object.keys(rows[0]);
-    const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const quote = csvCell;
     const csv = [headers.map(quote).join(","), ...rows.map((row) => headers.map((header) => quote(row[header])).join(","))].join("\r\n");
     const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -141,35 +159,6 @@ export function downloadCSV(filename, rows) {
     link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
-}
-
-export function parseCSV(text) {
-    const rows = [];
-    let row = [];
-    let cell = "";
-    let quoted = false;
-    const input = text.replace(/^\uFEFF/, "");
-    for (let index = 0; index < input.length; index += 1) {
-        const char = input[index];
-        if (char === '"' && quoted && input[index + 1] === '"') { cell += '"'; index += 1; }
-        else if (char === '"') quoted = !quoted;
-        else if (char === "," && !quoted) { row.push(cell.trim()); cell = ""; }
-        else if ((char === "\n" || char === "\r") && !quoted) {
-            if (char === "\r" && input[index + 1] === "\n") index += 1;
-            row.push(cell.trim()); cell = "";
-            if (row.some(Boolean)) rows.push(row);
-            row = [];
-        } else cell += char;
-    }
-    row.push(cell.trim());
-    if (row.some(Boolean)) rows.push(row);
-    if (quoted) throw new Error("CSV contains an unclosed quoted field.");
-    if (rows.length < 2) throw new Error("CSV must include a header and at least one data row.");
-    const headers = rows[0].map((header) => header.trim().toLowerCase().replace(/[\s_-]+/g, ""));
-    return rows.slice(1).map((cells, index) => ({
-        rowNumber: index + 2,
-        data: Object.fromEntries(headers.map((header, column) => [header, cells[column] || ""]))
-    }));
 }
 
 export const monthKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;

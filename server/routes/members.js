@@ -31,6 +31,9 @@ import {
     uploadMemberPhoto
 } from "../services/memberPhotosService.js";
 import { photoBody } from "../middleware/photoBody.js";
+import { ownerOnly } from "../middleware/requireOwner.js";
+import { validateImportPayload } from "../middleware/validateImport.js";
+import { importMembers } from "../services/memberImportService.js";
 
 const router = express.Router();
 
@@ -74,6 +77,12 @@ router.post("/:memberId/memberships", validateMemberId, validateAssignmentPayloa
 router.get("/", validateMemberListQuery, getMembers);
 router.get("/:id", validateMemberId, getMember);
 router.post("/", validateMemberPayload("create"), createMember);
+// Import from a spreadsheet (migration 016): owner only, saved in one go or not at all.
+router.post("/import", ownerOnly("Only the gym owner can import members."), validateImportPayload, (request, response, next) => {
+    importMembers(request.importPayload, request.gymId)
+        .then((result) => response.json({ status: "success", data: result }))
+        .catch(next);
+});
 router.put("/:id", validateMemberId, validateMemberPayload("update"), updateMember);
 router.delete("/:id", validateMemberId, deleteMember);
 // Consent history is append-only: there is deliberately no update or delete route for it.

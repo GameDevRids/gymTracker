@@ -1,4 +1,5 @@
 import * as membershipsService from "../services/membershipsService.js";
+import { expiryRemindersFor } from "../services/whatsappMessagesService.js";
 import { logger } from "../config/logger.js";
 import { captureException } from "../config/monitoring.js";
 
@@ -38,13 +39,17 @@ export function getMemberships(request, response, next) {
         .catch(next);
 }
 
+// Each row carries reminded_at: when its current end date was last reminded about, or null.
 export function getExpiringMemberships(request, response, next) {
     membershipsService.listExpiringMemberships({ ...request.expiringMembershipQuery, gymId: request.gymId })
-        .then((memberships) => response.json({
-            status: "success",
-            data: memberships,
-            days: request.expiringMembershipQuery.days
-        }))
+        .then(async (memberships) => {
+            const reminded = await expiryRemindersFor(memberships, request.gymId);
+            response.json({
+                status: "success",
+                data: memberships.map((membership) => ({ ...membership, reminded_at: reminded.get(membership.id) || null })),
+                days: request.expiringMembershipQuery.days
+            });
+        })
         .catch(next);
 }
 

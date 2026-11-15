@@ -76,7 +76,6 @@ function renderPosterOptions(data) {
 
 export function renderAttendanceSettings() {
     const heading = `<h2>Attendance</h2><p class="helper-text">How members check in. Staff can always check a member in by hand.</p>`;
-    if (state.sampleDataLoaded) return `<section class="card settings-section" id="attendance-settings">${heading}<p class="helper-text">Not available while sample data is loaded.</p></section>`;
     if (checkinSettings.status !== "ready" || !checkinSettings.data) {
         const body = checkinSettings.status === "error"
             ? `<div class="empty-state" role="alert"><p>${escapeHTML(checkinSettings.message)}</p><button class="button button-secondary" type="button" data-action="retry-checkin-settings">Try again</button></div>`

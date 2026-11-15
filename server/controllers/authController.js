@@ -1,5 +1,7 @@
 import * as authService from "../services/authService.js";
 import { clearRefreshCookie, publicSession, readRefreshCookie, setRefreshCookie } from "../middleware/sessionCookie.js";
+import { logger } from "../config/logger.js";
+import { captureException } from "../config/monitoring.js";
 
 // Login and refresh put the refresh token in an HttpOnly cookie and return only the access token.
 function sendSession(request, response, session) {
@@ -62,13 +64,51 @@ export function createAuthHandlers(service = authService) {
             .catch(next);
     }
 
-    return { postLogin, postRefresh, postLogout, postCreateGym };
+    // The same answer whether or not the email has an account.
+    function postForgotPassword(request, response, next) {
+        service.requestPasswordReset(request.resetEmail, resetPageUrl(request))
+            .then(() => response.json({ status: "success", message: "If an account uses that email, a link to choose a new password is on its way. Check your inbox and spam folder; the link works for one hour." }))
+            .catch(next);
+    }
+
+    // Every device is signed out after a reset, so this browser's refresh cookie goes too.
+    function postResetPassword(request, response, next) {
+        service.resetPassword(request.passwordReset.accessToken, request.passwordReset.password)
+            .then(() => {
+                clearRefreshCookie(request, response);
+                response.json({ status: "success", message: "Your password was changed. Sign in with the new password." });
+            })
+            .catch(next);
+    }
+
+    function postChangePassword(request, response, next) {
+        service.changePassword(request.authUser.email, request.passwordChange.currentPassword, request.passwordChange.newPassword)
+            .then((session) => sendSession(request, response, session))
+            .catch(next);
+    }
+
+    return { postLogin, postRefresh, postLogout, postCreateGym, postForgotPassword, postResetPassword, postChangePassword };
+}
+
+/**
+ * Where the reset email's link opens: PUBLIC_APP_URL (set it on Render) or this request's own
+ * address. Supabase only uses addresses on its Redirect URLs list, so a forged Host header
+ * cannot send the link elsewhere.
+ */
+export function resetPageUrl(request, environment = process.env) {
+    const configured = String(environment.PUBLIC_APP_URL || "").trim().replace(/\/+$/, "");
+    const base = /^https?:\/\//i.test(configured) ? configured : `${request.protocol}://${request.get("host")}`;
+    return `${base}/reset-password`;
 }
 
 export const { postLogin, postRefresh, postLogout, postCreateGym } = createAuthHandlers();
 
 export function authErrorHandler(error, _request, response, _next) {
     const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 600 ? error.status : 500;
+    if (status === 500) {
+        logger.error({ err: error }, "Authentication request failed.");
+        captureException(error);
+    }
     response.status(status).json({
         status: "error",
         message: status === 500 ? "The authentication request could not be completed." : error.message

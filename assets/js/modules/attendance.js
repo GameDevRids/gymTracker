@@ -4,7 +4,7 @@
 // - entrance poster: members scan a poster with their own phone; staff approve new phones here.
 // Both have "Can't scan? Check in manually". Also: the Visits page, a member's visits and linked
 // phones, the member card with its QR, and the one-time import of browser-only check-ins.
-import { state, getMember, memberFromApiRow, legacyAttendance, clearLegacyAttendance } from "../state.js";
+import { state, getMember, memberFromApiRow, legacyAttendance } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
@@ -72,12 +72,10 @@ function feedRecord(row, member = row.member) {
 }
 
 export async function loadAttendanceFeed(onChange = () => {}) {
-    if (state.sampleDataLoaded) return;
     attendanceFeed.status = "loading";
     try {
         const today = indiaDate();
         const response = await apiClient.get("/api/attendance", { params: { from: addDays(today, -(FEED_DAYS - 1)), to: today } });
-        if (state.sampleDataLoaded) return;
         state.attendance = (Array.isArray(response?.data) ? response.data : []).map((row) => feedRecord(row));
         attendanceFeed.status = "ready";
     } catch (error) {
@@ -99,7 +97,7 @@ async function refreshToday() {
 }
 
 function addToFeed(result) {
-    if (state.sampleDataLoaded || !result?.attendance) return;
+    if (!result?.attendance) return;
     const record = feedRecord(result.attendance, result.member);
     state.attendance = [record, ...state.attendance.filter((item) => item.id !== record.id)];
     const history = memberAttendance[record.memberId];
@@ -154,7 +152,7 @@ export function renderVisitsPage() {
         ? "Expired members are not checked in (Settings › Attendance)."
         : "Expired memberships are still recorded and flagged.";
     return `<div class="page-heading"><div><h1>Visits</h1><p>Check-ins at the entrance, stored for your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="checkin-by-name">Check in manually</button><button class="button button-primary" data-view="scan">Check-in screen</button></div></div>
-        ${pending ? `<div class="note-box import-note" role="status"><span><strong>${plural(pending, "check-in")}</strong> saved only in this browser by an older version.</span><button class="button button-secondary button-small" data-action="import-browser-checkins">Import check-ins saved in this browser</button></div>` : ""}
+        ${pending ? `<div class="note-box import-note" role="status"><span><strong>${plural(pending, "check-in")}</strong> saved only in this browser by an older version.</span><button class="button button-secondary button-small" data-action="open-local-data">Move my saved data to the cloud</button></div>` : ""}
         <div class="summary-row"><span class="summary-chip"><strong>${todayCount}</strong> today</span><span class="summary-chip"><strong>${weekCount}</strong> this week</span><span class="summary-chip"><strong>${monthVisitors}</strong> unique visitors this month</span></div>
         <div class="toolbar"><label class="sr-only" for="visits-date">Day</label><input class="field-control" id="visits-date" type="date" value="${escapeHTML(day)}" max="${escapeHTML(today)}"><input class="search-field" id="attendance-search" type="search" placeholder="Search member…" aria-label="Search visits"></div>
         <section class="card table-card">${table}</section>
@@ -247,7 +245,7 @@ function standalonePhotos() {
 }
 
 export async function loadPendingDevices() {
-    if (!usesPoster() || state.sampleDataLoaded) {
+    if (!usesPoster()) {
         pendingDevices.rows = [];
         pendingPhotos.rows = [];
         updateApprovalBadges();
@@ -440,9 +438,6 @@ function deskResultHtml() {
 
 export function renderCheckInPage() {
     const heading = (text, actions = "") => `<div class="page-heading"><div><h1>Check-in</h1><p>${text}</p></div><div class="heading-actions">${actions}</div></div>`;
-    if (state.sampleDataLoaded) {
-        return `${heading("Sample data is loaded in this browser.")}<section class="card"><div class="empty-state"><p>Check-ins for sample members stay in this browser.</p><button class="button button-primary" data-action="check-in">Record a check-in</button></div></section>`;
-    }
     const method = checkinMethod();
     if (!method) {
         const body = checkinSettings.status === "error"
@@ -471,7 +466,6 @@ export function renderCheckInPage() {
 
 /** Starts what the Check-in screen needs: the camera (member QR) or the front-desk refresh (poster). */
 export function startCheckInScreen(onChange = () => {}) {
-    if (state.sampleDataLoaded) return;
     if (usesMemberQr()) {
         stopDesk();
         startScanner();
@@ -921,27 +915,22 @@ async function reissue(memberId, button) {
 
 // ---------- Import from this browser ----------
 
-async function importBrowserCheckIns(button, onChange) {
+/**
+ * Sends check-ins an older version saved only in this browser to the database, as part of
+ * "Move my saved data to the cloud". Safe to repeat: the server skips ones already recorded.
+ */
+export async function importLegacyCheckIns() {
     const records = legacyAttendance()
         .filter((record) => UUID.test(record.memberId) && !Number.isNaN(Date.parse(record.checkedInAt)))
         .map((record) => ({ member_id: record.memberId, checked_in_at: new Date(record.checkedInAt).toISOString() }));
-    const ignored = legacyAttendance().length - records.length;
-    if (button) button.disabled = true;
-    try {
-        const totals = { imported: 0, already_recorded: 0, skipped: ignored };
-        for (let index = 0; index < records.length; index += 5000) {
-            const response = await apiClient.post("/api/attendance/import", { records: records.slice(index, index + 5000) });
-            totals.imported += response.data.imported;
-            totals.already_recorded += response.data.already_recorded;
-            totals.skipped += response.data.skipped;
-        }
-        clearLegacyAttendance();
-        toast(`Imported ${plural(totals.imported, "check-in")}${totals.already_recorded ? `, ${totals.already_recorded} already recorded` : ""}${totals.skipped ? `, ${totals.skipped} skipped (removed members or repeats)` : ""}.`);
-        await loadAttendanceFeed(onChange);
-    } catch (error) {
-        toast(error.message || "The check-ins could not be imported.", "error");
-        if (button?.isConnected) button.disabled = false;
+    const totals = { imported: 0, already_recorded: 0, skipped: legacyAttendance().length - records.length };
+    for (let index = 0; index < records.length; index += 5000) {
+        const response = await apiClient.post("/api/attendance/import", { records: records.slice(index, index + 5000) });
+        totals.imported += response.data.imported;
+        totals.already_recorded += response.data.already_recorded;
+        totals.skipped += response.data.skipped;
     }
+    return totals;
 }
 
 // ---------- Actions ----------
@@ -964,7 +953,6 @@ export function handleAttendanceAction(action, element, onChange) {
         case "device-reject": changeDevice("reject", element, onChange); return true;
         case "device-revoke": confirmRevoke(element); return true;
         case "device-revoke-confirm": changeDevice("revoke", element, onChange); return true;
-        case "import-browser-checkins": importBrowserCheckIns(element, onChange); return true;
         case "retry-visits": loadAttendanceFeed(onChange); return true;
         default: return false;
     }

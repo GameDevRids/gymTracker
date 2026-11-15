@@ -1,6 +1,7 @@
 import express from "express";
 import { supabaseClient } from "../config/database.js";
 import { logger } from "../config/logger.js";
+import { captureException } from "../config/monitoring.js";
 import { readCookie, requireSameOrigin } from "../middleware/sessionCookie.js";
 import {
     createEntranceLimits,
@@ -209,11 +210,15 @@ export function createEntranceRouter({
         if (error instanceof MemberPhotoError) {
             // Never says more than "not sent", so the page still reveals nothing about the number.
             logger.error({ err: error }, "Entrance photo upload failed.");
+            captureException(error, { tags: { area: "entrance" } });
             return response.status(503).json({ status: "error", message: "Your photo could not be sent. You can add it at the front desk." });
         }
         const known = error instanceof EntranceError || error instanceof CheckinSettingsError || error instanceof PhotoFileError;
         const status = known && Number.isInteger(error.status) ? error.status : 500;
-        if (status === 500) logger.error({ err: error }, "Entrance check-in request failed.");
+        if (status === 500) {
+            logger.error({ err: error }, "Entrance check-in request failed.");
+            captureException(error, { tags: { area: "entrance" } });
+        }
         response.status(status).json({
             status: "error",
             message: status === 500 ? "Check-in is not working right now. Please check in at the front desk." : error.message,

@@ -1,18 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDemoState, createEmptyState, removeLegacyDemoData } from "../../data/demo-data.js";
+import { createEmptyState, removeLegacyDemoData } from "../../assets/js/workspace.js";
+import { createDemoState } from "./helpers/legacyDemoData.js";
 
-test("new workspaces are empty while sample data remains available explicitly", () => {
+test("new workspaces are empty", () => {
     const empty = createEmptyState();
     assert.deepEqual(empty.members, []);
     assert.deepEqual(empty.plans, []);
     assert.deepEqual(empty.payments, []);
     assert.deepEqual(empty.attendance, []);
+});
 
-    const sample = createDemoState();
-    assert.ok(sample.members.length > 0);
-    assert.ok(sample.payments.length > 0);
-    assert.ok(sample.attendance.length > 0);
+test("the cleanup knows every id of the old fictional workspace, without shipping it", () => {
+    const legacy = createDemoState();
+    // Even if a record's member link were lost, its own id still marks it as fictional.
+    for (const list of [legacy.attendance, legacy.payments]) list.forEach((item) => { item.memberId = "GP-OWN-1"; });
+    const { state } = removeLegacyDemoData(legacy);
+    assert.deepEqual(state.members, []);
+    assert.deepEqual(state.plans, []);
+    assert.deepEqual(state.attendance, []);
+    assert.deepEqual(state.payments, []);
+});
+
+test("the app no longer ships or imports the sample data", async () => {
+    const { existsSync, readFileSync, readdirSync } = await import("node:fs");
+    const root = new URL("../../", import.meta.url);
+    assert.equal(existsSync(new URL("data/demo-data.js", root)), false);
+    const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
+        ? walk(new URL(`${entry.name}/`, dir))
+        : entry.name.endsWith(".js") ? [new URL(entry.name, dir)] : []));
+    for (const file of [...walk(new URL("assets/js/", root)), new URL("sw.js", root)]) {
+        assert.doesNotMatch(readFileSync(file, "utf8"), /demo-data|createDemoState|load-sample-data|loadSampleState/, file.pathname);
+    }
 });
 
 test("legacy auto-seeded demo data is removed while owner-created records are kept", () => {

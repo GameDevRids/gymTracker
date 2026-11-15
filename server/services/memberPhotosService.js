@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { supabaseClient } from "../config/database.js";
 import { logger } from "../config/logger.js";
+import { captureException } from "../config/monitoring.js";
 import { preparePhoto } from "./photoFile.js";
 
 // Member photos (migration 014). Files live in the private "member-photos" bucket at
@@ -37,6 +38,7 @@ function databaseError(error) {
 
 function storageError(error, action) {
     logger.error({ err: error, action }, "Member photo storage request failed.");
+    captureException(error instanceof Error ? error : new Error(`Member photo storage request failed: ${action}`), { tags: { area: "photos" } });
     throw new MemberPhotoError(503, `The photo could not be ${action} right now. Please try again.`);
 }
 

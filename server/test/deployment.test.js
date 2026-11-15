@@ -93,7 +93,7 @@ test("frontend HTML and static assets load with the expected content security po
     const workerResponse = await fetch(`${baseUrl}/sw.js`);
     assert.equal(workerResponse.status, 200);
     const workerSource = await workerResponse.text();
-    assert.match(workerSource, /gympulse-shell-v15/);
+    assert.match(workerSource, /gympulse-shell-v20/);
     // Member photos (signed Storage URLs and the photo API) are never cached by the worker.
     assert.match(workerSource, /if \(isMemberPhoto\(url\)\) return;/);
     assert.match(workerSource, /fetch\(new Request\(request, \{ cache: "no-cache" \}\)\)[\s\S]*?cache\.put\(url\.pathname, copy\)/);
@@ -120,4 +120,18 @@ test("the service worker pre-caches every frontend module so the app can start o
     walk(root);
     assert.ok(modules.length > 10);
     assert.deepEqual(modules.filter((path) => !listed.has(path)), []);
+});
+
+test("the Privacy Policy and Terms are public pages that state the version users agree to", async () => {
+    const { TERMS_VERSION } = await import("../../assets/js/legal.js");
+    for (const path of ["/privacy", "/terms"]) {
+        const response = await fetch(`${baseUrl}${path}`);
+        assert.equal(response.status, 200, path);
+        assert.match(response.headers.get("content-type"), /text\/html/);
+        const html = await response.text();
+        assert.ok(html.includes(`Version ${TERMS_VERSION}`), `${path} shows version ${TERMS_VERSION}`);
+        assert.doesNotMatch(html, /<script/i, `${path} needs no script`);
+    }
+    const account = await fetch(`${baseUrl}/api/account/status`);
+    assert.equal(account.status, 401, "the account API needs sign-in");
 });

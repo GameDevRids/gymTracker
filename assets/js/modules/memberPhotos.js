@@ -6,7 +6,7 @@ import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal, onModalClose } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { escapeHTML } from "../utils.js";
-import { state, getMember, consentHistory } from "../state.js";
+import { getMember, consentHistory } from "../state.js";
 import { mountPhotoFlow } from "../photoCapture.js";
 
 const URL_MARGIN_MS = 5 * 60 * 1000;
@@ -16,7 +16,7 @@ const urlCache = new Map();
 export const profilePhotos = {};
 
 export function photosAvailable() {
-    return !state.sampleDataLoaded;
+    return true;
 }
 
 export function initials(name) {

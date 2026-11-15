@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createGym, login, refresh, logout } from "../services/authService.js";
+import { GYM_COLUMNS } from "../middleware/requireAuth.js";
 
 process.env.SUPABASE_URL = "https://gympulse-auth.example.test";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "server-only-test-key";
@@ -15,7 +16,7 @@ function mockDatabase() {
             assert.equal(table, "gym_users");
             return {
                 select(columns) {
-                    assert.equal(columns, "gym_id,role,gyms(id,name)");
+                    assert.equal(columns, GYM_COLUMNS);
                     return this;
                 },
                 eq(field, value) {
