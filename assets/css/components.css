@@ -363,3 +363,10 @@
     .setup-step { grid-template-columns: 26px minmax(0, 1fr); }
     .setup-step .button { grid-column: 2; justify-self: start; }
 }
+
+/* The photo row at the top of the edit-member form */
+.member-photo-row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.member-photo-preview { width: 72px; height: 72px; flex: none; font-size: 22px; }
+.member-photo-actions { display: grid; gap: 6px; min-width: 0; flex: 1 1 180px; }
+.member-photo-actions .button-row { flex-wrap: wrap; }
+.member-photo-row .photo-flow { width: 100%; }

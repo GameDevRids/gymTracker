@@ -3,16 +3,11 @@
 // linked once (staff approve it) and then checks in with one tap. The phone's secret lives in an
 // HttpOnly cookie the page cannot read; nothing is kept in browser storage.
 import { buildUpiLink, upiNote } from "./upi.js";
-import { mountPhotoFlow } from "./photoCapture.js";
 
 const panel = document.querySelector("#panel");
 const gymName = document.querySelector("#entry")?.dataset.gym || "";
 const base = window.location.pathname.replace(/\/+$/, "");
 let current = null;
-// Set once a photo was sent from this page, so the offer is not repeated.
-let photoSent = false;
-let photoFlow = null;
-let waitingCode = "";
 
 function escapeHTML(value) {
     return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
@@ -71,14 +66,12 @@ function renderLink(message = "", { again = false } = {}) {
 }
 
 function renderWaiting(code, message = "") {
-    waitingCode = code;
     show(`<div class="stack">
         <h2>Ask the front desk to approve this phone</h2>
         <p class="muted">Show them this code:</p>
         <p class="code" aria-label="Code ${escapeHTML(String(code).split("").join(" "))}">${escapeHTML(code)}</p>
         ${notice(message)}
         <button class="primary" type="button" data-action="refresh">I've been approved</button>
-        ${photoSent ? "" : `<button class="secondary" type="button" data-action="photo">Add your photo (optional)</button>`}
         <button class="link" type="button" data-action="link">Use a different number</button>
     </div>`);
 }
@@ -259,49 +252,6 @@ function renderResult(result) {
     show(`<div class="result result-${tone}" role="status">${html}</div><button class="link" type="button" data-action="refresh">Done</button>`);
 }
 
-// ---------- Optional photo while waiting for approval ----------
-
-// The photo goes to the front desk as "waiting for approval"; it is used only to confirm it is
-// you at check-in. The page always answers the same way, so it says nothing about the number.
-async function sendPhoto(blob) {
-    let reply;
-    try {
-        const response = await fetch(`${base}/photo`, {
-            method: "POST",
-            credentials: "same-origin",
-            cache: "no-store",
-            headers: { "Content-Type": blob.type || "image/jpeg", "X-Photo-Consent": "agreed" },
-            body: blob
-        });
-        const json = await response.json().catch(() => ({}));
-        reply = { status: response.status, message: json.message || "" };
-    } catch {
-        throw new Error("No connection. Check your internet and try again.");
-    }
-    if (reply.status !== 200) throw new Error(reply.message || "Your photo could not be sent. You can add it at the front desk.");
-}
-
-function renderPhotoStep() {
-    if (!waitingCode) return loadState();
-    const code = waitingCode;
-    show(`<div class="stack"><h2>Add your photo</h2><div id="photo-step"></div></div>`);
-    photoFlow?.destroy();
-    photoFlow = mountPhotoFlow(panel.querySelector("#photo-step"), {
-        needsConsent: true,
-        cameraFacing: "user",
-        cancelLabel: "Skip",
-        // Agreement is sent with the photo itself; nothing is saved before the photo is sent.
-        onConsent: () => {},
-        onPhoto: async (blob) => {
-            await sendPhoto(blob);
-            photoSent = true;
-            photoFlow?.destroy();
-            renderWaiting(code, "Photo sent. The front desk will check it when they approve this phone.");
-        },
-        onCancel: () => renderWaiting(code)
-    });
-}
-
 // ---------- Events ----------
 
 panel.addEventListener("submit", (event) => {
@@ -316,7 +266,6 @@ panel.addEventListener("click", (event) => {
     const action = button.dataset.action;
     if (action === "checkin") checkIn(button);
     else if (action === "refresh") loadState();
-    else if (action === "photo") renderPhotoStep();
     else if (action === "link") renderLink();
     else if (action === "link-again") renderLink("", { again: true });
 });

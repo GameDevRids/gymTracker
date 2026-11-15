@@ -211,44 +211,11 @@ async function runPhotoChange(element, request, message, onChange) {
         delete consentHistory[memberId];
         closeModal();
         toast(message);
-        await loadPendingPhotos();
         onChange(memberId);
     } catch (error) {
         toast(error.message || "The photo could not be updated.", "error");
         if (element.isConnected) element.disabled = false;
     }
-}
-
-// ---------- Photos sent from the entrance poster page ----------
-
-export const pendingPhotos = { status: "idle", rows: [], message: "" };
-
-export async function loadPendingPhotos() {
-    if (!photosAvailable()) {
-        pendingPhotos.rows = [];
-        return false;
-    }
-    const before = pendingPhotos.rows.map((row) => row.member_id).join();
-    try {
-        const response = await apiClient.get("/api/member-photos", { params: { status: "pending" } });
-        // The desk refreshes every few seconds: keep a still-valid URL so the image is not reloaded.
-        const previous = new Map(pendingPhotos.rows.map((row) => [`${row.member_id}|${row.submitted_at}`, row]));
-        pendingPhotos.rows = (Array.isArray(response?.data) ? response.data : []).map((row) => {
-            const old = previous.get(`${row.member_id}|${row.submitted_at}`);
-            return old?.url && Date.parse(old.expires_at) - URL_MARGIN_MS > Date.now() ? { ...row, url: old.url, expires_at: old.expires_at } : row;
-        });
-        pendingPhotos.status = "ready";
-    } catch (error) {
-        pendingPhotos.status = "error";
-        pendingPhotos.message = error.message || "Photos waiting for approval could not be loaded.";
-    }
-    return before !== pendingPhotos.rows.map((row) => row.member_id).join();
-}
-
-/** The photo a waiting phone sent, with its own Approve / Reject. */
-export function pendingPhotoBlock(row) {
-    return `<div class="pending-photo">${row.url ? `<img src="${escapeHTML(row.url)}" alt="Photo sent by ${escapeHTML(row.member?.full_name || "the member")}" referrerpolicy="no-referrer" decoding="async">` : `<span class="member-avatar">${escapeHTML(initials(row.member?.full_name))}</span>`}
-        <div><small>Photo sent from the poster page</small><span class="button-row"><button class="button button-primary button-small" type="button" data-action="photo-approve" data-id="${escapeHTML(row.member_id)}">Approve photo</button><button class="button button-secondary button-small" type="button" data-action="photo-reject" data-id="${escapeHTML(row.member_id)}">Reject photo</button></span></div></div>`;
 }
 
 // ---------- Profile ----------
@@ -274,7 +241,7 @@ export function renderPhotoSection(member) {
     const id = escapeHTML(member.id);
     let actions;
     if (status === "pending") {
-        actions = `<p class="helper-text">The member sent this photo from the entrance poster page. Approve it only if it is clearly them.</p><span class="button-row"><button class="button button-primary button-small" type="button" data-action="photo-approve" data-id="${id}">Approve photo</button><button class="button button-secondary button-small" type="button" data-action="photo-reject" data-id="${id}">Reject photo</button></span>`;
+        actions = `<p class="helper-text">This photo was sent from the poster page before members could no longer add their own. Approve it only if it is clearly them, or reject it to delete it.</p><span class="button-row"><button class="button button-primary button-small" type="button" data-action="photo-approve" data-id="${id}">Approve photo</button><button class="button button-secondary button-small" type="button" data-action="photo-reject" data-id="${id}">Reject photo</button></span>`;
     } else if (status === "approved") {
         actions = `<span class="button-row"><button class="button button-secondary button-small" type="button" data-action="photo-add" data-id="${id}">Change photo</button><button class="button button-secondary button-small" type="button" data-action="photo-remove" data-id="${id}">Remove photo</button></span>`;
     } else {
@@ -292,6 +259,75 @@ export function renderPhotoSection(member) {
         <div class="card-body">${photo?.state === "error" ? `<p class="helper-text" role="alert">${escapeHTML(photo.message)}</p>` : ""}${actions}<p class="helper-text">Kept only inside this app to confirm it's them at check-in. Never shared.</p>
         ${consent ? `<button class="text-button" type="button" data-action="photo-withdraw" data-id="${id}">Member withdraws consent</button>` : ""}</div>
         ${list ? `<div class="activity-list">${list}</div>` : ""}</section>`;
+}
+
+// ---------- Edit-member form: the photo, saved as soon as it is taken ----------
+
+// Only an approved photo is the member's photo here. One waiting from the old poster page is
+// reviewed on the profile; taking a new one here replaces it.
+const hasPhoto = (member) => (member?.photoStatus || "none") === "approved";
+
+function editPhotoIdle(member) {
+    const avatar = avatarHtml({ id: member.id, name: member.name, photoStatus: hasPhoto(member) ? "approved" : "none" }, "member-avatar member-photo-preview");
+    const buttons = hasPhoto(member)
+        ? `<button class="button button-secondary button-small" type="button" data-edit-photo="change">Change photo</button>`
+        : `<button class="button button-secondary button-small" type="button" data-edit-photo="camera">Take photo</button><button class="button button-secondary button-small" type="button" data-edit-photo="gallery">Choose from gallery</button>`;
+    const note = member.photoConsent
+        ? "Kept only inside this app to confirm it's them at check-in. Saved as soon as you take it."
+        : "Kept only inside this app to confirm it's them at check-in. The member agrees first.";
+    return `${avatar}<span class="member-photo-actions"><span class="button-row">${buttons}</span><span class="helper-text">${note}</span></span>`;
+}
+
+/** The photo row at the top of the edit-member form. Removing a photo stays on the profile. */
+export function editPhotoField(member) {
+    if (!photosAvailable() || !member?.memberCode) return "";
+    return `<div class="field full photo-field member-photo-field" data-member-id="${escapeHTML(member.id)}">
+        <span class="field-label">Photo</span>
+        <div class="member-photo-row" data-photo-slot>${editPhotoIdle(member)}</div></div>`;
+}
+
+/**
+ * Wires the edit form's photo row. The photo is uploaded at once, so the form's Save and Cancel
+ * do not affect it; onChange(memberId) redraws the list and profile behind the dialog.
+ */
+export function mountEditPhoto(form, onChange = () => {}) {
+    const field = form?.querySelector(".member-photo-field");
+    if (!field) return;
+    const memberId = field.dataset.memberId;
+    const slot = field.querySelector("[data-photo-slot]");
+    let flow = null;
+    const showIdle = () => {
+        flow = null;
+        const member = getMember(memberId);
+        if (!member || !slot.isConnected) return;
+        slot.innerHTML = editPhotoIdle(member);
+        hydratePhotos(slot);
+    };
+    hydratePhotos(slot);
+    field.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-edit-photo]");
+        if (!button) return;
+        const source = button.dataset.editPhoto;
+        const needsConsent = !getMember(memberId)?.photoConsent;
+        flow?.destroy();
+        flow = mountPhotoFlow(slot, {
+            needsConsent,
+            cancelLabel: "Cancel",
+            // "Take photo" and "Choose from gallery" already said which one, so open it straight
+            // from this tap. After the consent step the member picks again, which phones require.
+            startWith: needsConsent || source === "change" ? "" : source,
+            onConsent: () => agreeToPhoto(memberId),
+            onPhoto: async (blob) => {
+                await uploadPhoto(memberId, blob);
+                flow?.destroy();
+                showIdle();
+                toast("Photo saved.");
+                onChange(memberId);
+            },
+            onCancel: showIdle
+        });
+    });
+    onModalClose(() => flow?.destroy());
 }
 
 // ---------- Add-member forms: an optional photo step ----------
@@ -386,7 +422,7 @@ export function handlePhotoAction(action, element, onChange = () => {}, { before
             const resume = beforeAdd(element) || (() => {});
             openPhotoDialog(memberId, {
                 name: element.dataset.name || "",
-                onDone: () => { loadPendingPhotos(); onChange(memberId); },
+                onDone: () => onChange(memberId),
                 onClose: resume
             });
             return true;

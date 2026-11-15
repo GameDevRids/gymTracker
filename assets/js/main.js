@@ -45,7 +45,7 @@ import { upiIdProblem, UTR_PATTERN } from "./upi.js";
 import { welcomePayment } from "./welcomeMessage.js";
 import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, pauseCheckinForPhoto, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
 import { handleCheckinSettingsAction, loadCheckinSettings, saveAttendanceSettings } from "./modules/checkinSettingsUi.js";
-import { handlePhotoAction, hydratePhotos, loadProfilePhoto, mountFormPhoto, photoFormField, saveFormPhoto } from "./modules/memberPhotos.js";
+import { editPhotoField, handlePhotoAction, hydratePhotos, loadProfilePhoto, mountEditPhoto, mountFormPhoto, photoFormField, saveFormPhoto } from "./modules/memberPhotos.js";
 import { usesMemberQr } from "./modules/checkinMethod.js";
 import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
 import { expiryReminderTemplate, handleReminderTemplateAction, handleReminderTemplateEvent, handleReminderTemplateSubmit, loadReminderTemplates, recordExpiryReminder } from "./modules/expiryReminder.js";
@@ -515,6 +515,7 @@ function renderMemberPlanField(status, plans = []) {
 function renderMemberFormBody(member, planStatus = "loading", plans = []) {
     const isEdit = Boolean(member);
     const body = `<form id="member-form" data-mode="${isEdit ? "update" : "create"}" data-id="${escapeHTML(member?.id || "")}" data-plans-state="${isEdit ? "not-needed" : planStatus}" class="form-grid" novalidate>
+            ${isEdit ? editPhotoField(member) : ""}
             ${nameField("form", member?.name || "")}
             <div class="field"><label for="form-phone">Phone number *</label><input id="form-phone" name="phone" type="tel" value="${escapeHTML(member?.phone || "")}" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="form-phone-error"><span id="form-phone-error" class="helper-text phone-error" role="alert" hidden>Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.</span></div>
             ${setField("email", "Email address", member?.email || "", "email")}
@@ -578,7 +579,10 @@ function openMemberForm(memberId = "") {
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit" form="member-form" ${isEdit ? "" : "disabled"}>${isEdit ? "Save changes" : "Add member"}</button>`
     });
     const form = document.querySelector("#member-form");
-    if (!isEdit) {
+    if (isEdit) {
+        // The photo is saved on its own, so Save and Cancel here do not affect it.
+        mountEditPhoto(form, rerenderAfterPhoto);
+    } else {
         loadMemberFormPlans(form);
         mountFormPhoto(form);
     }

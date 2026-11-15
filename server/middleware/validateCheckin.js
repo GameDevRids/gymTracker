@@ -91,9 +91,7 @@ export const ENTRANCE_LIMITS = {
     linkIp: { windowMs: 15 * 60 * 1000, limit: 20 },
     linkPoster: { windowMs: 15 * 60 * 1000, limit: 100 },
     checkinIp: { windowMs: 15 * 60 * 1000, limit: 120 },
-    checkinPhone: { windowMs: 60 * 1000, limit: 10 },
-    // Photos sent from the poster page: a few per phone (or per IP without one) per hour.
-    photoPhone: { windowMs: 60 * 60 * 1000, limit: 3 }
+    checkinPhone: { windowMs: 60 * 1000, limit: 10 }
 };
 
 const ipKey = (request) => ipKeyGenerator(request.ip || "");
@@ -119,10 +117,6 @@ export function createEntranceLimits(limits = ENTRANCE_LIMITS) {
         checkinPhone: limiter(limits.checkinPhone, (request) => {
             const secret = request.deviceSecret;
             return DEVICE_SECRET_PATTERN.test(String(secret || "")) ? `phone:${hashDeviceSecret(secret)}` : `ip:${ipKey(request)}`;
-        }, busy),
-        photoPhone: limiter(limits.photoPhone || ENTRANCE_LIMITS.photoPhone, (request) => {
-            const secret = request.deviceSecret;
-            return DEVICE_SECRET_PATTERN.test(String(secret || "")) ? `photo:${hashDeviceSecret(secret)}` : `photo-ip:${ipKey(request)}`;
         }, busy)
     };
 }

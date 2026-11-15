@@ -11,7 +11,7 @@ import { MAX_PHOTO_BYTES, preparePhoto } from "../services/photoFile.js";
 import * as photos from "../services/memberPhotosService.js";
 import { deleteMember } from "../services/membersService.js";
 import { photoBody } from "../middleware/photoBody.js";
-import { createEntranceRouter, DEVICE_COOKIE } from "../routes/entrance.js";
+import { createEntranceRouter } from "../routes/entrance.js";
 import { approveDevice, entranceCheckIn, hashDeviceSecret, newDeviceSecret, requestLink } from "../services/entranceService.js";
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452000000100000001008020000", "hex");
@@ -206,147 +206,81 @@ test("signed URLs last about an hour and are made only for this gym's approved p
     assert.equal((await photos.withCheckinPhoto({ member: { id: ids.aisha } }, gymA, db)).member.photo_url, null);
 });
 
-// ---------- Entrance poster page ----------
+// ---------- Entrance poster page: members can no longer add their own photo ----------
 
-async function startEntrance(db) {
+/** A photo left over from when members could send their own, waiting for staff. */
+function leftoverPendingPhoto(db, id, { deviceId = null } = {}) {
+    const path = `${gymA}/${id}/pendingPhotoAAAAAAAAAAAAAA.jpg`;
+    Object.assign(member(db, id), { photo_path: path, photo_status: "pending", photo_device_id: deviceId, photo_consent: true, photo_consent_at: morning.toISOString(), photo_updated_at: morning.toISOString() });
+    db.tables.member_consent_events.push({ gym_id: gymA, member_id: id, channel: "photo", action: "granted", source: "poster_page", created_at: morning.toISOString() });
+    db.files.set(path, { body: jpegBytes() });
+    return path;
+}
+
+test("the poster page has no photo step and its upload endpoint is gone", async () => {
+    const db = posterDb();
     const app = express();
     app.set("trust proxy", 1);
-    app.use(express.json());
-    app.use("/c", createEntranceRouter({ client: db, minLinkMs: 0, minPhotoMs: 0, now: () => morning }));
+    app.use("/c", createEntranceRouter({ client: db, minLinkMs: 0, now: () => morning }));
     const server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.once("listening", resolve));
     const base = `http://127.0.0.1:${server.address().port}`;
     const token = db.tables.gyms.find((gym) => gym.id === gymA).entrance_token;
-    const send = (secret, body = jpegBytes(), { consent = true, ip = "203.0.113.20" } = {}) => fetch(`${base}/c/${token}/photo`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "image/jpeg",
-            Origin: base,
-            "X-Forwarded-For": ip,
-            ...(consent ? { "X-Photo-Consent": "agreed" } : {}),
-            ...(secret ? { Cookie: `${DEVICE_COOKIE}=${secret}` } : {})
-        },
-        body
-    }).then(async (response) => ({ status: response.status, json: await response.json() }));
-    return { send, close: () => new Promise((resolve) => server.close(resolve)) };
-}
-
-async function waitingPhone(db, phone) {
-    const secret = newDeviceSecret();
-    await requestLink(db.tables.gyms.find((gym) => gym.id === gymA), secret, phone, { now: morning }, db);
-    return secret;
-}
-
-test("a member's own photo from the poster page is saved only as pending, with poster-page consent", async () => {
-    const db = posterDb();
-    const { send, close } = await startEntrance(db);
     try {
-        const secret = await waitingPhone(db, "9876543210");
-        const reply = await send(secret, jpegBytes(), { ip: "203.0.113.21" });
-        assert.equal(reply.status, 200);
-        assert.deepEqual(reply.json.data, { state: "photo_sent" });
-        const riya = member(db, ids.riya);
-        assert.equal(riya.photo_status, "pending");
-        assert.equal(riya.photo_device_id, db.tables.member_devices.find((row) => row.device_secret_hash === hashDeviceSecret(secret)).id);
-        assert.deepEqual(events(db, ids.riya).map((event) => [event.action, event.source]), [["granted", "poster_page"]]);
-        // A pending photo is not shown on check-in cards.
-        assert.equal((await photos.withCheckinPhoto({ member: { id: ids.riya } }, gymA, db)).member.photo_url, null);
-        // Sending again cannot replace the pending photo.
-        const before = riya.photo_path;
-        assert.equal((await send(secret, jpegBytes(), { ip: "203.0.113.21" })).status, 200);
-        assert.equal(member(db, ids.riya).photo_path, before);
-        assert.equal(db.files.size, 1);
+        const reply = await fetch(`${base}/c/${token}/photo`, {
+            method: "POST",
+            headers: { "Content-Type": "image/jpeg", Origin: base, "X-Photo-Consent": "agreed" },
+            body: jpegBytes()
+        });
+        assert.equal(reply.status, 404);
+        assert.equal(db.files.size, 0, "nothing was stored");
+        const page = await (await fetch(`${base}/c/${token}`)).text();
+        assert.doesNotMatch(page, /photo/i, "the poster page offers no photo step");
     } finally {
-        await close();
+        await new Promise((resolve) => server.close(resolve));
     }
 });
 
-test("the poster page answers the same and saves nothing for unknown numbers, family phones or members with a photo", async () => {
-    const db = posterDb({ [ids.dev]: {} });
-    const { send, close } = await startEntrance(db);
-    try {
-        const path = await withPhoto(db, ids.dev);
-        const cases = {
-            stranger: await waitingPhone(db, "9000000001"),
-            family: await waitingPhone(db, "9123403210"),
-            hasPhoto: await waitingPhone(db, "9876543211"),
-            noCookie: ""
-        };
-        let ip = 30;
-        for (const [name, secret] of Object.entries(cases)) {
-            const reply = await send(secret, jpegBytes(), { ip: `203.0.113.${ip += 1}` });
-            assert.equal(reply.status, 200, name);
-            assert.deepEqual(reply.json.data, { state: "photo_sent" }, name);
-        }
-        assert.deepEqual([...db.files.keys()], [path], "only Dev's desk photo exists");
-        assert.equal(member(db, ids.dev).photo_status, "approved", "an approved photo cannot be replaced from the poster page");
-        assert.equal(member(db, ids.kabir).photo_status, "none");
-        assert.equal(member(db, ids.meera).photo_status, "none");
-        assert.deepEqual(events(db, ids.kabir), []);
-    } finally {
-        await close();
-    }
+test("the poster page's script has no photo step left in it", () => {
+    const script = readFileSync(new URL("../../assets/js/entrance.js", import.meta.url), "utf8");
+    assert.doesNotMatch(script, /photo/i);
 });
 
-test("the poster page checks the file and the agreement first, and limits uploads per phone", async () => {
+test("staff approve or reject a photo left waiting from the poster page; rejecting deletes it", async () => {
     const db = posterDb();
-    const { send, close } = await startEntrance(db);
-    try {
-        const secret = await waitingPhone(db, "9876543213");
-        assert.equal((await send(secret, PNG, { ip: "203.0.113.50" })).status, 400);
-        assert.equal((await send(secret, jpegBytes(), { consent: false, ip: "203.0.113.50" })).status, 400);
-        assert.equal((await send(secret, jpegBytes({ padTo: MAX_PHOTO_BYTES }), { ip: "203.0.113.50" })).status, 413);
-        assert.equal(db.files.size, 0);
-        // Three uploads per phone per hour.
-        assert.equal((await send(secret, jpegBytes(), { ip: "203.0.113.51" })).status, 429);
-    } finally {
-        await close();
-    }
+    leftoverPendingPhoto(db, ids.riya);
+    const nehaPath = leftoverPendingPhoto(db, ids.neha);
+
+    const approved = await photos.approvePendingPhoto(ids.riya, gymA, db);
+    assert.equal(approved.status, "approved");
+    assert.equal(member(db, ids.riya).photo_device_id, null);
+
+    const rejected = await photos.rejectPendingPhoto(ids.neha, gymA, owner, db);
+    assert.deepEqual([rejected.status, rejected.consent], ["none", false]);
+    assert.equal(db.files.has(nehaPath), false, "the rejected file is deleted");
+    assert.deepEqual(events(db, ids.neha).map((event) => [event.action, event.source]), [["granted", "poster_page"], ["withdrawn", "desk"]]);
+    assert.equal(await status(photos.rejectPendingPhoto(ids.riya, gymA, owner, db)), 404, "an approved photo is not 'pending'");
 });
 
-test("staff approve or reject a pending photo; rejecting deletes it and asks again at the desk", async () => {
+test("one gym cannot approve or reject another gym's waiting photo", async () => {
     const db = posterDb();
-    const { send, close } = await startEntrance(db);
-    try {
-        const secretRiya = await waitingPhone(db, "9876543210");
-        const secretNeha = await waitingPhone(db, "9876543213");
-        await send(secretRiya, jpegBytes(), { ip: "203.0.113.60" });
-        await send(secretNeha, jpegBytes(), { ip: "203.0.113.61" });
-        const pending = await photos.listPendingPhotos(gymA, db);
-        assert.deepEqual(pending.map((row) => row.member_id).sort(), [ids.riya, ids.neha].sort());
-        assert.ok(pending.every((row) => row.url && row.device_id));
-        assert.deepEqual(await photos.listPendingPhotos(gymB, db), [], "gym B sees none of them");
-
-        const approved = await photos.approvePendingPhoto(ids.riya, gymA, db);
-        assert.equal(approved.status, "approved");
-        assert.equal(member(db, ids.riya).photo_device_id, null);
-
-        const nehaPath = member(db, ids.neha).photo_path;
-        const rejected = await photos.rejectPendingPhoto(ids.neha, gymA, owner, db);
-        assert.deepEqual([rejected.status, rejected.consent], ["none", false]);
-        assert.equal(db.files.has(nehaPath), false, "the rejected file is deleted");
-        assert.deepEqual(events(db, ids.neha).map((event) => [event.action, event.source]), [["granted", "poster_page"], ["withdrawn", "desk"]]);
-        assert.equal(await status(photos.rejectPendingPhoto(ids.riya, gymA, owner, db)), 404, "an approved photo is not 'pending'");
-    } finally {
-        await close();
-    }
+    leftoverPendingPhoto(db, ids.riya);
+    assert.equal(await status(photos.approvePendingPhoto(ids.riya, gymB, db)), 404);
+    assert.equal(await status(photos.rejectPendingPhoto(ids.riya, gymB, owner, db)), 404);
+    assert.equal(member(db, ids.riya).photo_status, "pending");
 });
 
 test("rejecting a phone request also deletes the photo that phone sent", async () => {
     const db = posterDb();
-    const { send, close } = await startEntrance(db);
-    try {
-        const secret = await waitingPhone(db, "9876543210");
-        await send(secret, jpegBytes(), { ip: "203.0.113.70" });
-        const device = db.tables.member_devices.find((row) => row.device_secret_hash === hashDeviceSecret(secret));
-        assert.equal(await photos.rejectPhotosFromDevice(device.id, gymA, owner, db), 1);
-        assert.equal(member(db, ids.riya).photo_status, "none");
-        assert.equal(db.files.size, 0);
-    } finally {
-        await close();
-    }
-});
+    const secret = newDeviceSecret();
+    await requestLink(db.tables.gyms.find((gym) => gym.id === gymA), secret, "9876543210", { now: morning }, db);
+    const device = db.tables.member_devices.find((row) => row.device_secret_hash === hashDeviceSecret(secret));
+    leftoverPendingPhoto(db, ids.riya, { deviceId: device.id });
 
+    assert.equal(await photos.rejectPhotosFromDevice(device.id, gymA, owner, db), 1);
+    assert.equal(member(db, ids.riya).photo_status, "none");
+    assert.equal(db.files.size, 0);
+});
 // ---------- Photos stay inside the app ----------
 
 test("photos never appear in the welcome card, member card, receipts, WhatsApp messages or the poster's answer", async () => {

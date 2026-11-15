@@ -118,10 +118,12 @@ export function pickPhotoFile(source, facing = "environment") {
  * - onConsent(): called when the member taps "I agree"; may be async (e.g. recording it).
  * - onPhoto(blob): called with the finished 512×512 JPEG; may be async (e.g. uploading).
  * - onCancel(): the member chose not to continue.
- * - cameraFacing: "environment" (back camera, staff at the desk) or "user" (selfie, poster page).
+ * - cameraFacing: "environment" (back camera, staff at the desk) or "user" (selfie).
+ * - startWith: "camera" or "gallery" opens that picker at once, for a caller whose own button
+ *   already said which one. Only without a consent step, and only when mounting inside the tap.
  * Returns { destroy }.
  */
-export function mountPhotoFlow(container, { needsConsent = true, onConsent = () => {}, onPhoto, onCancel = () => {}, cancelLabel = "Not now", consentText = PHOTO_CONSENT_TEXT, cameraFacing = "environment" } = {}) {
+export function mountPhotoFlow(container, { needsConsent = true, onConsent = () => {}, onPhoto, onCancel = () => {}, cancelLabel = "Not now", consentText = PHOTO_CONSENT_TEXT, cameraFacing = "environment", startWith = "" } = {}) {
     let image = null;
     let crop = null;
     let destroyed = false;
@@ -278,7 +280,12 @@ export function mountPhotoFlow(container, { needsConsent = true, onConsent = () 
         image = null;
     }
 
-    if (needsConsent) showConsent();
-    else showChoose();
+    if (needsConsent) {
+        showConsent();
+    } else {
+        showChoose();
+        // Still inside the caller's tap, which is what phones require to open a picker.
+        if (startWith === "camera" || startWith === "gallery") choose(startWith);
+    }
     return { destroy };
 }
