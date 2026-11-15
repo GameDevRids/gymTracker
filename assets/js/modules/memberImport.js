@@ -1,158 +1,318 @@
-import { cleanMemberName, isValidIndianPhone, memberNameIssue, normalizeIndianPhone } from "../utils.js";
+// Import members from an owner's spreadsheet: column matching, Indian phone and date formats,
+// plans, duplicates and the list of what will be saved. No DOM or browser-state imports, so the
+// same rules are tested in Node. The server checks everything again and saves in one go.
+import { cleanMemberName, memberNameIssue } from "../utils.js";
+import { excelSerialToDate } from "../spreadsheet.js";
 
-const NAME_IMPORT_ISSUES = {
-    missing: "name is required",
-    email: "name looks like an email address",
-    "too-long": "name is too long",
-    invalid: "name must use letters only"
-};
+export const IMPORT_MAX_ROWS = 2000;
 
-// CSV import logic kept free of DOM and global state so it can be tested in Node.
-// Headers arrive normalized by parseCSV: lower case with spaces, "_" and "-" removed.
+export const IMPORT_FIELDS = [
+    { key: "name", label: "Name", required: true, aliases: ["name", "full name", "member name", "member", "customer name", "client name", "naam", "नाम", "सदस्य"] },
+    { key: "phone", label: "Phone", required: true, aliases: ["phone", "mobile", "mobile no", "mobile number", "phone number", "phone no", "contact", "contact no", "contact number", "whatsapp", "whatsapp number", "cell", "मोबाइल", "फोन"] },
+    { key: "plan", label: "Plan", aliases: ["plan", "plan name", "membership", "membership plan", "package", "scheme", "type"] },
+    { key: "startDate", label: "Start date", aliases: ["start date", "start", "from", "from date", "joining date", "date of joining", "doj", "joined", "join date", "admission date", "start from"] },
+    { key: "endDate", label: "End date", aliases: ["end date", "end", "to", "to date", "expiry", "expiry date", "expires", "valid till", "valid upto", "valid up to", "due date", "renewal date", "till"] },
+    { key: "amountPaid", label: "Amount paid", aliases: ["amount paid", "paid", "amount", "fees paid", "fee paid", "payment", "paid amount", "received", "fees"] },
+    { key: "notes", label: "Notes", aliases: ["notes", "note", "remarks", "remark", "comments", "comment"] }
+];
 
-const pick = (data, keys) => {
-    for (const key of keys) {
-        const value = String(data?.[key] ?? "").trim();
-        if (value) return value;
-    }
-    return "";
-};
+export const TEMPLATE_HEADERS = ["Name", "Phone", "Plan", "Start date", "End date", "Amount paid", "Notes"];
 
-const isISODate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && !Number.isNaN(new Date(`${value}T12:00:00Z`).getTime())
-    && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
-
-/** Ten-digit key used to detect duplicate phone numbers, or "" when not recognisable. */
-export function importPhoneKey(phone) {
-    const digits = String(phone || "").replace(/\D/g, "");
-    if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
-    if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
-    return digits.length === 10 ? digits : "";
+export function normalizeHeader(value) {
+    return String(value ?? "").toLowerCase().replace(/[._:/()#*-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-// Optional consent column: only an explicit "yes" grants consent. Blank means no consent.
-const CONSENT_YES = /^(yes|y|true|1)$/i;
-const CONSENT_NO = /^(no|n|false|0)$/i;
+const cellText = (cell) => String(cell?.text ?? "").trim();
+const isEmptyRow = (row) => !row || row.every((cell) => !cellText(cell));
 
-export function readImportRow({ rowNumber, data }) {
+/** The header row: the first of the first ten rows naming two known columns, else the first non-empty row. */
+export function findHeaderRow(rows) {
+    const aliases = new Set(IMPORT_FIELDS.flatMap((field) => field.aliases));
+    for (let index = 0; index < Math.min(rows.length, 10); index += 1) {
+        const known = (rows[index] || []).filter((cell) => aliases.has(normalizeHeader(cellText(cell)))).length;
+        if (known >= 2) return index;
+    }
+    const first = rows.findIndex((row) => !isEmptyRow(row));
+    return first < 0 ? 0 : first;
+}
+
+/** For each field, the column index whose header matches it, or -1. A column is used once. */
+export function guessColumns(headerRow = []) {
+    const headers = headerRow.map((cell) => normalizeHeader(cellText(cell)));
+    const used = new Set();
+    const columns = {};
+    // Exact names first, then names that contain a known word ("Mobile No." → Phone).
+    for (const pass of ["exact", "contains"]) {
+        for (const field of IMPORT_FIELDS) {
+            if (columns[field.key] >= 0) continue;
+            const index = headers.findIndex((header, column) => header && !used.has(column) && field.aliases.some((alias) => pass === "exact"
+                ? header === alias
+                : alias.length > 3 && (header.startsWith(`${alias} `) || header.endsWith(` ${alias}`))));
+            columns[field.key] = index;
+            if (index >= 0) used.add(index);
+        }
+    }
+    return columns;
+}
+
+/** A 10-digit Indian mobile from +91 98765 43210, 098765-43210, 919876543210 or a number cell. */
+export function importPhone(cell) {
+    const text = cellText(cell);
+    if (!text) return { phone: "", problem: "phone is missing" };
+    if (/e\+?\d+$/i.test(text)) return { phone: "", problem: `phone ${text} was shortened by the spreadsheet; format the phone column as text and save again` };
+    let digits = text.replace(/[\s\-().]/g, "");
+    if (/[^\d+]/.test(digits)) return { phone: "", problem: `phone ${text} is not a mobile number` };
+    digits = digits.replace(/^\+/, "");
+    if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+    else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+    else if (digits.length === 13 && digits.startsWith("091")) digits = digits.slice(3);
+    return /^[6-9]\d{9}$/.test(digits)
+        ? { phone: digits, problem: "" }
+        : { phone: "", problem: `phone ${text} is not a 10-digit Indian mobile number` };
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+function realDate(year, month, day) {
+    if (!(year >= 1990 && year <= 2100 && month >= 1 && month <= 12 && day >= 1)) return "";
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? date.toISOString().slice(0, 10) : "";
+}
+
+const fullYear = (text) => (text.length === 2 ? 2000 + Number(text) : Number(text));
+const monthNumber = (name) => MONTHS.indexOf(String(name).slice(0, 3).toLowerCase()) + 1;
+
+/**
+ * "YYYY-MM-DD" from DD/MM/YYYY, DD-MM-YYYY, DD.MM.YY, 12 Jan 2026, 2026-01-12 or an Excel date.
+ * Slashes and dashes are read day first, as in India.
+ */
+export function importDate(cell, { date1904 = false } = {}) {
+    if (cell?.date) return { date: cell.date, problem: "" };
+    const text = cellText(cell);
+    if (!text) return { date: "", problem: "" };
+    let match;
+    let date = "";
+    if ((match = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4}|\d{2})$/.exec(text))) date = realDate(fullYear(match[3]), Number(match[2]), Number(match[1]));
+    else if ((match = /^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/.exec(text))) date = realDate(Number(match[1]), Number(match[2]), Number(match[3]));
+    else if ((match = /^(\d{1,2})(?:st|nd|rd|th)?[\s\-/.,]*([A-Za-z]{3,9})[\s\-/.,']*(\d{4}|\d{2})$/.exec(text)) && monthNumber(match[2])) date = realDate(fullYear(match[3]), monthNumber(match[2]), Number(match[1]));
+    else if ((match = /^([A-Za-z]{3,9})[\s\-/.]+(\d{1,2})(?:st|nd|rd|th)?,?[\s\-/.]+(\d{4})$/.exec(text)) && monthNumber(match[1])) date = realDate(Number(match[3]), monthNumber(match[1]), Number(match[2]));
+    else if (/^\d{5}(\.\d+)?$/.test(text)) {
+        // An Excel date that lost its date format, for example in a CSV export.
+        const serial = Number(text);
+        if (serial >= 25000 && serial <= 80000) date = excelSerialToDate(serial, date1904);
+    }
+    return date ? { date, problem: "" } : { date: "", problem: `"${text}" is not a date we can read; use DD/MM/YYYY` };
+}
+
+/** Rupees from 1500, ₹1,500, Rs. 1500/-, 1500.50; blank is no payment. */
+export function importAmount(cell) {
+    const text = cellText(cell);
+    if (!text) return { amount: 0, problem: "" };
+    const cleaned = text.replace(/₹|rs\.?|inr|\/-|,|\s/gi, "");
+    const amount = Number(cleaned);
+    if (cleaned === "" || !Number.isFinite(amount) || amount < 0) return { amount: 0, problem: `amount paid "${text}" is not a number` };
+    if (amount > 10000000) return { amount: 0, problem: `amount paid ${text} is too large` };
+    return { amount: Math.round(amount * 100) / 100, problem: "" };
+}
+
+/** Plan names match whatever their case or spacing. */
+export function planKey(name) {
+    return String(name ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+const NAME_PROBLEMS = {
+    missing: "name is missing",
+    email: "name looks like an email address",
+    "too-long": "name is too long",
+    invalid: "name must use letters (spaces, dots, apostrophes and hyphens are fine)"
+};
+
+function addDays(date, days) {
+    const value = new Date(`${date}T00:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + days);
+    return value.toISOString().slice(0, 10);
+}
+
+/** A guess of the plan length from its name ("Quarterly" → 90 days), or 0. */
+export function guessPlanDays(name) {
+    const key = planKey(name);
+    const months = /(\d{1,2})\s*(?:months?|mon|mths?|m\b)/.exec(key);
+    if (months) return Number(months[1]) === 12 ? 365 : Number(months[1]) * 30;
+    if (/(year|annual|12)/.test(key)) return 365;
+    if (/half/.test(key)) return 180;
+    if (/quarter/.test(key)) return 90;
+    if (/month/.test(key)) return 30;
+    const days = /(\d{1,3})\s*days?/.exec(key);
+    return days ? Number(days[1]) : 0;
+}
+
+/**
+ * Reads every data row under the header with the chosen columns. Returns rows with their values
+ * and any problems found in the row on its own (before plans and duplicates are considered).
+ */
+export function readImportRows(rows, headerIndex, columns, { date1904 = false } = {}) {
+    const read = (row, key) => (columns[key] >= 0 ? row[columns[key]] : undefined);
+    const result = [];
+    for (let index = headerIndex + 1; index < rows.length; index += 1) {
+        const row = rows[index] || [];
+        if (isEmptyRow(row)) continue;
+        const problems = [];
+        const name = cleanMemberName(cellText(read(row, "name")));
+        const nameIssue = memberNameIssue(name);
+        if (nameIssue) problems.push(NAME_PROBLEMS[nameIssue]);
+        const phone = importPhone(read(row, "phone"));
+        if (phone.problem) problems.push(phone.problem);
+        const start = importDate(read(row, "startDate"), { date1904 });
+        if (start.problem) problems.push(`start date ${start.problem}`);
+        const end = importDate(read(row, "endDate"), { date1904 });
+        if (end.problem) problems.push(`end date ${end.problem}`);
+        if (start.date && end.date && end.date < start.date) problems.push("end date is before the start date");
+        const amount = importAmount(read(row, "amountPaid"));
+        if (amount.problem) problems.push(amount.problem);
+        const notes = cellText(read(row, "notes")).slice(0, 5000);
+        result.push({
+            rowNumber: index + 1,
+            cells: row.map(cellText),
+            name,
+            phone: phone.phone,
+            phoneText: cellText(read(row, "phone")),
+            planName: cellText(read(row, "plan")),
+            startDate: start.date,
+            endDate: end.date,
+            amountPaid: amount.amount,
+            notes,
+            problems
+        });
+    }
+    return result;
+}
+
+/** Plan names in the file that are not one of the gym's active plans, with how many rows use them. */
+export function unknownPlans(importRows, activePlans) {
+    const known = new Set(activePlans.map((plan) => planKey(plan.name)));
+    const counts = new Map();
+    for (const row of importRows) {
+        const key = planKey(row.planName);
+        // A row without a plan but with dates or a payment needs a plan too.
+        const needsPlan = key || row.startDate || row.endDate || row.amountPaid > 0;
+        if (!needsPlan || (key && known.has(key))) continue;
+        const entry = counts.get(key) || { key, name: row.planName || "", count: 0 };
+        entry.count += 1;
+        counts.set(key, entry);
+    }
+    return [...counts.values()].sort((a, b) => b.count - a.count);
+}
+
+/**
+ * Sorts the rows into what will be saved, what needs attention, and members already in the gym.
+ * planChoices: { [planKey]: { action: "map", planId } | { action: "create", name, durationDays, price } | { action: "skip" } }
+ * existingMembers: [{ id, name, phone }]; memberships: [{ member_id, start_date, end_date, status }]
+ * duplicateMode: "skip" (leave existing members alone) or "update" (name, notes, and the plan
+ * from the file when it does not overlap one they have).
+ */
+export function planImport(importRows, { activePlans = [], planChoices = {}, existingMembers = [], memberships = [], duplicateMode = "skip" } = {}) {
+    const plansByKey = new Map(activePlans.map((plan) => [planKey(plan.name), plan]));
+    const existingByPhone = new Map(existingMembers.map((member) => [String(member.phone || "").replace(/\D/g, "").slice(-10), member]));
+    const newPlans = [];
+    const newPlanRefs = new Map();
+    for (const [key, choice] of Object.entries(planChoices)) {
+        if (choice?.action !== "create") continue;
+        const ref = `new-${newPlans.length + 1}`;
+        newPlans.push({ ref, name: String(choice.name || "").trim(), duration_days: Number(choice.durationDays), price: Number(choice.price) });
+        newPlanRefs.set(key, { ref, durationDays: Number(choice.durationDays), name: String(choice.name || "").trim() });
+    }
+    const seenPhones = new Map();
+    const ready = [];
+    const problems = [];
+    const duplicates = [];
+    for (const row of importRows) {
+        const reasons = [...row.problems];
+        if (row.phone && seenPhones.has(row.phone)) reasons.push(`same phone as row ${seenPhones.get(row.phone)}`);
+        if (row.phone && !seenPhones.has(row.phone)) seenPhones.set(row.phone, row.rowNumber);
+
+        const key = planKey(row.planName);
+        const needsPlan = Boolean(key || row.startDate || row.endDate || row.amountPaid > 0);
+        let plan = null;
+        if (needsPlan) {
+            const choice = plansByKey.has(key) ? { action: "map", planId: plansByKey.get(key).id } : planChoices[key];
+            if (!choice) reasons.push(key ? `plan "${row.planName}" is not one of your plans` : "dates or an amount paid but no plan");
+            else if (choice.action === "skip") reasons.push(key ? `plan "${row.planName}" was set to be skipped` : "rows without a plan were set to be skipped");
+            else if (choice.action === "map") {
+                const mapped = activePlans.find((item) => item.id === choice.planId);
+                if (mapped) plan = { id: mapped.id, name: mapped.name, durationDays: Number(mapped.duration_days) };
+                else reasons.push(`plan "${row.planName}" is not one of your plans`);
+            } else if (choice.action === "create") {
+                const created = newPlanRefs.get(key);
+                plan = { ref: created.ref, name: created.name, durationDays: created.durationDays };
+            }
+        }
+        let startDate = row.startDate;
+        let endDate = row.endDate;
+        if (plan && !startDate && !endDate) reasons.push("plan needs a start date or an end date");
+        if (plan && plan.durationDays > 0) {
+            if (startDate && !endDate) endDate = addDays(startDate, plan.durationDays - 1);
+            if (endDate && !startDate) startDate = addDays(endDate, -(plan.durationDays - 1));
+        }
+
+        const existing = row.phone ? existingByPhone.get(row.phone) : null;
+        const entry = { ...row, plan, startDate, endDate, existing: existing || null, reasons };
+        if (reasons.length) { problems.push(entry); continue; }
+        if (existing && duplicateMode !== "update") { duplicates.push(entry); continue; }
+        if (existing && plan) {
+            const overlap = memberships.find((membership) => membership.member_id === existing.id && membership.status !== "cancelled"
+                && membership.start_date <= endDate && membership.end_date >= startDate);
+            if (overlap) {
+                entry.reasons = [`${existing.name} already has a plan from ${overlap.start_date} to ${overlap.end_date}`];
+                problems.push(entry);
+                continue;
+            }
+        }
+        ready.push(entry);
+    }
+    const usedRefs = new Set(ready.map((row) => row.plan?.ref).filter(Boolean));
+    const payload = {
+        update_existing: duplicateMode === "update",
+        new_plans: newPlans.filter((plan) => usedRefs.has(plan.ref)),
+        rows: ready.map((row) => ({
+            row: row.rowNumber,
+            full_name: row.name,
+            phone: row.phone,
+            notes: row.notes || null,
+            plan: row.plan ? (row.plan.ref ? { ref: row.plan.ref } : { id: row.plan.id }) : null,
+            start_date: row.plan ? row.startDate : null,
+            end_date: row.plan ? row.endDate : null,
+            amount_paid: row.plan && row.amountPaid > 0 ? row.amountPaid : null
+        }))
+    };
     return {
-        rowNumber,
-        data,
-        name: cleanMemberName(pick(data, ["name", "fullname", "membername"])),
-        phone: pick(data, ["phone", "phonenumber", "mobile", "mobilenumber"]),
-        email: pick(data, ["email", "emailaddress"]),
-        dob: pick(data, ["dob", "dateofbirth"]),
-        gender: pick(data, ["gender"]),
-        planName: pick(data, ["plan", "membershipplan", "planname"]),
-        startDate: pick(data, ["startdate", "joinedat", "joiningdate"]),
-        expiryDate: pick(data, ["expirydate"]),
-        whatsappConsent: pick(data, ["whatsappoptin", "whatsappconsent", "whatsapp"])
+        ready,
+        problems,
+        duplicates,
+        // Rows whose phone already belongs to a member, whatever happens to them: the skip or
+        // update choice stays on screen even when every match ends up needing attention.
+        existingMatches: [...ready, ...problems, ...duplicates].filter((row) => row.existing).length,
+        newMembers: ready.filter((row) => !row.existing).length,
+        updates: ready.filter((row) => row.existing).length,
+        payload
     };
 }
 
-/**
- * Checks parsed CSV rows against the gym's existing member phones and active plans.
- * Returns valid rows first, then rows with issues, each carrying an `issues` array.
- */
-export function validateImportRows(parsedRows, { existingPhones = [], activePlans = [] } = {}) {
-    const seen = new Set(existingPhones.map(importPhoneKey).filter(Boolean));
-    const planNames = new Set(activePlans.map((plan) => String(plan.name || "").trim().toLowerCase()));
-    const valid = [];
-    const invalid = [];
-    for (const parsed of parsedRows) {
-        const row = readImportRow(parsed);
-        const issues = [];
-        const phoneKey = importPhoneKey(row.phone);
-        const nameIssue = memberNameIssue(row.name);
-        if (nameIssue) issues.push(NAME_IMPORT_ISSUES[nameIssue]);
-        if (!isValidIndianPhone(row.phone)) issues.push("valid Indian mobile number is required");
-        else if (seen.has(phoneKey)) issues.push("duplicate phone number");
-        if (phoneKey) seen.add(phoneKey);
-        if (row.whatsappConsent && !CONSENT_YES.test(row.whatsappConsent) && !CONSENT_NO.test(row.whatsappConsent)) {
-            issues.push("WhatsApp consent must be yes or no");
-        }
-        if (row.planName && !planNames.has(row.planName.toLowerCase())) issues.push("unknown membership plan");
-        if (row.startDate && !isISODate(row.startDate)) issues.push("start date must use YYYY-MM-DD");
-        if (row.expiryDate && !isISODate(row.expiryDate)) issues.push("expiry date must use YYYY-MM-DD");
-        if (row.startDate && row.expiryDate && isISODate(row.startDate) && isISODate(row.expiryDate) && row.expiryDate < row.startDate) {
-            issues.push("expiry date precedes start date");
-        }
-        (issues.length ? invalid : valid).push({ ...row, issues });
-    }
-    return { valid, invalid, rows: [...valid, ...invalid] };
-}
-
-/**
- * Creates each valid row through the API, one at a time, collecting per-row errors.
- * Rows without a plan are created unassigned rather than given an arbitrary plan.
- */
-export async function importMembers(rows, { plans = [], createMember, assignPlan, recordConsent, onProgress = () => {}, today }) {
-    const errors = [];
-    let imported = 0;
-    let withoutPlan = 0;
-    for (const [index, row] of rows.entries()) {
-        onProgress({ current: index + 1, total: rows.length, row });
-        const plan = row.planName
-            ? plans.find((item) => String(item.name || "").trim().toLowerCase() === row.planName.toLowerCase())
-            : null;
-        if (row.planName && !plan) {
-            errors.push({ rowNumber: row.rowNumber, message: `Active membership plan "${row.planName}" was not found.` });
-            continue;
-        }
-        let member;
-        try {
-            member = await createMember({
-                name: row.name,
-                phone: normalizeIndianPhone(row.phone),
-                email: row.email,
-                dob: row.dob,
-                gender: row.gender,
-                status: "active",
-                notes: "Imported from CSV"
-            });
-            if (!member?.id) throw new Error("The member was not returned by the API.");
-        } catch (error) {
-            errors.push({ rowNumber: row.rowNumber, message: error?.message || "The member could not be created." });
-            continue;
-        }
-        imported += 1;
-        if (CONSENT_YES.test(row.whatsappConsent || "")) {
-            try {
-                if (!recordConsent) throw new Error("consent recording is unavailable");
-                await recordConsent(member.id, true, "csv_import");
-            } catch (error) {
-                errors.push({
-                    rowNumber: row.rowNumber,
-                    message: `Member was created, but WhatsApp consent was not recorded: ${String(error?.message || "unknown error").replace(/\.+$/, "")}. Record it from the member's profile.`
-                });
-            }
-        }
-        if (!plan) {
-            withoutPlan += 1;
-            continue;
-        }
-        try {
-            await assignPlan(member.id, plan.id, row.startDate || today, Number(plan.price));
-        } catch (error) {
-            errors.push({
-                rowNumber: row.rowNumber,
-                message: `Member was created, but the plan was not assigned: ${String(error?.message || "assignment failed").replace(/\.+$/, "")}. Assign it from the member's profile.`
-            });
-        }
-    }
-    return { imported, withoutPlan, errors };
-}
-
-/** Reads every page of the members list and returns all phone numbers. */
-export async function fetchAllMemberPhones(fetchPage, limit = 100) {
-    const phones = [];
-    for (let page = 1, totalPages = 1; page <= totalPages; page += 1) {
-        const response = await fetchPage({ page, limit });
-        const members = response?.data?.members;
-        if (!Array.isArray(members)) throw new Error("The members API returned an unexpected response.");
-        phones.push(...members.map((member) => member.phone).filter(Boolean));
-        const total = response?.data?.pagination?.total ?? response?.total;
-        totalPages = response?.data?.pagination?.totalPages ?? (Number.isFinite(total) ? Math.ceil(total / limit) : 1);
-    }
-    return phones;
+/** Skipped rows with the owner's own columns and the reason, for a CSV they can fix and re-import. */
+export function skippedRows(plan, headers) {
+    const seen = new Map();
+    const columnNames = headers.map((header, index) => {
+        const name = String(header || "").trim() || `Column ${index + 1}`;
+        const count = (seen.get(name) || 0) + 1;
+        seen.set(name, count);
+        return count > 1 ? `${name} (${count})` : name;
+    });
+    const rows = [
+        ...plan.problems.map((row) => ({ row, reason: row.reasons.join("; ") })),
+        ...plan.duplicates.map((row) => ({ row, reason: `already a member: ${row.existing.name}` }))
+    ].sort((a, b) => a.row.rowNumber - b.row.rowNumber);
+    return rows.map(({ row, reason }) => ({
+        "Row in file": row.rowNumber,
+        ...Object.fromEntries(columnNames.map((name, index) => [name, row.cells[index] ?? ""])),
+        "Why it was skipped": reason
+    }));
 }

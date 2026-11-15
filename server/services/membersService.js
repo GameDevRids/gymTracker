@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { supabaseClient } from "../config/database.js";
 import { selectCurrentMembership } from "./membershipsService.js";
+import { removePhotoBeforeArchive } from "./memberPhotosService.js";
 
 const memberColumns = [
     "id",
@@ -20,6 +21,11 @@ const memberColumns = [
     "whatsapp_opt_in",
     "whatsapp_opt_in_at",
     "whatsapp_opt_out_at",
+    // Photo state only (migration 014); the storage path never leaves the server.
+    "photo_status",
+    "photo_updated_at",
+    "photo_consent",
+    "photo_consent_at",
     "created_at",
     "updated_at",
     "archived_at"
@@ -35,9 +41,15 @@ export class MembersServiceError extends Error {
     }
 }
 
+// The unique index from migration 015: one current member per phone number in a gym.
+const isPhoneConflict = (error) => error?.code === "23505" && /members_gym_phone_key/.test(`${error.message || ""} ${error.details || ""}`);
+
 function throwDatabaseError(error, operation) {
     if (operation === "payments" && ["PGRST205", "42P01", "42703"].includes(error?.code)) {
         throw new MembersServiceError(503, "Payments are unavailable. Run migration 006_create_payments.sql in Supabase SQL Editor.");
+    }
+    if (isPhoneConflict(error)) {
+        throw new MembersServiceError(409, "This phone number already belongs to another member.");
     }
     if (error?.code === "23505") {
         throw new MembersServiceError(409, "Member code already exists.");
@@ -49,7 +61,7 @@ function throwDatabaseError(error, operation) {
         throw new MembersServiceError(409, "Member has related records and cannot be deleted.");
     }
     if (error?.code === "PGRST204" || error?.code === "42703") {
-        throw new MembersServiceError(503, "The members table is missing required columns. Run migration 009_add_member_contact_and_whatsapp_consent.sql in Supabase SQL Editor.");
+        throw new MembersServiceError(503, "The members table is missing required columns. Run the latest migrations (up to 014_add_member_photos.sql) in Supabase SQL Editor.");
     }
     if (error?.code === "PGRST205" || error?.code === "42P01") {
         throw new MembersServiceError(503, "Membership history is unavailable. Run migration 004_create_member_memberships.sql in Supabase SQL Editor.");
@@ -215,7 +227,7 @@ export async function createMember(member, gymId, client = supabaseClient) {
             .single();
 
         if (!error) return data;
-        if (error.code === "23505" && !hasSuppliedCode && attempt < 2) continue;
+        if (error.code === "23505" && !isPhoneConflict(error) && !hasSuppliedCode && attempt < 2) continue;
         throwDatabaseError(error, "create");
     }
     throw new MembersServiceError(500, "Could not generate a unique member code.");
@@ -239,6 +251,28 @@ export async function updateMember(id, member, gymId, client = supabaseClient) {
     if (error) throwDatabaseError(error, "update");
     if (!data) throw new MembersServiceError(404, "Member not found.");
     return data;
+}
+
+/**
+ * Refuses a phone number another current member of this gym already has. The browser used to be
+ * the only check, and only against the members it had loaded. Migration 015's unique index is
+ * the final guard; this gives the owner the other member's name.
+ */
+export async function assertPhoneAvailable(phone, gymId, { exceptId = null } = {}, client = supabaseClient) {
+    requireSupabaseClient(client);
+    if (!phone) return;
+    const digits = String(phone).replace(/\D/g, "").slice(-10);
+    let query = client
+        .from("members")
+        .select("id,full_name")
+        .eq("gym_id", gymId)
+        .is("archived_at", null)
+        .in("phone", [digits, `+91${digits}`, `91${digits}`])
+        .limit(1);
+    if (exceptId) query = query.neq("id", exceptId);
+    const { data, error } = await query;
+    if (error) throwDatabaseError(error, "get");
+    if (data?.length) throw new MembersServiceError(409, `This phone number already belongs to ${data[0].full_name}.`);
 }
 
 const CONSENT_SOURCES = new Set(["staff_form", "csv_import", "member_reply_stop"]);
@@ -301,10 +335,14 @@ export async function listConsentEvents(memberId, gymId, client = supabaseClient
 export async function deleteMember(id, gymId, client = supabaseClient) {
     requireSupabaseClient(client);
     if (!gymId) throw new MembersServiceError(403, "Gym is required.");
+    // The photo file is deleted first; the archive then clears the photo columns with it.
+    // If the file cannot be deleted, the member is not archived and staff can try again.
+    const photoPath = await removePhotoBeforeArchive(id, gymId, client);
     const archivedAt = new Date().toISOString();
+    const photoCleared = photoPath ? { photo_path: null, photo_status: "none", photo_device_id: null, photo_updated_at: archivedAt } : {};
     const { data, error } = await client
         .from("members")
-        .update({ archived_at: archivedAt, updated_at: archivedAt })
+        .update({ archived_at: archivedAt, updated_at: archivedAt, ...photoCleared })
         .eq("id", id)
         .eq("gym_id", gymId)
         .is("archived_at", null)

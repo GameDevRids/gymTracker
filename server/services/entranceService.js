@@ -93,6 +93,14 @@ async function devicesForSecret(gym, secret, client) {
     return withMembers(data || [], gym.id, client);
 }
 
+/** This phone's link requests still waiting for staff (the last PENDING_DAYS), this gym only. */
+export async function pendingLinksForSecret(gym, secret, client = supabaseClient, now = new Date()) {
+    requireClient(client);
+    const since = now.getTime() - PENDING_DAYS * 86400000;
+    return (await devicesForSecret(gym, secret, client))
+        .filter((row) => row.status === "pending" && Date.parse(row.created_at) >= since);
+}
+
 function approvedMembers(rows) {
     const approved = rows.filter((row) => row.status === "approved");
     const names = uniqueFirstNames(approved);

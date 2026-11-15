@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v13";
+const CACHE_NAME = "gympulse-shell-v20";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -14,6 +14,13 @@ const APP_SHELL = [
     "/assets/js/state.js",
     "/assets/js/storage.js",
     "/assets/js/utils.js",
+    "/assets/js/errorReporting.js",
+    "/assets/js/passwordRules.js",
+    "/assets/js/version.js",
+    "/assets/js/legal.js",
+    "/assets/js/workspace.js",
+    "/assets/js/modules/setupChecklist.js",
+    "/assets/js/modules/account.js",
     "/assets/js/i18n.js",
     "/assets/js/api/apiClient.js",
     "/assets/js/api/membersApi.js",
@@ -28,14 +35,20 @@ const APP_SHELL = [
     "/assets/js/modules/dashboard.js",
     "/assets/js/modules/expiring.js",
     "/assets/js/modules/memberImport.js",
+    "/assets/js/modules/memberImportUi.js",
+    "/assets/js/spreadsheet.js",
     "/assets/js/modules/memberMemberships.js",
     "/assets/js/modules/members.js",
     "/assets/js/modules/operations.js",
     "/assets/js/modules/plans.js",
-    "/assets/js/modules/whatsapp.js",
     "/assets/js/modules/welcome.js",
     "/assets/js/modules/welcomeUi.js",
     "/assets/js/welcomeMessage.js",
+    "/assets/js/reminderMessage.js",
+    "/assets/js/localDataMove.js",
+    "/assets/js/modules/expiryReminder.js",
+    "/assets/js/modules/summary.js",
+    "/assets/js/modules/localData.js",
     "/assets/js/upi.js",
     "/assets/js/checkin.js",
     "/assets/js/modules/attendance.js",
@@ -44,10 +57,18 @@ const APP_SHELL = [
     "/assets/js/modules/checkinMethod.js",
     "/assets/js/modules/checkinSettingsUi.js",
     "/assets/js/entrance.js",
+    "/assets/js/photoCapture.js",
+    "/assets/js/modules/memberPhotos.js",
     "/assets/css/entrance.css",
-    "/data/demo-data.js",
-    "/assets/icons/gympulse-192.png",
-    "/assets/icons/gympulse-512.png"
+    "/assets/icons/icon-192.png",
+    "/assets/icons/icon-512.png",
+    "/assets/icons/icon-maskable-512.png",
+    "/assets/icons/apple-touch-icon.png",
+    "/assets/icons/favicon.svg",
+    "/assets/icons/favicon-32.png",
+    "/assets/icons/favicon-16.png",
+    "/assets/icons/mark-on-dark.svg",
+    "/assets/icons/mark-on-light.svg"
 ];
 
 self.addEventListener("install", (event) => {
@@ -63,9 +84,18 @@ self.addEventListener("activate", (event) => {
     self.clients.claim();
 });
 
+/** Signed photo URLs from Supabase Storage, and the app's own photo endpoints. */
+function isMemberPhoto(url) {
+    return url.pathname.includes("/storage/v1/object/")
+        || url.pathname.startsWith("/api/member-photos")
+        || /^\/api\/members\/[^/]+\/photo/.test(url.pathname);
+}
+
 self.addEventListener("fetch", (event) => {
     const request = event.request;
     const url = new URL(request.url);
+    // Member photos (signed Supabase Storage URLs) and the photo API are never cached here.
+    if (isMemberPhoto(url)) return;
     if (request.method !== "GET" || url.origin !== self.location.origin) return;
     // The entrance poster page is per phone and per poster: always from the network, never cached
     // (and never stored as the app's /index.html).

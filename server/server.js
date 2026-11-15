@@ -14,14 +14,20 @@ import membershipsRouter from "./routes/memberships.js";
 import paymentsRouter from "./routes/payments.js";
 import messageTemplatesRouter from "./routes/messageTemplates.js";
 import gymSettingsRouter from "./routes/gymSettings.js";
+import summaryRouter from "./routes/summary.js";
+import exportRouter from "./routes/export.js";
+import clientErrorsRouter from "./routes/clientErrors.js";
+import accountRouter from "./routes/account.js";
+import { startGymDeletionSweep } from "./services/accountService.js";
 import attendanceRouter from "./routes/attendance.js";
 import memberDevicesRouter from "./routes/memberDevices.js";
+import memberPhotosRouter from "./routes/memberPhotos.js";
 import { createEntranceRouter } from "./routes/entrance.js";
 import whatsappRouter from "./routes/whatsapp.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./middleware/requireAuth.js";
 import { requireDemoAuth } from "./middleware/demoAuth.js";
-import { createAuthRateLimit } from "./middleware/authRateLimit.js";
+import { createAuthRateLimit, createRefreshRateLimit } from "./middleware/authRateLimit.js";
 import { supabaseClient, supabaseConfigured } from "./config/database.js";
 import { whatsappConfig } from "./config/whatsappConfig.js";
 import { resolveListenAddress } from "./config/listen.js";
@@ -32,6 +38,17 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const currentFile = fileURLToPath(import.meta.url);
 const projectDir = path.resolve(currentDir, "..");
 const allowedOrigins = new Set(whatsappConfig.allowedOrigins);
+
+/** The Supabase project's origin, where member photos' signed URLs point; "" if not configured. */
+export function photoImageOrigin(value = process.env.SUPABASE_URL) {
+    try {
+        const url = new URL(String(value || "").trim());
+        return ["https:", "http:"].includes(url.protocol) ? url.origin : "";
+    } catch {
+        return "";
+    }
+}
+
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 app.use(httpLogger);
@@ -42,16 +59,19 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             styleSrcAttr: ["'unsafe-inline'"],
             fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            imgSrc: ["'self'", "data:", "blob:"],
+            // Member photos are shown from short-lived signed Supabase Storage URLs.
+            imgSrc: ["'self'", "data:", "blob:", ...(photoImageOrigin() ? [photoImageOrigin()] : [])],
             connectSrc: ["'self'"]
         }
     }
 }));
 app.use(compression());
 app.use(requireDemoAuth());
+// Every phone on the gym Wi-Fi shares one IP and the front desk polls for check-ins, so the
+// general limit is generous; sign-in keeps its own strict limit below.
 app.use("/api", rateLimit({
     windowMs: 15 * 60 * 1000,
-    limit: 300,
+    limit: 1000,
     // Entrance scans have their own per-user limit (routes/attendance.js); every device on
     // the gym Wi-Fi shares one IP, so a busy morning must not lock the whole gym out.
     skip: (request) => request.path === "/attendance/scan",
@@ -65,7 +85,7 @@ app.use("/api/whatsapp/send", rateLimit({
     legacyHeaders: false
 }));
 app.use("/api/auth/login", createAuthRateLimit());
-app.use("/api/auth/refresh", createAuthRateLimit());
+app.use("/api/auth/refresh", createRefreshRateLimit());
 app.use((request, response, next) => {
     const origin = request.get("Origin");
     if (origin && allowedOrigins.has(origin)) {
@@ -86,6 +106,8 @@ app.use((request, response, next) => {
 app.use("/api/whatsapp/webhook", express.raw({ type: "application/json", limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/auth", authRouter);
+// Browser errors for Sentry; no sign-in, so errors on the sign-in screen are reported too.
+app.use("/api/client-errors", clientErrorsRouter);
 app.use("/api", databaseRouter);
 app.use("/api/members", requireAuth(), membersRouter);
 app.use("/api/plans", requireAuth(), plansRouter);
@@ -93,8 +115,13 @@ app.use("/api/memberships", requireAuth(), membershipsRouter);
 app.use("/api/payments", requireAuth(), paymentsRouter);
 app.use("/api/message-templates", requireAuth(), messageTemplatesRouter);
 app.use("/api/gym-settings", requireAuth(), gymSettingsRouter);
+app.use("/api/summary", requireAuth(), summaryRouter);
+// The account page and the full data download still work while a gym waits to be erased.
+app.use("/api/account", requireAuth({ allowNoGym: true, allowPendingDeletion: true }), accountRouter);
+app.use("/api/export", requireAuth({ allowPendingDeletion: true }), exportRouter);
 app.use("/api/attendance", requireAuth(), attendanceRouter);
 app.use("/api/member-devices", requireAuth(), memberDevicesRouter);
+app.use("/api/member-photos", requireAuth(), memberPhotosRouter);
 // The public entrance poster page and its check-in calls (no login; own rate limits).
 app.use("/c", createEntranceRouter());
 app.use("/api/whatsapp", (request, response, next) => {
@@ -110,7 +137,12 @@ app.get("/sw.js", (_request, response) => {
     response.sendFile(path.join(projectDir, "sw.js"));
 });
 app.get("/index.html", (_request, response) => response.sendFile(path.join(projectDir, "index.html")));
+// The page a password-reset email opens; the app reads the link from the address after "#".
+app.get("/reset-password", (_request, response) => response.sendFile(path.join(projectDir, "index.html")));
 app.get("/", (_request, response) => response.sendFile(path.join(projectDir, "index.html")));
+// The draft Privacy Policy and Terms of Service, readable without signing in.
+app.get("/privacy", (_request, response) => response.sendFile(path.join(projectDir, "privacy.html")));
+app.get("/terms", (_request, response) => response.sendFile(path.join(projectDir, "terms.html")));
 app.get("/health", (_request, response) => response.json({ status: "ok" }));
 app.get("/health/db", async (_request, response) => {
     if (!supabaseConfigured || !supabaseClient) {
@@ -155,6 +187,9 @@ function startServer() {
         });
         server.closeIdleConnections?.();
     };
+    // Erases gyms whose 7-day deletion wait is over (migration 017), once an hour.
+    const stopSweep = startGymDeletionSweep();
+    server.on("close", stopSweep);
     process.once("SIGTERM", () => shutdown("SIGTERM"));
     process.once("SIGINT", () => shutdown("SIGINT"));
     return server;

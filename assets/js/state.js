@@ -1,56 +1,54 @@
-import { loadState, saveState, resetState } from "./storage.js";
+import { clearSavedWorkspace, readSavedWorkspace } from "./storage.js";
 import { cleanMemberName } from "./utils.js";
-import { createEmptyState } from "../../data/demo-data.js";
+import { createEmptyState, removeLegacyDemoData } from "./workspace.js";
 import { apiClient } from "./api/apiClient.js";
 import { fetchMembers } from "./api/membersApi.js";
 
-export let initializationWarning = "";
-export let memberListPagination = { page: 1, limit: 25, total: 0 };
-export const state = (() => {
-    try {
-        return loadState();
-    } catch (error) {
-        initializationWarning = error.message || "Browser storage is unavailable; changes may not persist.";
-        return createEmptyState();
-    }
-})();
-if (!state.whatsapp) state.whatsapp = {};
-if (!state.apiMemberPayments) state.apiMemberPayments = {};
+// Everything about the gym comes from the database and is kept in memory only. The demo gym is a
+// real gym in the database too (server/scripts/seed-demo.js); nothing is saved in the browser.
+export const state = Object.assign(createEmptyState(), { apiMemberPayments: {} });
 
-// Check-ins live in the database. Real gyms keep them in memory only (state.attendance is
-// filled from the API). Check-ins an older version saved in this browser stay in storage,
-// untouched, until they are imported, so nothing is lost.
-let pendingLegacyAttendance = [];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+let workspaceUser = "";
+// What an older version kept in this browser for this owner (never sample data), waiting for
+// the one-time "Move my saved data to the cloud" step. The app does not read it otherwise.
+let savedWorkspace = null;
 
-/** Call after loading a workspace: sets aside browser-saved check-ins for the one-time import. */
-export function setAsideLegacyAttendance() {
-    if (state.sampleDataLoaded) {
-        pendingLegacyAttendance = [];
+function resetState(values = {}) {
+    Object.keys(state).forEach((key) => delete state[key]);
+    Object.assign(state, createEmptyState(), { apiMemberPayments: {} }, values);
+}
+
+/** Call after sign-in: starts an empty workspace. */
+export function startWorkspace(userId) {
+    workspaceUser = userId || "";
+    resetState();
+    const saved = readSavedWorkspace(workspaceUser);
+    // Sample data an older version loaded in this browser is fictional: it is simply removed.
+    if (saved?.sampleDataLoaded === true) {
+        clearSavedWorkspace(workspaceUser);
+        savedWorkspace = null;
         return;
     }
-    pendingLegacyAttendance = (Array.isArray(state.attendance) ? state.attendance : [])
-        .filter((record) => record && record.memberId && record.checkedInAt);
-    state.attendance = [];
+    savedWorkspace = saved ? removeLegacyDemoData(saved).state : null;
 }
 
+export function savedBrowserWorkspace() {
+    return savedWorkspace;
+}
+
+/** Deletes what older versions kept in this browser; the app stops using it. */
+export function forgetSavedBrowserWorkspace() {
+    clearSavedWorkspace(workspaceUser);
+    savedWorkspace = null;
+}
+
+/** Check-ins an older version saved only in this browser, for the one-time move. */
 export function legacyAttendance() {
-    return pendingLegacyAttendance;
+    return (Array.isArray(savedWorkspace?.attendance) ? savedWorkspace.attendance : [])
+        .filter((record) => record && record.memberId && record.checkedInAt);
 }
 
-export function clearLegacyAttendance() {
-    pendingLegacyAttendance = [];
-    persist();
-}
-
-export function persist() {
-    saveState(state.sampleDataLoaded ? state : { ...state, attendance: pendingLegacyAttendance });
-}
-
-export function resetDemo() {
-    const fresh = resetState();
-    Object.keys(state).forEach((key) => delete state[key]);
-    Object.assign(state, fresh);
-}
 
 export function memberFromApiRow(member) {
     if (!member) return null;
@@ -71,20 +69,23 @@ export function memberFromApiRow(member) {
         expiryDate: currentMembership?.end_date || "",
         status: member.status === "suspended" ? "suspended" : "active",
         // Lifetime totals calculated by the server from memberships and recorded payments.
-        totalFees: Number(member.billing?.billed ?? currentMembership?.total_fees ?? currentMembership?.price ?? 0),
+        totalFees: Number(member.billing?.billed ?? 0),
         paidTotal: Number(member.billing?.paid ?? 0),
-        charges: [],
-        amountPaid: 0,
         emergencyContact: member.emergency_contact || "",
         // Consent comes only from the database; the browser never assumes it.
         whatsappOptIn: member.whatsapp_opt_in === true,
         whatsappOptInAt: member.whatsapp_opt_in_at || "",
         whatsappOptOutAt: member.whatsapp_opt_out_at || "",
         notes: member.notes || "",
+        // Photo state only; the image itself is loaded from a short-lived signed URL kept in
+        // memory (modules/memberPhotos.js), never stored with the member.
+        photoStatus: ["pending", "approved"].includes(member.photo_status) ? member.photo_status : "none",
+        photoConsent: member.photo_consent === true,
+        photoConsentAt: member.photo_consent_at || "",
+        photoUpdatedAt: member.photo_updated_at || "",
         // Only single-member responses carry the check-in QR token.
         ...(member.qr_token ? { qrToken: member.qr_token } : {}),
         followUpStatus: member.follow_up_status || "pending",
-        renewals: [],
         createdAt: member.created_at || "",
         updatedAt: member.updated_at || ""
     };
@@ -106,47 +107,23 @@ export function memberToApiPayload(member) {
     return payload;
 }
 
-export async function loadMembersFromApi(options = {}) {
-    const status = options.status && ["active", "suspended"].includes(options.status) ? options.status : undefined;
-    const params = {
-        page: options.page ?? 1,
-        limit: options.limit ?? 25,
-        ...(status ? { status } : {}),
-        ...(options.search ? { search: options.search } : {})
-    };
-    const response = await fetchMembers(params);
-    const members = Array.isArray(response?.data?.members) ? response.data.members : [];
-    memberListPagination = {
-        page: response?.page ?? response?.data?.pagination?.page ?? params.page,
-        limit: response?.limit ?? response?.data?.pagination?.limit ?? params.limit,
-        total: response?.total ?? response?.data?.pagination?.total ?? members.length
-    };
-    state.members = members.map((member) => memberFromApiRow(member));
+const MEMBER_PAGE_SIZE = 100;
+
+/**
+ * Loads every current member of the gym into memory, a page of 100 at a time. Totals, filters,
+ * exports and pickers then cover the whole gym, not just one page.
+ */
+export async function loadAllMembersFromApi() {
+    const first = await fetchMembers({ page: 1, limit: MEMBER_PAGE_SIZE });
+    const total = Number(first?.total ?? first?.data?.pagination?.total ?? 0);
+    const pages = Math.max(1, Math.ceil(total / MEMBER_PAGE_SIZE));
+    const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, index) => fetchMembers({ page: index + 2, limit: MEMBER_PAGE_SIZE })));
+    const rows = [first, ...rest].flatMap((response) => (Array.isArray(response?.data?.members) ? response.data.members : []));
+    // A member added while the pages load can shift a row onto two pages; keep it once.
+    const byId = new Map();
+    for (const row of rows) if (row?.id && !byId.has(row.id)) byId.set(row.id, memberFromApiRow(row));
+    state.members = [...byId.values()];
     return state.members;
-}
-
-export async function createMemberOnApi(member) {
-    const response = await apiClient.post("/api/members", memberToApiPayload(member));
-    const record = response?.data ?? null;
-    const mapped = memberFromApiRow(record);
-    if (mapped) {
-        const existingIndex = state.members.findIndex((entry) => entry.id === mapped.id);
-        if (existingIndex >= 0) state.members[existingIndex] = mapped;
-        else state.members.unshift(mapped);
-    }
-    return mapped;
-}
-
-export async function updateMemberOnApi(id, member) {
-    const response = await apiClient.put(`/api/members/${id}`, memberToApiPayload(member));
-    const record = response?.data ?? null;
-    const mapped = memberFromApiRow(record);
-    if (mapped) {
-        const existingIndex = state.members.findIndex((entry) => entry.id === mapped.id);
-        if (existingIndex >= 0) state.members[existingIndex] = mapped;
-        else state.members.unshift(mapped);
-    }
-    return mapped;
 }
 
 function storeMember(mapped) {
@@ -154,13 +131,36 @@ function storeMember(mapped) {
     const index = state.members.findIndex((entry) => entry.id === mapped.id);
     if (index >= 0) state.members[index] = { ...state.members[index], ...mapped };
     else state.members.unshift(mapped);
-    return mapped;
+    return state.members[index >= 0 ? index : 0];
+}
+
+export async function createMemberOnApi(member) {
+    const response = await apiClient.post("/api/members", memberToApiPayload(member));
+    return storeMember(memberFromApiRow(response?.data ?? null));
+}
+
+/** The server answers with the whole member, including fees, payments and current plan. */
+export async function updateMemberOnApi(id, member) {
+    const response = await apiClient.put(`/api/members/${id}`, memberToApiPayload(member));
+    return storeMember(memberFromApiRow(response?.data ?? null));
 }
 
 /** Saves only the given database fields, e.g. { follow_up_status: "contacted" }. */
 export async function updateMemberFieldsOnApi(id, fields) {
     const response = await apiClient.put(`/api/members/${id}`, fields);
     return storeMember(memberFromApiRow(response?.data ?? null));
+}
+
+/** Reloads one member (fees, payments, plan) from the database, e.g. after a payment or a new plan. */
+export async function reloadMemberFromApi(id) {
+    if (!UUID.test(String(id || ""))) return getMember(id) || null;
+    const response = await apiClient.get(`/api/members/${id}`);
+    return storeMember(memberFromApiRow(response?.data ?? null));
+}
+
+/** The member from memory, or from the database when they are not loaded yet. */
+export async function ensureMember(id) {
+    return getMember(id) || (UUID.test(String(id || "")) ? reloadMemberFromApi(id) : null);
 }
 
 /** Grants or withdraws WhatsApp consent; the server records it in the member's consent history. */
@@ -188,40 +188,19 @@ export async function loadConsentHistory(id, onChange = () => {}) {
 export async function deleteMemberOnApi(id) {
     await apiClient.delete(`/api/members/${id}`);
     state.members = state.members.filter((member) => member.id !== id);
-    memberListPagination = {
-        ...memberListPagination,
-        total: Math.max(0, memberListPagination.total - 1)
-    };
 }
 
 export function getPlan(planId) { return state.plans.find((plan) => plan.id === planId); }
 export function getMember(memberId) { return state.members.find((member) => member.id === memberId); }
 export function getMemberPayments(memberId) {
-    const member = getMember(memberId);
-    if (member?.memberCode) return state.apiMemberPayments[memberId] || [];
-    return state.payments.filter((payment) => payment.memberId === memberId);
+    return state.apiMemberPayments[memberId] || [];
 }
 export function memberBalance(member) {
-    if (member.memberCode) return Math.max(0, Number(member.totalFees || 0) - Number(member.paidTotal || 0));
-    const payments = state.payments.filter((payment) => payment.memberId === member.id);
-    return Math.max(0, Number(member.totalFees || 0) - payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
-}
-
-// Revenue charts still read payments saved in this browser. When the database holds payments
-// that those charts cannot show yet, say so instead of claiming there are none.
-export function revenueEmptyMessage() {
-    const databasePaid = state.members.some((member) => member.memberCode && Number(member.paidTotal) > 0);
-    return databasePaid ? "Payments are recorded, but monthly totals are not available yet." : "No payments recorded yet.";
+    return Math.max(0, Number(member.totalFees || 0) - Number(member.paidTotal || 0));
 }
 
 // Keeps the database totals current after this browser records a payment, until the next reload.
 export function addPaidAmount(memberId, amount) {
     const member = getMember(memberId);
     if (member) member.paidTotal = Number(member.paidTotal || 0) + Number(amount || 0);
-}
-export function activeMembers() {
-    const date = new Date();
-    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-    const today = date.toISOString().slice(0, 10);
-    return state.members.filter((member) => member.status !== "suspended" && member.expiryDate >= today);
 }

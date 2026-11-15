@@ -1,6 +1,7 @@
 import { escapeHTML, formatDate, formatPhone } from "../utils.js";
 import { t } from "../i18n.js";
 import { renderSkeletonList } from "../components/skeleton.js";
+import { buildReminderMessage } from "../reminderMessage.js";
 
 /** Identifies one reminder: renewing a membership changes its end date, so it starts unreminded. */
 export function reminderKey(membership) {
@@ -43,15 +44,14 @@ export function renderExpiring(memberships = [], status = "loading", days = 7, r
                         ? `${Math.abs(membership.days_left)} ${t("expiredDays")}`
                         : membership.days_left === 0 ? t("expiresToday") : `${membership.days_left} ${t("daysLeft").toLowerCase()}`;
                     const phoneDigits = remindablePhone(member);
-                    const message = reminderTemplate
-                        .replace(/\{(name|plan|expiry_date)\}/g, (_match, placeholder) => ({
-                            name: member.full_name,
-                            plan: membership.plan_name,
-                            expiry_date: formatDate(membership.end_date)
-                        })[placeholder]);
+                    const message = buildReminderMessage(reminderTemplate, {
+                        name: member.full_name,
+                        plan: membership.plan_name,
+                        expiry_date: formatDate(membership.end_date)
+                    });
                     const blocker = reminderBlocker(member);
                     const whatsappAction = !blocker
-                        ? `<a class="button button-secondary button-small" href="https://wa.me/91${phoneDigits}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer" data-remind-key="${escapeHTML(key)}">${escapeHTML(isReminded ? t("reminded") : t("remindWhatsApp"))}</a>`
+                        ? `<a class="button button-secondary button-small" href="https://wa.me/91${phoneDigits}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer" data-remind-key="${escapeHTML(key)}" data-member-id="${escapeHTML(member.id)}" data-membership-id="${escapeHTML(membership.id)}">${escapeHTML(isReminded ? t("reminded") : t("remindWhatsApp"))}</a>`
                         : `<span class="helper-text reminder-blocked">${blocker === "no-consent" ? escapeHTML(t("noWhatsAppConsent")) : "Invalid phone"}</span>`;
                     return `<article class="card expiring-card${isReminded ? " is-reminded" : ""}">
                         <div class="expiring-member"><span class="member-avatar">${escapeHTML(member.full_name.slice(0, 1))}</span><div><strong>${escapeHTML(member.full_name)}</strong><small>${escapeHTML(formatPhone(member.phone))}</small></div></div>

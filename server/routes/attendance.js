@@ -9,18 +9,22 @@ import {
     validateScan
 } from "../middleware/validateAttendance.js";
 import { validateCheckinSearch } from "../middleware/validateCheckin.js";
+import { withCheckinPhoto } from "../services/memberPhotosService.js";
 
 const router = express.Router();
 const scanRateLimit = createScanRateLimit();
 
+// Staff result cards show the member's approved photo so staff can confirm it is them.
 router.post("/scan", scanRateLimit, validateScan, (request, response, next) => {
     attendance.scanCheckIn(request.scanToken, request.gymId, request.authUser?.id || null)
+        .then((result) => withCheckinPhoto(result, request.gymId))
         .then((result) => response.json({ status: "success", data: result }))
         .catch(next);
 });
 
 router.post("/manual", validateManualCheckIn, (request, response, next) => {
     attendance.manualCheckIn(request.checkInMemberId, request.gymId, request.authUser?.id || null)
+        .then((result) => withCheckinPhoto(result, request.gymId))
         .then((result) => response.json({ status: "success", data: result }))
         .catch(next);
 });

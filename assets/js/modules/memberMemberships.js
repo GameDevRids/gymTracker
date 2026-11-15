@@ -2,8 +2,8 @@ import { createMemberPlanAssignment, fetchMemberMembershipHistory, fetchMembersh
 import { fetchActivePlans } from "../api/plansApi.js";
 import { closeModal, openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
-import { state, getMember } from "../state.js";
-import { escapeHTML, formatDate, formatINR, formatPlanDuration, localISODate, statusPill } from "../utils.js";
+import { getMember, getPlan, reloadMemberFromApi } from "../state.js";
+import { addDays, escapeHTML, formatDate, formatINR, formatPlanDuration, indiaISODate, statusPill } from "../utils.js";
 
 const membershipsByMember = new Map();
 let allMemberships = [];
@@ -42,6 +42,28 @@ function selectCurrentMembership(memberships) {
             .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))
                 || b.start_date.localeCompare(a.start_date))[0]
         || null;
+}
+
+/** The member's current plan name: from the database, or from sample data's plan list. */
+export function planNameFor(member) {
+    if (!member) return "";
+    return getCurrentMembership(member.id)?.plan_name || getPlan(member.planId)?.name || "";
+}
+
+/**
+ * Renewals from the database: every non-cancelled membership that is not the member's first.
+ * Needs loadAllMemberships(); returns [] until it has finished.
+ */
+export function renewalMemberships() {
+    const byMember = new Map();
+    for (const membership of allMemberships.filter((entry) => entry.status !== "cancelled")) {
+        const list = byMember.get(membership.member_id) || [];
+        list.push(membership);
+        byMember.set(membership.member_id, list);
+    }
+    return [...byMember.values()].flatMap((list) => list
+        .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")) || a.start_date.localeCompare(b.start_date))
+        .slice(1));
 }
 
 export function setMemberCurrentMembership(memberId, membership) {
@@ -164,7 +186,19 @@ function updateAssignmentPreview(form) {
     summary.innerHTML = `<strong>${escapeHTML(selected.dataset.name)}</strong><p>${escapeHTML(formatPlanDuration(selected.dataset.duration))} · ${formatINR(Number(selected.dataset.price))}</p>`;
 }
 
-function renderAssignmentForm(memberId, plans) {
+/**
+ * For a renewal: start the day after the member's latest plan ends (today if it already
+ * ended), on the same plan when it is still active.
+ */
+function renewalDefaults(memberships, today = indiaISODate()) {
+    const latest = memberships
+        .filter((membership) => membership.status !== "cancelled")
+        .sort((a, b) => b.end_date.localeCompare(a.end_date))[0];
+    if (!latest) return { startDate: today, planId: "" };
+    return { startDate: latest.end_date >= today ? addDays(latest.end_date, 1) : today, planId: latest.plan_id };
+}
+
+function renderAssignmentForm(memberId, plans, { startDate = indiaISODate(), planId = "" } = {}) {
     const activePlans = plans.filter((plan) => plan.is_active);
     if (!activePlans.length) {
         return {
@@ -172,11 +206,11 @@ function renderAssignmentForm(memberId, plans) {
             footer: `<button class="button button-secondary" data-action="close-modal" type="button">Close</button>`
         };
     }
-    const options = activePlans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-duration="${plan.duration_days}" data-price="${plan.price}">${escapeHTML(plan.name)} · ${escapeHTML(formatPlanDuration(plan.duration_days))} · ${formatINR(plan.price)}</option>`).join("");
+    const options = activePlans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-duration="${plan.duration_days}" data-price="${plan.price}" ${plan.id === planId ? "selected" : ""}>${escapeHTML(plan.name)} · ${escapeHTML(formatPlanDuration(plan.duration_days))} · ${formatINR(plan.price)}</option>`).join("");
     const body = `<form id="membership-assignment-form" data-member-id="${escapeHTML(memberId)}" class="form-grid">
         <div class="field full"><label for="assignment-plan">Active plan *</label><select id="assignment-plan" name="plan_id" required><option value="">Select a plan</option>${options}</select></div>
         <div class="field full" id="assignment-summary"><div class="empty-state">Select a plan to review its details.</div></div>
-        <div class="field"><label for="assignment-start-date">Membership start date *</label><input id="assignment-start-date" name="start_date" type="date" value="${localISODate()}" required></div>
+        <div class="field"><label for="assignment-start-date">Membership start date *</label><input id="assignment-start-date" name="start_date" type="date" value="${escapeHTML(startDate)}" required></div>
         <div class="field"><label>Calculated expiry date</label><div class="field-control assignment-end-date" id="assignment-end-date">Select a plan and start date.</div></div>
         <div class="note-box field full">The end date includes the plan's full duration. Existing membership history is preserved.</div>
         <div class="note-box field full assignment-warning" id="assignment-warning" role="alert" hidden></div>
@@ -187,16 +221,17 @@ function renderAssignmentForm(memberId, plans) {
     };
 }
 
-export async function openAssignmentModal(memberId) {
+/** Assigns a plan; with { renew: true } it renews: starts after the current plan, same plan. */
+export async function openAssignmentModal(memberId, { renew = false } = {}) {
     const member = getMember(memberId);
     if (!member || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(memberId)) {
-        toast("Select a member loaded from the backend before assigning a plan.", "error");
+        toast("This member could not be found. Refresh the page and try again.", "error");
         return;
     }
     const requestId = ++assignmentModalRequest;
     openModal({
-        title: `Assign a plan to ${escapeHTML(member.name)}`,
-        subtitle: "Choose an active plan and membership start date.",
+        title: `${renew ? "Renew" : "Assign a plan to"} ${escapeHTML(member.name)}${renew ? "'s membership" : ""}`,
+        subtitle: renew ? "The new plan starts the day after the current one ends. Past memberships stay in the history." : "Choose an active plan and membership start date.",
         body: `<div class="empty-state" role="status">Loading active plans and membership history…</div>`,
         footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button>`
     });
@@ -208,7 +243,8 @@ export async function openAssignmentModal(memberId) {
         ]);
         if (!isCurrentAssignmentModal(requestId)) return;
         membershipsByMember.set(memberId, memberships);
-        const form = renderAssignmentForm(memberId, plans);
+        const defaults = renew ? renewalDefaults(memberships) : {};
+        const form = renderAssignmentForm(memberId, plans, defaults);
         const modal = document.querySelector("#modal-root .modal");
         if (!isCurrentAssignmentModal(requestId)) return;
         modal.querySelector(".modal-body").innerHTML = form.body;
@@ -218,7 +254,7 @@ export async function openAssignmentModal(memberId) {
     } catch (error) {
         const modal = document.querySelector("#modal-root .modal");
         if (!isCurrentAssignmentModal(requestId)) return;
-        modal.querySelector(".modal-body").innerHTML = `<div class="empty-state"><p>${escapeHTML(error.message || "Unable to load plans and membership history.")}</p><button class="button button-secondary" data-action="retry-assignment" data-id="${escapeHTML(memberId)}">Try again</button></div>`;
+        modal.querySelector(".modal-body").innerHTML = `<div class="empty-state"><p>${escapeHTML(error.message || "Unable to load plans and membership history.")}</p><button class="button button-secondary" data-action="retry-assignment" data-id="${escapeHTML(memberId)}" data-renew="${renew}">Try again</button></div>`;
     }
 }
 
@@ -235,7 +271,7 @@ export function handleMembershipAction(action, target) {
     } else if (action === "refresh-member-memberships") {
         loadMemberMembershipHistory(memberId);
     } else if (action === "retry-assignment") {
-        openAssignmentModal(memberId);
+        openAssignmentModal(memberId, { renew: target.dataset.renew === "true" });
     } else if (action === "go-to-plans") {
         closeModal();
         document.querySelector('[data-view="plans"]')?.click();
@@ -284,7 +320,12 @@ export async function submitMembershipAssignment(form, onUpdated) {
         closeModal();
         toast(`${selected.dataset.name} assigned through ${formatDate(endDate)}.`);
         onUpdated();
-        await Promise.all([loadMemberMembershipHistory(memberId), loadAllMemberships()]);
+        // The new plan's fee changes the member's balance, which the server calculates.
+        await Promise.all([
+            loadMemberMembershipHistory(memberId),
+            loadAllMemberships(),
+            reloadMemberFromApi(memberId).catch((error) => console.error("GymPulse could not reload the member's balance.", error))
+        ]);
         onUpdated();
         await loadMemberMembershipHistory(memberId);
     } catch (error) {

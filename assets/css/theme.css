@@ -93,7 +93,6 @@ textarea:focus-visible, [tabindex]:focus-visible {
 
 /* ---------- Brand, login ---------- */
 .brand { font-weight: 800; letter-spacing: -.3px; }
-.brand-mark { color: var(--slate); background: var(--marigold); }
 .brand-light, .auth-brand .brand-light { color: var(--marigold); }
 /* Bug fix: the sidebar's white brand colour made "Gym" invisible on the login card */
 .brand.auth-brand { color: var(--slate); }
@@ -191,7 +190,6 @@ tbody tr:hover { background: #F7F9FA; }
 .status-suspended, .status-pending, .status-upcoming, .status-expiring { color: var(--marigold-ink); background: var(--marigold-tint); }
 .status-inactive, .status-unassigned { color: var(--ink-3); background: var(--slate-soft); }
 .badge-soft { color: var(--leaf); background: var(--leaf-tint); font-size: 12px; }
-.sample-data-badge { color: var(--ink-3); background: var(--slate-soft); font-size: 11px; }
 
 /* ---------- Summary chips, alerts, notes ---------- */
 .summary-chip { border-color: var(--line); color: var(--ink-2); font-size: 13px; }

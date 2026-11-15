@@ -33,13 +33,20 @@ export function getMember(request, response, next) {
 }
 
 export function createMember(request, response, next) {
-    membersService.createMember(request.validatedMember, request.gymId)
+    membersService.assertPhoneAvailable(request.validatedMember.phone, request.gymId)
+        .then(() => membersService.createMember(request.validatedMember, request.gymId))
         .then((member) => response.status(201).json({ status: "success", data: member }))
         .catch(next);
 }
 
+// Answers with the whole member, including fees, payments and current plan, so the browser
+// never shows a ₹0 balance or "Unassigned" after an edit.
 export function updateMember(request, response, next) {
-    membersService.updateMember(request.params.id, request.validatedMember, request.gymId)
+    const { id } = request.params;
+    const phone = request.validatedMember.phone;
+    (phone ? membersService.assertPhoneAvailable(phone, request.gymId, { exceptId: id }) : Promise.resolve())
+        .then(() => membersService.updateMember(id, request.validatedMember, request.gymId))
+        .then(() => membersService.getMember(id, request.gymId))
         .then((member) => response.json({ status: "success", data: member }))
         .catch(next);
 }

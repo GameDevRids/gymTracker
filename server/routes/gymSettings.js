@@ -1,6 +1,7 @@
 import express from "express";
-import { getGymSettings, saveGymSettings } from "../services/gymSettingsService.js";
-import { validateGymSettings } from "../middleware/validateGymSettings.js";
+import { fillUnsetPreferences, getGymSettings, saveGymSettings } from "../services/gymSettingsService.js";
+import { validateGymSettings, validateLocalDataImport } from "../middleware/validateGymSettings.js";
+import { importExpiryReminders, saveTemplateIfUnset } from "../services/whatsappMessagesService.js";
 import { membersErrorHandler } from "../controllers/membersController.js";
 import { getCheckinSettings, replaceEntranceToken, saveCheckinSettings } from "../services/checkinSettingsService.js";
 import { validateCheckinSettings } from "../middleware/validateCheckin.js";
@@ -18,6 +19,23 @@ router.put("/", validateGymSettings, (request, response, next) => {
     saveGymSettings(request.gymId, request.validatedSettings, request.authUser?.id || null)
         .then((settings) => response.json({ status: "success", data: settings }))
         .catch(next);
+});
+
+// "Move my saved data to the cloud": settings, the reminder message and "Reminded" marks an
+// older version kept in one browser. Fills only what the gym has not saved yet; safe to repeat.
+router.post("/import-local", validateLocalDataImport, async (request, response, next) => {
+    try {
+        const { preferences, expiryReminderTemplate, expiryReminders } = request.localData;
+        const userId = request.authUser?.id || null;
+        const filled = await fillUnsetPreferences(request.gymId, preferences, userId);
+        const templateSaved = expiryReminderTemplate
+            ? await saveTemplateIfUnset("expiry_reminder", expiryReminderTemplate.language, expiryReminderTemplate.body, userId, request.gymId)
+            : false;
+        const reminders = await importExpiryReminders(expiryReminders, userId, request.gymId);
+        response.json({ status: "success", data: { preferences_filled: filled, reminder_message_saved: templateSaved, reminders } });
+    } catch (error) {
+        next(error);
+    }
 });
 
 // Settings > Attendance. Every login can read them; only the owner can change them.

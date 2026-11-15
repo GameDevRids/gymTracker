@@ -22,17 +22,30 @@ export function methodLabel(method) {
 // { status: "idle" | "loading" | "ready" | "error", data, message }
 export const gymSettings = { status: "idle", data: null, message: "" };
 
+// Called with the saved settings whenever they load or change (main.js applies language and dates).
+let onSettingsApplied = () => {};
+export function whenGymSettingsApplied(callback) {
+    onSettingsApplied = typeof callback === "function" ? callback : () => {};
+}
+
 function applyGymSettings(data) {
     gymSettings.data = data;
     gymSettings.status = "ready";
     gymSettings.message = "";
     state.gym.name = data.name || state.gym.name;
-    // Phone and address used to live only in this browser. Until they are saved to the
-    // database, keep showing the browser's values so the owner can save them.
-    if (data.saved || data.phone) state.gym.phone = data.phone || "";
-    if (data.saved || data.address) state.gym.address = data.address || "";
+    state.gym.phone = data.phone || "";
+    state.gym.address = data.address || "";
     state.gym.upiId = data.upi_id || "";
     state.gym.upiPayeeName = data.upi_payee_name || "";
+    // Preferences saved for the gym (migration 015); the server fills in defaults.
+    if (data.date_format) state.gym.dateFormat = data.date_format;
+    if (data.language) state.gym.language = data.language;
+    state.gym.preferences = {
+        expiryReminderDays: Number.isInteger(data.expiry_reminder_days) ? data.expiry_reminder_days : 7,
+        paymentReminders: data.payment_reminders !== false,
+        inactivityReminders: data.inactivity_reminders !== false
+    };
+    onSettingsApplied(data);
 }
 
 export async function loadGymSettings() {

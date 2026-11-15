@@ -1,3 +1,6 @@
+// Test fixture: the fictional workspace older GymPulse versions saved in browsers (seeded into
+// every new workspace, or loaded with "Load sample data"). The app no longer ships it; tests use
+// it to check that assets/js/workspace.js removes exactly these records.
 const firstNames = ["Aarav", "Aisha", "Kabir", "Diya", "Arjun", "Meera", "Rohan", "Ishita", "Vivaan", "Ananya", "Reyansh", "Sana", "Aditya", "Kavya", "Ibrahim", "Tara", "Dev", "Nisha", "Neil", "Simran", "Kunal", "Myra", "Zoya", "Rahul", "Anika", "Samar", "Ira", "Yash", "Riya", "Om", "Sahil", "Avni"];
 const lastNames = ["Sharma", "Patel", "Mehta", "Rao", "Kapoor", "Iyer", "Khan", "Singh", "Desai", "Joshi", "Nair", "Verma", "Malhotra", "Das", "Chopra", "Kulkarni"];
 const planList = [
@@ -110,64 +113,4 @@ export function createDemoState() {
         notifications: [],
         createdAt: new Date().toISOString()
     };
-}
-
-export function createEmptyState() {
-    return {
-        gym: {
-            name: "My Gym", address: "", phone: "",
-            currency: "INR", dateFormat: "DD MMM YYYY",
-            preferences: { expiryReminderDays: 7, paymentReminders: true, inactivityReminders: true }
-        },
-        plans: [],
-        members: [],
-        attendance: [],
-        payments: [],
-        notifications: [],
-        createdAt: new Date().toISOString()
-    };
-}
-
-/**
- * Removes the fictional records that older versions seeded into every new
- * workspace automatically. Records the owner created themselves are kept.
- * Workspaces where the owner explicitly loaded sample data are left alone.
- */
-export function removeLegacyDemoData(saved) {
-    if (!saved || typeof saved !== "object" || saved.sampleDataLoaded) return { state: saved, changed: false };
-    const demo = createDemoState();
-    const idsOf = (list) => new Set(list.map((item) => item.id));
-    const demoMemberIds = idsOf(demo.members);
-    const demoIds = {
-        members: demoMemberIds,
-        plans: idsOf(demo.plans),
-        attendance: idsOf(demo.attendance),
-        payments: idsOf(demo.payments)
-    };
-    const gym = saved.gym && typeof saved.gym === "object" ? saved.gym : {};
-    const demoGymFields = Object.keys(demoGymDetails).filter((key) => gym[key] === demoGymDetails[key]);
-    const hasDemoRecords = Object.entries(demoIds).some(([key, ids]) => Array.isArray(saved[key]) && saved[key].some((item) => ids.has(item?.id)));
-    if (!demoGymFields.length && !hasDemoRecords) return { state: saved, changed: false };
-
-    const emptyGym = createEmptyState().gym;
-    const cleanedGym = { ...gym };
-    demoGymFields.forEach((key) => { cleanedGym[key] = emptyGym[key]; });
-    const keep = (list, ids) => (Array.isArray(list) ? list : []).filter((item) => !ids.has(item?.id) && !demoMemberIds.has(item?.memberId));
-    const state = {
-        ...saved,
-        gym: cleanedGym,
-        members: (Array.isArray(saved.members) ? saved.members : []).filter((member) => !demoMemberIds.has(member?.id)),
-        plans: (Array.isArray(saved.plans) ? saved.plans : []).filter((plan) => !demoIds.plans.has(plan?.id)),
-        attendance: keep(saved.attendance, demoIds.attendance),
-        payments: keep(saved.payments, demoIds.payments)
-    };
-    if (state.whatsapp && Array.isArray(state.whatsapp.conversations)) {
-        const conversations = state.whatsapp.conversations.filter((conversation) => !demoMemberIds.has(conversation?.memberId));
-        state.whatsapp = {
-            ...state.whatsapp,
-            conversations,
-            activeMemberId: demoMemberIds.has(state.whatsapp.activeMemberId) ? conversations[0]?.memberId || "" : state.whatsapp.activeMemberId
-        };
-    }
-    return { state, changed: true };
 }

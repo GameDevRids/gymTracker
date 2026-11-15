@@ -1,90 +1,105 @@
 import {
     state,
-    persist,
-    resetDemo,
-    getPlan,
     getMember,
     memberBalance,
     addPaidAmount,
-    memberListPagination,
-    initializationWarning,
-    loadMembersFromApi,
+    startWorkspace,
+    loadAllMembersFromApi,
     createMemberOnApi,
     updateMemberOnApi,
     updateMemberFieldsOnApi,
+    reloadMemberFromApi,
+    ensureMember,
     setWhatsAppConsentOnApi,
     loadConsentHistory,
-    deleteMemberOnApi,
-    setAsideLegacyAttendance
+    deleteMemberOnApi
 } from "./state.js";
 import { renderDashboard, drawDashboardCharts } from "./modules/dashboard.js";
-import { renderMembers, renderProfile } from "./modules/members.js";
+import { MEMBERS_PAGE_SIZE, filterMembers, renderMemberResults, renderMembers, renderProfile } from "./modules/members.js";
 import { renderPlansPage, loadPlans, setPlanSearch, setPlanStatus, handlePlanAction, handlePlanSubmit, updatePlanDurationField } from "./modules/plans.js";
 import {
     handleMembershipAction,
     loadAllMemberships,
     loadMemberMembershipHistory,
     getCurrentMembership,
+    openAssignmentModal,
+    planNameFor,
+    renewalMemberships,
     setMemberCurrentMembership,
     submitMembershipAssignment,
     updateAssignmentForm
 } from "./modules/memberMemberships.js";
 import { fetchActivePlans } from "./api/plansApi.js";
-import { fetchMembers } from "./api/membersApi.js";
-import { fetchAllMemberPhones, importMembers, validateImportRows } from "./modules/memberImport.js";
+import { handleImportAction, handleImportChange, handleImportFile, openMemberImport } from "./modules/memberImportUi.js";
 import { createMemberPlanAssignment, fetchMemberMembershipHistory } from "./api/membershipsApi.js";
 import { createPayment, fetchMemberPayments } from "./api/paymentsApi.js";
 import { apiClient, clearAuthSession, restoreAuthSession, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
-import { markReminderSent, renderExpiring } from "./modules/expiring.js";
-import { renderOperationsPage, drawAnalyticsCharts } from "./modules/operations.js";
+import { markReminderSent, reminderKey, renderExpiring } from "./modules/expiring.js";
+import { renderOperationsPage, drawAnalyticsCharts, retentionRows } from "./modules/operations.js";
 import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
-import { renderWhatsAppPage, handleWhatsAppAction, handleWhatsAppSubmit, handleWhatsAppChange } from "./modules/whatsapp.js";
-import { applyNavigationTranslations, setLanguage, t } from "./i18n.js";
+import { applyNavigationTranslations, isSupportedLanguage, setLanguage, t } from "./i18n.js";
 import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
-import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, paymentsPage, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel } from "./modules/upiPayments.js";
+import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel, whenGymSettingsApplied } from "./modules/upiPayments.js";
 import { upiIdProblem, UTR_PATTERN } from "./upi.js";
 import { welcomePayment } from "./welcomeMessage.js";
-import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
+import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, pauseCheckinForPhoto, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
 import { handleCheckinSettingsAction, loadCheckinSettings, saveAttendanceSettings } from "./modules/checkinSettingsUi.js";
+import { handlePhotoAction, hydratePhotos, loadProfilePhoto, mountFormPhoto, photoFormField, saveFormPhoto } from "./modules/memberPhotos.js";
 import { usesMemberQr } from "./modules/checkinMethod.js";
 import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
-import { escapeHTML, uid, localISODate, addDays, formatINR, formatDate, formatPhone, formatPlanDuration, memberStatus, parseCSV, downloadCSV, daysBetween, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, setCurrency } from "./utils.js";
-import { loadState, setStorageUser } from "./storage.js";
-import { createDemoState } from "../../data/demo-data.js";
+import { expiryReminderTemplate, handleReminderTemplateAction, handleReminderTemplateEvent, handleReminderTemplateSubmit, loadReminderTemplates, recordExpiryReminder } from "./modules/expiryReminder.js";
+import { currentSummary, loadSummary } from "./modules/summary.js";
+import { forgetEmptyLocalData, handleLocalDataAction, localDataToMove, openLocalDataDialog } from "./modules/localData.js";
+import { escapeHTML, localISODate, indiaISODate, addDays, formatINR, formatDate, formatPlanDuration, downloadCSV, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, visitDay } from "./utils.js";
+import { readUiPreferences, saveUiPreferences } from "./storage.js";
+import { bindAuthPasswordLinks, checkAccountBeforeApp, downloadGymWorkbook, handleAuthPasswordSubmit, handleTermsSubmit, openDeleteGymDialog, reportProblemUrl, setAccountEmail, startPasswordResetIfLinked, submitChangePassword, submitDeleteGym } from "./modules/account.js";
+import { APP_VERSION } from "./version.js";
+import { startErrorReporting } from "./errorReporting.js";
+import { hideSetupChecklist, loadSetupPlans } from "./modules/setupChecklist.js";
 
 const page = document.querySelector("#page-content");
 const viewTitles = {
     expiring: "Expiring soon", overview: "Overview", members: "Members", plans: "Membership plans", attendance: "Attendance", payments: "Payments",
     renewals: "Renewals", retention: "Retention", analytics: "Analytics", reports: "Reports",
-    notifications: "Notifications", whatsapp: "WhatsApp inbox", integrations: "Integrations", settings: "Settings", profile: "Member profile", scan: "Check-in"
+    notifications: "Notifications", integrations: "Integrations", settings: "Settings", profile: "Member profile", scan: "Check-in"
 };
-let currentView = "expiring";
+// Conveniences remembered in this browser (storage.js): the last page, member filters and the
+// Expiring soon window. Everything else comes from the database.
+const uiPreferences = readUiPreferences();
+const MEMBER_FILTERS = ["all", "active", "upcoming", "expired", "cancelled", "unassigned", "suspended"];
+const MEMBER_SORTS = ["name", "expiry", "joined"];
+let currentView = viewTitles[uiPreferences.view] && uiPreferences.view !== "profile" ? uiPreferences.view : "expiring";
 let profileId = "";
-let memberFilters = { search: "", filter: "all", sort: "name", page: 1 };
-let memberSearchTimer;
+let memberFilters = {
+    search: "",
+    filter: MEMBER_FILTERS.includes(uiPreferences.memberFilter) ? uiPreferences.memberFilter : "all",
+    sort: MEMBER_SORTS.includes(uiPreferences.memberSort) ? uiPreferences.memberSort : "name",
+    page: 1
+};
 let memberRequestVersion = 0;
-let importedRows = [];
-let importPlans = [];
-let currentFileName = "members.csv";
 let memberPlanRequest = 0;
 let memberSaving = false;
-let expiringDays = 7;
+let expiringDays = [3, 7, 15, 30].includes(uiPreferences.expiringDays) ? uiPreferences.expiringDays : 7;
 let expiringMemberships = [];
 let expiringStatus = "loading";
-// "loading" until the first members request after sign-in finishes, so the list shows skeletons, not "No members yet".
+// "loading" until every member has loaded after sign-in, so the list shows skeletons, not "No members yet".
 let membersStatus = "loading";
-// Total members in the gym, ignoring search and filters; shown on the Members nav badge.
-let gymMemberTotal = null;
-let memberTotalRequest = 0;
 let expiringRequestVersion = 0;
 let activeSession;
+let localDataOffered = false;
+let profileLoading = "";
 
 function showAuthScreen(onboarding = false, message = "") {
     document.querySelector("#auth-screen").hidden = false;
     document.querySelector("#app-shell").hidden = true;
     document.querySelector(".mobile-bottom-nav").hidden = true;
     document.querySelector("#login-form").hidden = onboarding;
+    document.querySelector("#forgot-password-form").hidden = true;
+    document.querySelector("#reset-password-form").hidden = true;
+    document.querySelector("#terms-form").hidden = true;
+    document.querySelector("#deletion-pending").hidden = true;
+    document.querySelector("#auth-description").hidden = false;
     document.querySelector("#create-gym-form").hidden = !onboarding;
     document.querySelector("#auth-title").textContent = onboarding ? "Create your gym" : "Sign in to GymPulse";
     document.querySelector("#auth-description").textContent = onboarding
@@ -114,19 +129,19 @@ function takeAuthNotice() {
     }
 }
 
-function loadUserWorkspace(userId) {
-    setStorageUser(userId);
-    const savedState = loadState();
-    Object.keys(state).forEach((key) => delete state[key]);
-    Object.assign(state, savedState);
-    // Check-ins now come from the database; browser-saved ones wait for the one-time import.
-    setAsideLegacyAttendance();
-    if (!state.whatsapp) state.whatsapp = {};
-    if (!state.apiMemberPayments) state.apiMemberPayments = {};
+// The gym's language and date format, saved in the database; applied at sign-in and on change.
+function applyGymPreferences({ language, date_format: dateFormat } = {}) {
+    if (isSupportedLanguage(language)) {
+        setLanguage(language);
+        state.gym.language = language;
+    }
+    if (dateFormat) state.gym.dateFormat = dateFormat;
+    setDateFormat(state.gym.dateFormat);
 }
 
 function startAuthenticatedApp(session) {
     activeSession = session;
+    setAccountEmail(session.user?.email);
     document.querySelector("#auth-screen").hidden = true;
     document.querySelector("#app-shell").hidden = false;
     document.querySelector(".mobile-bottom-nav").hidden = false;
@@ -137,38 +152,74 @@ function startAuthenticatedApp(session) {
     document.querySelector(".top-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
     document.querySelector(".profile-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
     state.gym.name = session.gym.name;
+    state.gym.id = session.gym.id;
     state.gym.isDemo = session.gym.is_demo === true;
+    // The owner can import members; other roles cannot (the server checks too).
+    state.gym.role = session.gym.role || "owner";
+    applyGymPreferences(session.gym);
     render();
     refreshMembersFromApi();
     loadExpiringMemberships();
-    // Loaded early so the "Member added" dialog can open WhatsApp without waiting.
+    loadSummary(rerenderSummaryViews);
+    loadSetupPlans(() => { if (currentView === "overview") render(); });
+    // Loaded early so the "Member added" dialog and Expiring soon can open WhatsApp without waiting.
     loadWelcomeTemplates();
+    loadReminderTemplates().then(() => { if (["expiring", "settings"].includes(currentView)) render(); });
     loadAttendanceFeed(rerenderAttendanceViews);
     // The gym's one check-in method decides what the Check-in screen, profile and cards show.
     loadCheckinSettings().then(() => {
         rerenderForCheckinMethod();
         watchApprovals(() => { if (["scan", "profile"].includes(currentView)) render(); });
     });
-    // Gym phone, address and UPI details live in the database.
-    loadGymSettings().then(() => { if (currentView === "settings") render(); });
-    loadAllMemberships(() => {
-        if (currentView === "overview") render();
+    // Gym phone, address, UPI details and preferences live in the database.
+    whenGymSettingsApplied((settings) => applyGymPreferences(settings));
+    loadGymSettings().then(() => {
+        if (currentView === "settings") render();
+        offerLocalDataMove();
     });
+    loadAllMemberships(() => {
+        if (["overview", "members", "renewals", "retention", "notifications"].includes(currentView)) render();
+    });
+    loadPaymentsPage(() => { if (["payments", "overview", "notifications"].includes(currentView)) render(); });
+}
+
+// Once per page load: an older version's data still in this browser is offered for the move.
+function offerLocalDataMove() {
+    forgetEmptyLocalData();
+    if (localDataOffered || !localDataToMove()?.any) return;
+    localDataOffered = true;
+    if (!document.querySelector("#modal-root .modal")) openLocalDataDialog();
+}
+
+// After "Move my saved data to the cloud": reload what the move changed.
+function afterLocalDataMove() {
+    loadGymSettings().then(() => render());
+    loadReminderTemplates({ force: true }).then(() => render());
+    loadExpiringMemberships();
+    loadAttendanceFeed(rerenderAttendanceViews);
+    render();
 }
 
 function acceptSession(session) {
-    loadUserWorkspace(session.user.id);
+    startWorkspace(session.user.id);
     setAuthSession(session);
     activeSession = session;
-    if (!session.gym) {
-        showAuthScreen(true);
-        return;
-    }
-    startAuthenticatedApp(session);
+    // Terms first (once per version), then the app, or the "scheduled for deletion" screen.
+    checkAccountBeforeApp(session, () => {
+        if (!session.gym) showAuthScreen(true);
+        else startAuthenticatedApp(session);
+    });
 }
 
-function expiryReminderTemplate() {
-    return state.whatsapp.expiryReminderTemplate || "Hi {name}, your {plan} membership expires on {expiry_date}. We would love to see you again!";
+// Pages that show gym-wide totals redraw when they arrive.
+function rerenderSummaryViews() {
+    if (["overview", "analytics", "payments"].includes(currentView)) render();
+}
+
+// Totals, the member's balance and the payments list change after payments, plans and archives.
+function refreshTotals(memberId = "") {
+    loadSummary(rerenderSummaryViews);
+    if (memberId) reloadMemberFromApi(memberId).then(() => { if (["profile", "members", "renewals"].includes(currentView)) render(); }).catch(() => {});
 }
 
 function mapPayment(payment) {
@@ -186,9 +237,13 @@ function mapPayment(payment) {
     };
 }
 
+// "Reminded" marks come from the database: each expiring row has reminded_at for its end date.
+function remindedKeys() {
+    return new Set(expiringMemberships.filter((membership) => membership.reminded_at).map((membership) => reminderKey(membership)));
+}
+
 function render() {
     setDateFormat(state.gym.dateFormat || "DD MMM YYYY");
-    setCurrency(state.gym.currency || "INR");
     applyNavigationTranslations();
     document.querySelectorAll(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === currentView));
     // Keep the active page visible: open "More" whenever the current page lives inside it.
@@ -200,56 +255,59 @@ function render() {
         link.setAttribute("aria-current", active ? "page" : "false");
     });
     document.querySelector('[data-action="mobile-more"]')?.classList.toggle("active", !mobilePrimaryViews.includes(currentView));
-    const translatedViews = ["expiring", "overview", "members", "plans", "attendance", "payments", "renewals", "retention", "analytics", "reports", "notifications", "whatsapp", "integrations", "settings"];
+    const translatedViews = ["expiring", "overview", "members", "plans", "attendance", "payments", "renewals", "retention", "analytics", "reports", "notifications", "integrations", "settings"];
     document.querySelector("#current-page").textContent = translatedViews.includes(currentView) ? t(currentView) : viewTitles[currentView] || "Overview";
-    document.querySelector("#member-count").textContent = gymMemberTotal ?? "";
+    document.querySelector("#member-count").textContent = membersStatus === "ready" ? state.members.length : "";
     document.querySelector("#gym-name-label").textContent = state.gym.name;
     document.querySelector(".gym-avatar").textContent = state.gym.name.trim().slice(0, 1).toUpperCase() || "G";
     const now = new Date();
     document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(now);
     if (currentView === "expiring") {
-        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiringDays, expiryReminderTemplate(), new Set(Object.keys(state.expiryReminders || {})));
+        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiringDays, expiryReminderTemplate(), remindedKeys());
     } else if (currentView === "overview") {
         page.innerHTML = renderDashboard();
         drawDashboardCharts();
     } else if (currentView === "members") {
-        page.innerHTML = renderMembers({ ...memberFilters, pagination: memberListPagination, loading: membersStatus === "loading" });
+        page.innerHTML = renderMembers({ ...memberFilters, loading: membersStatus === "loading" });
     } else if (currentView === "plans") {
         page.innerHTML = renderPlansPage();
-    } else if (currentView === "whatsapp") {
-        page.innerHTML = renderWhatsAppPage();
     } else if (currentView === "profile") {
-        page.innerHTML = renderProfile(profileId);
+        page.innerHTML = profileLoading === profileId && !getMember(profileId)
+            ? `<div class="empty-state" role="status">Loading member…</div>`
+            : renderProfile(profileId);
     } else if (currentView === "scan") {
         // The camera keeps running across re-renders, so the member-QR page is drawn once;
         // the poster front desk is redrawn whenever approvals or today's check-ins change.
-        const cameraPage = usesMemberQr() && !state.sampleDataLoaded;
+        const cameraPage = usesMemberQr();
         if (!cameraPage || !page.querySelector("#scanner-root")) page.innerHTML = renderCheckInPage();
         startCheckInScreen(rerenderCheckIn);
     } else {
         page.innerHTML = renderOperationsPage(currentView);
         if (currentView === "analytics") drawAnalyticsCharts();
     }
-    if (state.sampleDataLoaded) {
-        page.insertAdjacentHTML("afterbegin", `<div class="note-box" role="status"><strong>DEMO SAMPLE DATA</strong> — fictional browser-only records; not stored in your gym database.</div>`);
+    // Member photos load after the page is drawn, from short-lived signed URLs.
+    hydratePhotos(page);
+}
+
+// After a photo is added, changed, removed, approved or rejected.
+function rerenderAfterPhoto(memberId) {
+    if (currentView === "profile" && profileId === memberId) {
+        loadProfilePhoto(memberId, () => { if (currentView === "profile" && profileId === memberId) render(); });
+        loadProfileConsent(memberId);
+    } else if (currentView === "scan") {
+        rerenderCheckIn();
+    } else {
+        render();
     }
 }
 
-async function refreshMembersFromApi({ silent = false, page: requestedPage = memberFilters.page } = {}) {
+// Loads every member of the gym, so every page covers the whole gym.
+async function refreshMembersFromApi({ silent = false } = {}) {
     const requestVersion = ++memberRequestVersion;
-    memberFilters.page = requestedPage;
     try {
-        const members = await loadMembersFromApi({
-            page: requestedPage,
-            limit: 100,
-            status: memberFilters.filter === "suspended" ? "suspended" : undefined,
-            search: memberFilters.search
-        });
+        await loadAllMembersFromApi();
         if (requestVersion !== memberRequestVersion) return;
-        state.members = members;
         membersStatus = "ready";
-        if (!memberFilters.search && memberFilters.filter !== "suspended") setGymMemberTotal(memberListPagination.total);
-        else refreshMemberTotal();
         if (!silent) render();
     } catch (error) {
         if (requestVersion === memberRequestVersion) {
@@ -262,24 +320,17 @@ async function refreshMembersFromApi({ silent = false, page: requestedPage = mem
     }
 }
 
-function setGymMemberTotal(total) {
-    memberTotalRequest += 1;
-    gymMemberTotal = Number(total) || 0;
+function updateMemberCount() {
     const badge = document.querySelector("#member-count");
-    if (badge) badge.textContent = gymMemberTotal;
+    if (badge) badge.textContent = state.members.length;
 }
 
-// Asks for one row of the unfiltered list just to read its total.
-async function refreshMemberTotal() {
-    const request = ++memberTotalRequest;
-    try {
-        const response = await fetchMembers({ page: 1, limit: 1 });
-        if (request !== memberTotalRequest) return;
-        const total = response?.total ?? response?.data?.pagination?.total;
-        if (total !== undefined) setGymMemberTotal(total);
-    } catch (error) {
-        console.error("GymPulse could not load the member total.", error);
-    }
+// Typing in the search box redraws only the results, so the box keeps its focus.
+function renderMembersResults() {
+    const results = document.querySelector("#members-results");
+    if (currentView !== "members" || !results || membersStatus === "loading") return render();
+    results.innerHTML = renderMemberResults(memberFilters);
+    hydratePhotos(results);
 }
 
 // Pages that read check-ins redraw when the database feed arrives.
@@ -308,27 +359,43 @@ function navigate(view) {
     if (currentView === "scan" && view !== "scan") stopCheckInScreen();
     currentView = view;
     if (view !== "profile") profileId = "";
+    saveUiPreferences({ view });
+    if (view === "overview") loadSetupPlans(() => { if (currentView === "overview") render(); });
     render();
     if (view === "expiring") loadExpiringMemberships();
     if (view === "plans") loadPlans(renderPlansIfCurrent);
+    if (["overview", "analytics", "payments"].includes(view)) loadSummary(rerenderSummaryViews);
     if (view === "settings") {
         const renderSettings = () => { if (currentView === "settings") render(); };
         loadWelcomeTemplates({ force: true }).then(renderSettings);
+        loadReminderTemplates({ force: true }).then(renderSettings);
         loadGymSettings().then(renderSettings);
         loadCheckinSettings().then(renderSettings);
     }
     if (view === "attendance") loadAttendanceFeed(rerenderAttendanceViews);
-    if (view === "payments" && !state.sampleDataLoaded) loadPaymentsPage(() => { if (currentView === "payments") render(); });
-    if (view === "profile" && profileId) {
+    if (["payments", "notifications"].includes(view)) loadPaymentsPage(() => { if (currentView === view) render(); });
+    if (view === "profile" && profileId && !getMember(profileId)) {
+        // A member who is not loaded yet (for example just added on another phone).
+        const wanted = profileId;
+        profileLoading = wanted;
+        render();
+        ensureMember(wanted)
+            .catch((error) => toast(error.message || "This member could not be loaded.", "error"))
+            .finally(() => {
+                if (profileLoading === wanted) profileLoading = "";
+                if (currentView === "profile" && profileId === wanted) navigate("profile");
+            });
+    } else if (view === "profile" && profileId) {
         loadMemberMembershipHistory(profileId);
         loadMemberPaymentsFromApi(profileId);
         loadProfileConsent(profileId);
         loadProfileWelcome(profileId);
+        const photoFor = profileId;
+        loadProfilePhoto(photoFor, () => { if (currentView === "profile" && profileId === photoFor) render(); });
         const visitsFor = profileId;
         loadMemberDevices(visitsFor, () => { if (currentView === "profile" && profileId === visitsFor) render(); });
         loadMemberAttendance(visitsFor, () => { if (currentView === "profile" && profileId === visitsFor) render(); });
     }
-    if (initializationWarning) toast(initializationWarning, "error");
     page.focus({ preventScroll: true });
     closeMobileMenu();
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -346,9 +413,27 @@ async function loadExpiringMemberships() {
     } catch (error) {
         if (requestVersion !== expiringRequestVersion) return;
         expiringMemberships = [];
+        // renderExpiring shows an object status as an error message with "Try again".
         expiringStatus = { message: error.message || "Unable to load expiring memberships." };
     }
     if (currentView === "expiring") render();
+}
+
+/**
+ * "Remind on WhatsApp": WhatsApp opens through the link itself; this marks the card and logs the
+ * reminder for the membership's current end date, so every device shows it as reminded.
+ */
+async function recordReminderClick(link) {
+    const key = markReminderSent(link);
+    if (!key) return;
+    const membership = expiringMemberships.find((row) => reminderKey(row) === key);
+    if (membership) membership.reminded_at = new Date().toISOString();
+    try {
+        const message = new URL(link.href).searchParams.get("text") || "";
+        await recordExpiryReminder({ memberId: link.dataset.memberId, membershipId: link.dataset.membershipId, body: message });
+    } catch (error) {
+        toast(`WhatsApp was opened, but the reminder was not saved: ${error.message || "please try again"}`, "error");
+    }
 }
 
 async function loadMemberPaymentsFromApi(memberId, { silent = false } = {}) {
@@ -400,26 +485,10 @@ function closeMobileMenu() {
     document.querySelector("#mobile-menu").setAttribute("aria-expanded", "false");
 }
 
-// Reminders are remembered in this browser only, keyed by membership and end date.
-function recordExpiryReminder(key) {
-    const cutoff = localISODate(new Date(Date.now() - 90 * 86400000));
-    const kept = Object.entries(state.expiryReminders || {}).filter(([savedKey]) => savedKey.split(":").pop() >= cutoff);
-    state.expiryReminders = { ...Object.fromEntries(kept), [key]: new Date().toISOString() };
-    try {
-        persist();
-    } catch (error) {
-        toast(error.message || "The reminder could not be saved in this browser.", "error");
-    }
-}
-
+// Redraws after a change that is already saved in the database, with an optional message.
 function safePersist(message = "Changes saved.") {
-    try {
-        persist();
-        render();
-        if (message) toast(message);
-    } catch (error) {
-        toast(error.message || "Unable to save changes.", "error");
-    }
+    render();
+    if (message) toast(message);
 }
 
 function setField(name, label, value = "", type = "text", required = false, extra = "") {
@@ -428,13 +497,6 @@ function setField(name, label, value = "", type = "text", required = false, extr
 
 function memberPlanOptions(plans, selected = "") {
     return plans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-price="${Number(plan.price)}" data-days="${Number(plan.duration_days)}" ${plan.id === selected ? "selected" : ""}>${escapeHTML(plan.name)} — ${escapeHTML(formatPlanDuration(plan.duration_days))} — ${formatINR(plan.price)}</option>`).join("");
-}
-
-function demoRenewalPlanOptions(selected = "") {
-    return state.plans
-        .filter((plan) => plan.active)
-        .map((plan) => `<option value="${escapeHTML(plan.id)}" data-price="${plan.price}" data-days="${plan.durationDays}" ${plan.id === selected ? "selected" : ""}>${escapeHTML(plan.name)} · ${formatINR(plan.price)}</option>`)
-        .join("");
 }
 
 function renderMemberPlanField(status, plans = []) {
@@ -470,8 +532,9 @@ function renderMemberFormBody(member, planStatus = "loading", plans = []) {
             ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
             <p class="helper-text field full" id="member-assignment-error" role="alert" hidden></p>
             <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member agrees to receive WhatsApp updates</label><span class="helper-text">${member?.whatsappOptIn && member.whatsappOptInAt ? `Consent recorded on ${escapeHTML(formatDate(member.whatsappOptInAt.slice(0, 10)))}. ` : ""}Only tick this when the member has agreed. Every change is kept in their consent history, and reminders skip members without consent.</span></div>
+            ${!isEdit ? photoFormField("form") : ""}
             <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes">${escapeHTML(member?.notes || "")}</textarea></div>
-            <p class="helper-text field full">Phone numbers must be unique. For imports, use columns: name, phone, email, plan, joinedAt, startDate, expiryDate.</p>
+            <p class="helper-text field full">Each member needs their own phone number.</p>
         </form>`;
     return body;
 }
@@ -515,7 +578,10 @@ function openMemberForm(memberId = "") {
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit" form="member-form" ${isEdit ? "" : "disabled"}>${isEdit ? "Save changes" : "Add member"}</button>`
     });
     const form = document.querySelector("#member-form");
-    if (!isEdit) loadMemberFormPlans(form);
+    if (!isEdit) {
+        loadMemberFormPlans(form);
+        mountFormPhoto(form);
+    }
 }
 
 const EXPIRY_PLACEHOLDER = "Choose a plan to see the expiry date";
@@ -567,11 +633,13 @@ function openQuickAddMemberForm() {
             <div class="field"><label for="quick-phone">${t("phone")} *</label><input id="quick-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="quick-phone-error"><span id="quick-phone-error" class="helper-text phone-error" role="alert" hidden>${t("phoneHelp")}</span></div>
             <div id="quick-plan-field">${renderQuickAddPlanField("loading")}</div>
             ${consentField()}
+            ${photoFormField("quick")}
             <p class="helper-text" id="quick-assignment-error" role="alert" hidden></p>
         </form>`,
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">${t("cancel")}</button><button class="button button-primary" type="submit" form="quick-member-form" disabled>${t("addAssign")}</button>`
     });
     loadQuickAddPlans(document.querySelector("#quick-member-form"));
+    mountFormPhoto(document.querySelector("#quick-member-form"));
 }
 
 function consentField() {
@@ -627,7 +695,7 @@ async function saveQuickMember(form) {
         if (duplicate) throw new Error(`This phone number already belongs to ${duplicate.name}.`);
         member = await createMemberOnApi({ name, phone });
         if (!member?.id) throw new Error("The member was not returned by the backend.");
-        refreshMemberTotal();
+        updateMemberCount();
         form.dataset.createdMemberId = member.id;
         form.dataset.createdPlanId = planId;
         form.dataset.createdStartDate = startDate;
@@ -651,34 +719,27 @@ async function saveQuickMember(form) {
     const index = state.members.findIndex((item) => item.id === member.id);
     if (index >= 0) state.members[index] = updatedMember;
     await recordFormConsent(member.id, form.elements.whatsappOptIn.checked);
+    await saveFormPhoto(form, member.id);
     const error = form.querySelector("#quick-assignment-error");
     if (error) error.hidden = true;
+    refreshTotals(member.id);
     await finishMemberSave(member.id, "Member added and plan assigned.");
 }
 
-function openPaymentForm(memberId = "", membershipId = "", suggestedAmount = "") {
+async function openPaymentForm(memberId = "", membershipId = "", suggestedAmount = "") {
     let member = memberId ? getMember(memberId) : null;
     if (!member && memberId) {
-        const expiring = expiringMemberships.find((item) => item.member.id === memberId);
-        if (expiring) {
-            member = {
-                id: memberId,
-                name: expiring.member.full_name,
-                phone: expiring.member.phone,
-                planId: expiring.plan_id,
-                currentMembership: expiring,
-                membershipStatus: expiring.effective_status,
-                startDate: expiring.start_date,
-                expiryDate: expiring.end_date,
-                totalFees: Number(expiring.price),
-                status: "active"
-            };
-            state.members.unshift(member);
+        // Not loaded yet (for example Record payment on Expiring soon right after sign-in):
+        // read the whole member from the database instead of guessing from the list row.
+        try {
+            member = await ensureMember(memberId);
+        } catch (error) {
+            return toast(error.message || "Member was not found.", "error");
         }
     }
     if (memberId && !member) return toast("Member was not found.", "error");
     const membership = member ? getCurrentMembership(member.id) || member.currentMembership : null;
-    const choices = state.members.map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)} · ${escapeHTML(item.memberCode || item.id)}</option>`).join("");
+    const choices = [...state.members].sort((a, b) => a.name.localeCompare(b.name)).map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)}${item.memberCode ? ` · ${escapeHTML(item.memberCode)}` : ""}</option>`).join("");
     // Expiring soon passes the plan price: that payment is for the renewal. Otherwise the
     // amount is filled with the balance due, read from the database.
     const renewal = suggestedAmount !== "" && suggestedAmount !== undefined && suggestedAmount !== null;
@@ -758,39 +819,6 @@ function onPaymentFormEdit(target) {
     return true;
 }
 
-function openCheckInForm(memberId = "") {
-    const member = memberId ? getMember(memberId) : null;
-    const choices = state.members.map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)} · ${escapeHTML(item.id)}</option>`).join("");
-    openModal({
-        title: "Check in a member",
-        subtitle: "Select a member to record an attendance event.",
-        body: `<form id="checkin-form"><div class="field"><label for="form-memberId">Member *</label><select id="form-memberId" name="memberId" required><option value="">Select a member</option>${choices}</select></div>
-            <div class="note-box" style="margin-top:13px">A second check-in for the same member on the same day will be prevented.</div>
-            <div id="checkin-warning" class="helper-text" style="margin-top:9px"></div></form>`,
-        footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-primary" type="submit" form="checkin-form">Record check-in</button>`
-    });
-}
-
-function openRenewForm(memberId) {
-    const member = getMember(memberId);
-    if (!member) return toast("Member was not found.", "error");
-    const selectedPlan = getPlan(member.planId) || state.plans.find((plan) => plan.active);
-    const start = member.expiryDate >= localISODate() ? addDays(member.expiryDate, 1) : localISODate();
-    openModal({
-        title: `Renew ${escapeHTML(member.name)}'s membership`,
-        subtitle: "Previous membership activity will remain in the renewal history.",
-        body: `<form id="renew-form" data-id="${escapeHTML(member.id)}" class="form-grid">
-            <div class="field full"><label for="form-planId">New plan *</label><select id="form-planId" name="planId" required>${demoRenewalPlanOptions(selectedPlan?.id)}</select></div>
-            ${setField("startDate", "New start date", start, "date", true)}
-            ${setField("expiryDate", "New expiry date", addDays(start, selectedPlan?.durationDays || 30), "date", true)}
-            ${setField("amount", "Payment collected now (₹)", selectedPlan?.price || 0, "number", true, 'min="0" step="1"')}
-            <div class="field"><label for="form-method">Payment method</label><select id="form-method" name="method">${["UPI", "Cash", "Card", "Bank transfer", "Other"].map((method) => `<option>${method}</option>`).join("")}</select></div>
-            <div class="field full helper-text">New membership fee will be added to the member's billed fees. Any partial payment remains outstanding.</div>
-        </form>`,
-        footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-primary" type="submit" form="renew-form">Save renewal</button>`
-    });
-}
-
 function askDeleteMember(memberId) {
     const member = getMember(memberId);
     if (!member) return toast("Member was not found.", "error");
@@ -801,54 +829,11 @@ function askDeleteMember(memberId) {
     });
 }
 
-function openReceipt(paymentId) {
-    const payment = state.payments.find((item) => item.id === paymentId)
-        || Object.values(state.apiMemberPayments).flat().find((item) => item.id === paymentId);
-    if (!payment) return toast("Payment was not found.", "error");
-    const member = getMember(payment.memberId);
-    const shareText = `Payment receipt for ${member?.name || "member"}: ${formatINR(payment.amount)} on ${formatDate(payment.date)}. Receipt ${payment.id}.`;
-    const sharePhone = normalizeIndianPhone(member?.phone || "").replace(/\D/g, "");
-    const shareUrl = member && /^[6-9]\d{9}$/.test(sharePhone)
-        ? `https://wa.me/91${sharePhone}?text=${encodeURIComponent(shareText)}`
-        : "";
-    openModal({
-        title: "Payment receipt preview",
-        subtitle: "A local preview only; this is not a tax invoice.",
-        body: `<div class="card" style="padding:18px"><div style="font:800 17px Manrope,sans-serif;color:#173f32">${escapeHTML(state.gym.name)}</div><p class="helper-text">${escapeHTML(state.gym.address || "")}</p><hr style="border:0;border-top:1px solid #e8ede7"><div class="profile-fields">${receiptRow("Transaction ID", payment.id)}${receiptRow("Member", member?.name || "Removed member")}${receiptRow("Date", formatDate(payment.date))}${receiptRow("Method", payment.method)}${receiptRow("Status", payment.status)}${receiptRow("Amount", formatINR(payment.amount))}</div><p class="helper-text" style="margin-top:15px">Manually recorded payment · no gateway transaction</p></div>`,
-        footer: `${shareUrl ? `<a class="button button-secondary" href="${escapeHTML(shareUrl)}" target="_blank" rel="noopener noreferrer">Share via WhatsApp</a>` : ""}<button class="button button-secondary" data-action="print-receipt" data-id="${escapeHTML(payment.id)}">Print receipt</button><button class="button button-primary" data-action="close-modal">Done</button>`
-    });
-}
-
-function printReceipt(paymentId) {
-    const payment = state.payments.find((item) => item.id === paymentId)
-        || Object.values(state.apiMemberPayments).flat().find((item) => item.id === paymentId);
-    if (!payment) return toast("Payment was not found.", "error");
-    const member = getMember(payment.memberId);
-    const popup = window.open("", "_blank");
-    if (!popup) return toast("Allow pop-ups to print this receipt.", "error");
-    popup.opener = null;
-    const rows = [
-        ["Receipt", payment.id],
-        ["Member", member?.name || "Removed member"],
-        ["Phone", formatPhone(member?.phone) || "—"],
-        ["Date", formatDate(payment.date)],
-        ["Method", payment.method],
-        ["Amount", formatINR(payment.amount)]
-    ];
-    popup.document.write(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Payment receipt</title><style>body{font:16px Arial,sans-serif;max-width:640px;margin:40px auto;padding:24px;color:#173f32}h1{font-size:24px}table{width:100%;border-collapse:collapse}td{padding:10px;border-bottom:1px solid #ddd}td:first-child{color:#536057}strong{font-size:22px}</style><h1>${escapeHTML(state.gym.name)} · Payment receipt</h1><p>${escapeHTML(state.gym.address || "")}</p><table>${rows.map(([label, value]) => `<tr><td>${escapeHTML(label)}</td><td>${escapeHTML(value)}</td></tr>`).join("")}</table><p>This is a manually recorded payment receipt, not a tax invoice.</p></html>`);
-    popup.document.close();
-    popup.focus();
-    popup.print();
-}
-
-function receiptRow(label, value) {
-    return `<div><label>${escapeHTML(label)}</label><strong>${escapeHTML(value)}</strong></div>`;
-}
-
 function handleAction(action, target) {
     const id = target.dataset.id || "";
     switch (action) {
         case "close-modal": closeModal(); break;
+        case "hide-setup": hideSetupChecklist(); render(); break;
         case "add-member": openMemberForm(); break;
         case "quick-add-member": openQuickAddMemberForm(); break;
         case "mobile-more": openMobileMenu(); break;
@@ -859,8 +844,8 @@ function handleAction(action, target) {
             (async () => {
                 try {
                     await deleteMemberOnApi(id);
-                    refreshMemberTotal();
-                    state.payments = state.payments.filter((payment) => payment.memberId !== id);
+                    updateMemberCount();
+                    refreshTotals();
                     state.attendance = state.attendance.filter((record) => record.memberId !== id);
                     closeModal();
                     safePersist("Member archived; linked records were preserved.");
@@ -871,41 +856,33 @@ function handleAction(action, target) {
             break;
         }
         case "record-payment": openPaymentForm(id, target.dataset.membershipId || "", target.dataset.amount || ""); break;
-        // Sample data keeps its browser-only check-ins; real members are checked in on the server.
         case "check-in":
-            if (state.sampleDataLoaded) openCheckInForm(id);
-            else if (id) manualCheckIn(id, () => { rerenderAttendanceViews(); loadMemberAttendance(id, rerenderAttendanceViews); });
+            if (id) manualCheckIn(id, () => { rerenderAttendanceViews(); loadMemberAttendance(id, rerenderAttendanceViews); });
             else openCheckInByName();
             break;
         case "qr-check-in": navigate("scan"); break;
-        case "check-out": checkOut(id); break;
-        case "renew-member": openRenewForm(id); break;
+        // A renewal is a new plan in the database, starting after the current one ends.
+        case "renew-member": openAssignmentModal(id, { renew: true }); break;
+        case "retry-summary": loadSummary(rerenderSummaryViews); render(); break;
         case "export-members": exportMembers(); break;
         case "export-payments": exportPayments(); break;
         case "export-renewals": exportRenewals(); break;
         case "export-retention": exportRetention(); break;
         case "export-analytics": exportAnalytics(); break;
         case "download-report": downloadReport(); break;
-        case "import-csv": document.querySelector("#csv-file").click(); break;
-        case "confirm-import": confirmImport(); break;
-        case "copy-message": copyMessage(target.dataset.message || ""); break;
-        // Database payments open the receipt from the server; sample data keeps the local preview.
-        case "receipt":
-            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) openReceiptDialog(id);
-            else openReceipt(id);
+        case "download-workbook": downloadGymWorkbook(); break;
+        case "delete-gym": openDeleteGymDialog(openModal); break;
+        case "report-problem": {
+            const url = reportProblemUrl({ view: currentView, version: APP_VERSION });
+            if (url) window.open(url, "_blank", "noopener");
             break;
-        case "print-receipt": printReceipt(id); break;
-        case "reset-demo": resetDemoData(); break;
-        case "load-sample-data": if (state.gym.isDemo) loadSampleData(); break;
+        }
+        case "import-csv": openMemberImport(); break;
+        case "copy-message": copyMessage(target.dataset.message || ""); break;
+        // Receipts are numbered and kept by the server.
+        case "receipt": openReceiptDialog(id); break;
         default: break;
     }
-}
-
-function checkOut(attendanceId) {
-    const record = state.attendance.find((item) => item.id === attendanceId);
-    if (!record || record.checkedOutAt) return toast("This attendance record is not available for check-out.", "error");
-    record.checkedOutAt = new Date().toISOString();
-    safePersist("Check-out recorded.");
 }
 
 function updateMemberFormDefaults(target) {
@@ -916,22 +893,8 @@ function updateMemberFormDefaults(target) {
         form.elements.totalFees.value = option?.value ? option.dataset.price : "";
         updateMemberAssignmentPreview(form);
     }
-    if ((form.id === "renew-form" || form.id === "member-form") && target.name === "planId" && form.id === "renew-form") {
-        const option = target.selectedOptions[0];
-        const startDate = form.elements.startDate.value;
-        form.elements.expiryDate.value = addDays(startDate, Number(option?.dataset.days || 30));
-        form.elements.amount.value = option?.dataset.price || "0";
-    }
-    if (form.id === "renew-form" && target.name === "startDate") {
-        const option = form.elements.planId.selectedOptions[0];
-        form.elements.expiryDate.value = addDays(target.value, Number(option?.dataset.days || 30));
-    }
     if (form.id === "member-form" && target.name === "assignmentStartDate") {
         updateMemberAssignmentPreview(form);
-    }
-    if (form.id === "checkin-form" && target.name === "memberId") {
-        const member = getMember(target.value);
-        document.querySelector("#checkin-warning").textContent = member && memberStatus(member) === "expired" ? "This membership has expired. Submitting will require confirmation." : "";
     }
 }
 
@@ -956,28 +919,6 @@ function phoneDigits(phone) {
     if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
     if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
     return digits;
-}
-
-function uniqueMemberId() {
-    let id = uid("GP");
-    while (state.members.some((member) => member.id === id)) id = uid("GP");
-    return id;
-}
-
-function adjustCharges(charges, totalFees, date) {
-    const updated = charges?.length
-        ? charges.map((charge) => ({ ...charge, amount: Number(charge.amount) || 0 }))
-        : [{ amount: Number(totalFees), date }];
-    let difference = Number(totalFees) - updated.reduce((sum, charge) => sum + charge.amount, 0);
-    if (difference > 0) updated[updated.length - 1].amount += difference;
-    else {
-        for (let index = updated.length - 1; index >= 0 && difference < 0; index -= 1) {
-            const reduction = Math.min(updated[index].amount, Math.abs(difference));
-            updated[index].amount -= reduction;
-            difference += reduction;
-        }
-    }
-    return updated.filter((charge) => charge.amount > 0);
 }
 
 async function saveMember(form) {
@@ -1016,35 +957,28 @@ async function saveMember(form) {
         ? form.dataset.pendingStartDate || form.elements.assignmentStartDate.value
         : current?.startDate || "";
     if (isNewMember && !startDate) throw new Error("Choose a membership start date.");
-    const expiryDate = isNewMember ? form.elements.assignmentEndDate.value : current?.expiryDate || "";
 
     const record = {
-        id: current?.id || uniqueMemberId(),
         memberCode: current?.memberCode || "",
         name,
         phone,
         email: String(values.get("email") || "").trim(),
         dob: String(values.get("dob") || ""),
         gender: String(values.get("gender") || ""),
-        planId: plan?.id || current?.planId || "",
-        startDate,
-        expiryDate,
-        totalFees,
         status: String(values.get("status") || current?.status || "active"),
         emergencyContact: String(values.get("emergencyContact") || "").trim(),
         whatsappOptIn: values.has("whatsappOptIn"),
         notes: String(values.get("notes") || "").trim(),
-        renewals: current?.renewals || [],
-        followUpStatus: current?.followUpStatus || "pending",
-        charges: current?.charges || [{ amount: totalFees, date: startDate }]
+        followUpStatus: current?.followUpStatus || "pending"
     };
 
+    // The server answers with the whole member (fees, payments, plan), stored as it is.
     const saved = current
         ? await updateMemberOnApi(current.id, record)
         : await createMemberOnApi(record);
     if (!saved?.id) throw new Error("The member was not returned by the backend.");
     let createdAssignment = null;
-    if (isNewMember && !current) refreshMemberTotal();
+    if (isNewMember && !current) updateMemberCount();
     if (isNewMember) {
         form.dataset.createdMemberId = saved.id;
         form.dataset.id = saved.id;
@@ -1074,29 +1008,16 @@ async function saveMember(form) {
         form.dataset.assignedEndDate = assignment.end_date;
     }
 
-    if (saved) {
-        const normalized = {
-            ...(current || record),
-            ...saved,
-            planId: createdAssignment?.plan_id || current?.planId || record.planId,
-            currentMembership: createdAssignment || current?.currentMembership || saved.currentMembership || null,
-            membershipStatus: createdAssignment?.effective_status || current?.membershipStatus || saved.membershipStatus || "unassigned",
-            startDate: createdAssignment?.start_date || current?.startDate || record.startDate,
-            expiryDate: createdAssignment?.end_date || current?.expiryDate || record.expiryDate,
-            totalFees,
-            emergencyContact: record.emergencyContact,
-            charges: record.charges,
-            renewals: record.renewals,
-            followUpStatus: record.followUpStatus
-        };
-        const targetIndex = state.members.findIndex((member) => member.id === normalized.id);
-        if (targetIndex >= 0) state.members[targetIndex] = normalized;
-        else state.members.unshift(normalized);
-        if (createdAssignment) setMemberCurrentMembership(normalized.id, createdAssignment);
+    if (createdAssignment) {
+        setMemberCurrentMembership(saved.id, createdAssignment);
+        // Shown at once; refreshTotals below reads the server's figure.
+        const stored = getMember(saved.id);
+        if (stored) stored.totalFees = Number(createdAssignment.total_fees ?? totalFees);
     }
 
     // Consent changes go through their own endpoint so the database records them in the history.
     await recordFormConsent(saved.id, record.whatsappOptIn);
+    if (isNewMember) await saveFormPhoto(form, saved.id);
 
     if (initialPayment > 0) {
         const payment = await createPayment({
@@ -1116,6 +1037,7 @@ async function saveMember(form) {
         ];
     }
 
+    if (isNewMember) refreshTotals(saved.id);
     if (isNewMember) {
         await finishMemberSave(saved.id, "New member added and plan assigned.");
         return;
@@ -1157,184 +1079,175 @@ async function savePayment(form) {
     if (member.memberCode) addPaidAmount(member.id, mapped.amount);
     state.apiMemberPayments[member.id] = [mapped, ...(state.apiMemberPayments[member.id] || []).filter((item) => item.id !== mapped.id)];
     safePersist(null);
-    if (currentView === "payments" && !state.sampleDataLoaded) loadPaymentsPage(() => { if (currentView === "payments") render(); });
+    loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
+    refreshTotals(member.id);
     await openReceiptDialog(saved.id, { recorded: true });
 }
 
-function saveRenewal(form) {
-    const member = getMember(form.dataset.id);
-    if (!member) throw new Error("Member was not found.");
-    const values = new FormData(form);
-    const plan = getPlan(String(values.get("planId") || ""));
-    if (!plan || !plan.active) throw new Error("Choose an active membership plan.");
-    const amount = Number(values.get("amount"));
-    if (!Number.isFinite(amount) || amount < 0 || amount > plan.price) throw new Error("Payment must be between zero and the plan price.");
-    const startDate = String(values.get("startDate"));
-    const expiryDate = String(values.get("expiryDate"));
-    if (!startDate || !expiryDate || expiryDate < startDate) throw new Error("Enter a valid membership date range.");
-    const renewal = { date: localISODate(), previousExpiryDate: member.expiryDate, planId: plan.id, startDate, expiryDate, amount };
-    member.renewals = [...(member.renewals || []), renewal];
-    member.charges = [...(member.charges || [{ amount: Number(member.totalFees || 0), date: member.startDate }]), { amount: plan.price, date: localISODate() }];
-    member.planId = plan.id;
-    member.startDate = startDate;
-    member.expiryDate = expiryDate;
-    member.totalFees = Number(member.totalFees || 0) + plan.price;
-    member.status = "active";
-    if (amount > 0) state.payments.unshift({ id: uid("TX"), memberId: member.id, amount, date: localISODate(), method: String(values.get("method")), status: "paid", notes: "Membership renewal" });
-    closeModal(); safePersist("Membership renewed.");
+// After an import: every member, plan, membership and payment it added is reloaded.
+function afterMemberImport() {
+    membersStatus = "loading";
+    refreshMembersFromApi().then(() => render());
+    loadAllMemberships(() => render());
+    refreshTotals();
+    loadExpiringMemberships();
+    loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
+    if (currentView === "plans") loadPlans(renderPlansIfCurrent);
 }
 
-function recordCheckIn(form) {
-    const values = new FormData(form);
-    const member = getMember(String(values.get("memberId") || ""));
-    if (!member) throw new Error("Select a valid member.");
-    if (memberStatus(member) === "expired" && !window.confirm(`${member.name}'s membership is expired. Record this check-in anyway?`)) return;
-    const today = localISODate();
-    if (state.attendance.some((record) => record.memberId === member.id && record.checkedInAt.slice(0, 10) === today)) throw new Error("This member already has a check-in recorded today.");
-    state.attendance.unshift({ id: uid("AT"), memberId: member.id, checkedInAt: new Date().toISOString(), checkedOutAt: "", source: "manual" });
-    closeModal(); safePersist("Check-in recorded.");
+// A member's current membership status for exports, from the database.
+function exportStatus(member) {
+    if (member.status === "suspended") return "suspended";
+    return getCurrentMembership(member.id)?.effective_status || "unassigned";
 }
 
-async function openImportPreview() {
-    openModal({
-        title: "Preview member import",
-        subtitle: escapeHTML(currentFileName),
-        body: `<div class="empty-state" role="status">Checking existing members and plans…</div>`,
-        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button>`
-    });
-    let existingPhones;
-    try {
-        [importPlans, existingPhones] = await Promise.all([fetchActivePlans(), fetchAllMemberPhones(fetchMembers)]);
-    } catch (error) {
-        openModal({
-            title: "Preview member import",
-            subtitle: escapeHTML(currentFileName),
-            body: `<div class="empty-state" role="alert"><p>${escapeHTML(error.message || "Existing members and plans could not be loaded.")}</p><button class="button button-secondary" data-action="retry-import-preview">Try again</button></div>`,
-            footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button>`
-        });
-        return;
-    }
-    const { valid, invalid, rows: checkedRows } = validateImportRows(importedRows, { existingPhones, activePlans: importPlans });
-    importedRows = checkedRows;
-    renderImportPreview(valid.length, invalid.length);
-}
-
-function renderImportPreview(validCount, invalidCount) {
-    const rows = importedRows.slice(0, 30);
-    openModal({
-        title: "Preview member import",
-        subtitle: `${escapeHTML(currentFileName)} · ${validCount} valid · ${invalidCount} invalid or duplicate`,
-        wide: true,
-        body: `<div class="note-box" style="margin-bottom:12px">Required columns: <strong>name</strong> and <strong>phone</strong>. An optional <strong>whatsapp_opt_in</strong> column records consent only for rows marked yes. Supported aliases include full name, mobile, phone number, joining date and membership plan. Rows with an existing or repeated phone are skipped. Rows without a plan are added without a membership.</div>
-        <p id="import-progress" role="status" aria-live="polite"></p>
-        <div class="table-wrap"><table><thead><tr><th>Row</th><th>Name</th><th>Phone</th><th>Plan</th><th>Validation</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.rowNumber}</td><td>${escapeHTML(row.name)}</td><td>${escapeHTML(formatPhone(row.phone))}</td><td>${escapeHTML(row.planName || "No plan")}</td><td>${row.issues.length ? `<span class="status status-expired">${escapeHTML(row.issues.join(", "))}</span>` : `<span class="status">Ready</span>`}</td></tr>`).join("")}</tbody></table></div>${importedRows.length > 30 ? `<p class="helper-text">Showing first 30 of ${importedRows.length} rows.</p>` : ""}`,
-        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-primary" data-action="confirm-import" ${validCount ? "" : "disabled"}>Import ${validCount} members</button>`
-    });
-}
-
-async function confirmImport() {
-    const rows = importedRows.filter((row) => !row.issues.length);
-    if (!rows.length) return;
-    const skipped = importedRows
-        .filter((row) => row.issues.length)
-        .map((row) => ({ rowNumber: row.rowNumber, message: row.issues.join(", ") }));
-    const progress = document.querySelector("#import-progress");
-    document.querySelectorAll('[data-action="confirm-import"], #modal-root [data-action="close-modal"]').forEach((button) => { button.disabled = true; });
-
-    const result = await importMembers(rows, {
-        plans: importPlans,
-        createMember: createMemberOnApi,
-        assignPlan: createMemberPlanAssignment,
-        recordConsent: setWhatsAppConsentOnApi,
-        today: localISODate(),
-        onProgress: ({ current, total }) => {
-            if (progress?.isConnected) progress.textContent = `Importing member ${current} of ${total}…`;
-        }
-    });
-    if (progress?.isConnected) progress.textContent = "Refreshing the member list…";
-
-    importedRows = [];
-    importPlans = [];
-    memberFilters.page = 1;
-    await refreshMembersFromApi({ page: 1 });
-    const errors = [...result.errors, ...skipped].sort((a, b) => a.rowNumber - b.rowNumber);
-    const failureRows = errors.map((error) => `<li>Row ${error.rowNumber}: ${escapeHTML(error.message)}</li>`).join("");
-    const summary = [
-        `${result.imported} member${result.imported === 1 ? "" : "s"} imported`,
-        result.withoutPlan ? `${result.withoutPlan} without a plan` : "",
-        `${errors.length} row${errors.length === 1 ? "" : "s"} need${errors.length === 1 ? "s" : ""} attention`
-    ].filter(Boolean).join(" · ");
-    openModal({
-        title: "Member import complete",
-        body: `<p role="status">${summary}.</p>${failureRows ? `<ul class="helper-text" role="alert">${failureRows}</ul>` : ""}`,
-        footer: `<button class="button button-primary" type="button" data-action="close-modal">Done</button>`
-    });
+function memberExportRow(member) {
+    const membership = getCurrentMembership(member.id);
+    return {
+        memberCode: member.memberCode || member.id,
+        name: member.name,
+        phone: member.phone,
+        email: member.email || "",
+        joinedAt: member.joinedAt,
+        plan: planNameFor(member),
+        startDate: membership?.start_date || member.startDate || "",
+        expiryDate: membership?.end_date || member.expiryDate || ""
+    };
 }
 
 function exportMembers() {
     runExport("members.csv", state.members.map((member) => ({
-        memberId: member.id, name: member.name, phone: member.phone, email: member.email || "", joinedAt: member.joinedAt,
-        plan: getPlan(member.planId)?.name || "", startDate: member.startDate, expiryDate: member.expiryDate,
-        status: memberStatus(member), totalFees: member.totalFees, amountPaid: member.totalFees - memberBalance(member), outstanding: memberBalance(member)
+        ...memberExportRow(member),
+        status: exportStatus(member),
+        totalFees: member.totalFees,
+        amountPaid: Math.max(0, Number(member.totalFees || 0) - memberBalance(member)),
+        outstanding: memberBalance(member)
     })));
 }
 
-function exportPayments() {
-    if (!state.sampleDataLoaded) {
-        runExport("payments.csv", paymentsPage.payments.map((payment) => ({
-            receiptNumber: payment.receipt_number,
-            date: payment.paid_on,
-            memberName: payment.member?.full_name || "Removed member",
-            memberCode: payment.member?.member_code || "",
-            amount: payment.amount,
-            method: methodLabel(payment.method),
-            upiReference: payment.upi_reference || "",
-            note: payment.note || ""
-        })));
-        return;
+// Every payment of the gym from the database, newest first, 100 per request.
+async function fetchAllPayments() {
+    const payments = [];
+    for (let page = 1; ; page += 1) {
+        const response = await apiClient.get("/api/payments", { params: { page, limit: 100 } });
+        const rows = response?.data?.payments || [];
+        payments.push(...rows);
+        const total = Number(response?.data?.pagination?.total ?? payments.length);
+        if (!rows.length || payments.length >= total) return payments;
     }
-    runExport("payments.csv", state.payments.map((payment) => ({ ...payment, memberName: getMember(payment.memberId)?.name || "Removed member" })));
+}
+
+function paymentExportRow(payment) {
+    return {
+        receiptNumber: payment.receipt_number,
+        date: payment.paid_on,
+        memberName: payment.member?.full_name || "Removed member",
+        memberCode: payment.member?.member_code || "",
+        amount: Number(payment.amount),
+        method: methodLabel(payment.method),
+        upiReference: payment.upi_reference || "",
+        note: payment.note || ""
+    };
+}
+
+async function exportPayments() {
+    try {
+        runExport("payments.csv", (await fetchAllPayments()).map(paymentExportRow));
+    } catch (error) {
+        toast(error.message || "Payments could not be loaded for the export.", "error");
+    }
+}
+
+// Renewals: every plan after a member's first one.
+function renewalRows() {
+    return renewalMemberships().map((membership) => {
+        const member = getMember(membership.member_id);
+        return {
+            memberCode: member?.memberCode || "",
+            memberName: member?.name || "Removed member",
+            renewedOn: String(membership.created_at || "").slice(0, 10),
+            plan: membership.plan_name,
+            startDate: membership.start_date,
+            endDate: membership.end_date,
+            fee: Number(membership.total_fees ?? membership.price ?? 0)
+        };
+    });
 }
 
 function exportRenewals() {
-    runExport("renewals.csv", state.members.flatMap((member) => (member.renewals || []).map((renewal) => ({ memberId: member.id, memberName: member.name, ...renewal }))));
+    runExport("renewals.csv", renewalRows());
 }
 
 function exportRetention() {
-    const rows = state.members.map((member) => {
-        const last = state.attendance.filter((record) => record.memberId === member.id).sort((a, b) => b.checkedInAt.localeCompare(a.checkedInAt))[0];
-        const daysInactive = last ? daysBetween(last.checkedInAt.slice(0, 10)) : "";
-        return { memberId: member.id, name: member.name, phone: member.phone, lastVisit: last?.checkedInAt.slice(0, 10) || "", daysInactive, expiryDate: member.expiryDate, followUpStatus: member.followUpStatus || "pending" };
-    }).filter((row) => row.daysInactive === "" || row.daysInactive >= 7);
-    runExport("retention-followups.csv", rows);
+    runExport("retention-followups.csv", retentionRows().map(({ member, lastVisit, days, reasons }) => ({
+        memberCode: member.memberCode || member.id,
+        name: member.name,
+        phone: member.phone,
+        lastVisit: lastVisit || "",
+        daysInactive: days ?? "",
+        expiryDate: getCurrentMembership(member.id)?.end_date || member.expiryDate || "",
+        reasons: reasons.join("; "),
+        followUpStatus: member.followUpStatus || "pending"
+    })));
 }
 
 function exportAnalytics() {
+    const summary = currentSummary().data;
+    if (!summary) return toast("The gym's totals are still loading. Try again in a moment.", "error");
     runExport("analytics-summary.csv", [
-        { metric: "totalMembers", value: state.members.length },
-        { metric: "activeMembers", value: state.members.filter((member) => memberStatus(member) === "active").length },
-        { metric: "allTimeCollected", value: state.payments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + Number(payment.amount), 0) },
-        { metric: "outstanding", value: state.members.reduce((sum, member) => sum + memberBalance(member), 0) },
-        { metric: "attendanceRecords", value: state.attendance.length }
+        { metric: "Total members", value: summary.total_members },
+        { metric: "Active members", value: summary.active_members },
+        { metric: "New members this month", value: summary.new_members_this_month },
+        { metric: "Renewals this month", value: summary.renewals_this_month },
+        { metric: "Collected this month", value: summary.collected_this_month },
+        { metric: "Collected all time", value: summary.collected_all_time },
+        { metric: "Outstanding balance", value: summary.outstanding_total },
+        { metric: "Members with a balance", value: summary.members_with_balance },
+        { metric: "Inactive members (14 days)", value: summary.inactive_members },
+        { metric: "Check-ins, last 60 days", value: state.attendance.length }
     ]);
 }
 
-function downloadReport() {
+function attendanceRow(record) {
+    const member = getMember(record.memberId);
+    return {
+        date: visitDay(record),
+        time: new Intl.DateTimeFormat("en-IN", { timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(record.checkedInAt)),
+        memberCode: member?.memberCode || record.memberCode || "",
+        memberName: member?.name || record.memberName || "Removed member",
+        phone: member?.phone || "",
+        method: record.source,
+        membershipStatus: record.status || ""
+    };
+}
+
+// One day's check-ins: from the 60-day feed, or from the database for older days.
+async function attendanceForDay(day) {
+    const feedStart = addDays(indiaISODate(), -59);
+    if (day >= feedStart) return state.attendance.filter((record) => visitDay(record) === day);
+    const response = await apiClient.get("/api/attendance", { params: { date: day } });
+    return (response?.data || []).map((row) => ({ memberId: row.member_id, memberName: row.member?.full_name, memberCode: row.member?.member_code, checkedInAt: row.checked_in_at, checkInDate: row.check_in_date, source: row.method, status: row.membership_status_at_check_in }));
+}
+
+async function downloadReport() {
     const type = document.querySelector("#report-type")?.value;
-    const date = document.querySelector("#report-date")?.value || localISODate();
-    let rows = [];
-    let filename = `${type || "report"}.csv`;
-    if (type === "attendance-daily" || type === "attendance-monthly") {
-        rows = state.attendance.filter((record) => type === "attendance-daily" ? record.checkedInAt.slice(0, 10) === date : record.checkedInAt.slice(0, 7) === localISODate().slice(0, 7)).map((record) => ({ memberId: record.memberId, memberName: getMember(record.memberId)?.name || "Removed member", phone: getMember(record.memberId)?.phone || "", checkedInAt: record.checkedInAt, checkedOutAt: record.checkedOutAt || "", source: record.source }));
-    } else if (type === "revenue") rows = state.payments.filter((payment) => payment.status === "paid").map((payment) => ({ ...payment, memberName: getMember(payment.memberId)?.name || "Removed member" }));
-    else if (type === "outstanding") rows = state.members.filter((member) => memberBalance(member) > 0).map((member) => ({ memberId: member.id, name: member.name, phone: member.phone, outstanding: memberBalance(member) }));
-    else if (type === "memberships") rows = state.members.map((member) => ({ memberId: member.id, name: member.name, plan: getPlan(member.planId)?.name || "", startDate: member.startDate, expiryDate: member.expiryDate, status: memberStatus(member) }));
-    else if (type === "renewals") rows = state.members.flatMap((member) => (member.renewals || []).map((renewal) => ({ memberId: member.id, memberName: member.name, ...renewal })));
-    else if (type === "inactive") rows = state.members.filter((member) => {
-        const last = state.attendance.filter((record) => record.memberId === member.id).sort((a, b) => b.checkedInAt.localeCompare(a.checkedInAt))[0];
-        return !last || daysBetween(last.checkedInAt.slice(0, 10)) >= 14;
-    }).map((member) => ({ memberId: member.id, name: member.name, phone: member.phone, expiryDate: member.expiryDate }));
-    runExport(filename, rows);
+    const date = document.querySelector("#report-date")?.value || indiaISODate();
+    const today = indiaISODate();
+    const filename = `${type || "report"}.csv`;
+    try {
+        let rows = [];
+        if (type === "attendance-daily") rows = (await attendanceForDay(date)).map(attendanceRow);
+        else if (type === "attendance-monthly") rows = state.attendance.filter((record) => visitDay(record).slice(0, 7) === today.slice(0, 7)).map(attendanceRow);
+        else if (type === "revenue") {
+            rows = (await fetchAllPayments()).map(paymentExportRow);
+        } else if (type === "outstanding") rows = state.members.filter((member) => memberBalance(member) > 0).map((member) => ({ memberCode: member.memberCode || member.id, name: member.name, phone: member.phone, totalFees: member.totalFees, outstanding: memberBalance(member) }));
+        else if (type === "memberships") rows = state.members.map((member) => ({ ...memberExportRow(member), status: exportStatus(member) }));
+        else if (type === "renewals") rows = renewalRows();
+        else if (type === "inactive") rows = retentionRows().filter((row) => row.days === null || row.days >= 14).map(({ member, lastVisit }) => ({ ...memberExportRow(member), lastVisit: lastVisit || "No visit in 60 days" }));
+        runExport(filename, rows);
+    } catch (error) {
+        toast(error.message || "The report could not be made.", "error");
+    }
 }
 
 function runExport(filename, rows) {
@@ -1355,45 +1268,7 @@ async function copyMessage(message) {
     }
 }
 
-function resetDemoData() {
-    openModal({
-        title: "Clear local sample data?",
-        body: `<p class="confirm-copy">This removes the fictional sample records from this browser. It does not delete members or payments in your gym database.</p>`,
-        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-reset">Clear sample data</button>`
-    });
-}
-
-function confirmReset() {
-    try {
-        resetDemo();
-        memberFilters = { search: "", filter: "all", sort: "name" };
-        currentView = "overview";
-        closeModal(); render(); refreshMembersFromApi({ page: 1 }); loadAttendanceFeed(rerenderAttendanceViews); loadCheckinSettings().then(rerenderForCheckinMethod); toast("Local sample data cleared.");
-    } catch (error) {
-        toast(error.message || "Could not reset demo data.", "error");
-    }
-}
-
-function loadSampleData() {
-    try {
-        const sample = createDemoState();
-        const currentGym = state.gym;
-        Object.keys(state).forEach((key) => delete state[key]);
-        Object.assign(state, sample, {
-            gym: currentGym,
-            sampleDataLoaded: true,
-            apiMemberPayments: {},
-            whatsapp: {}
-        });
-        memberFilters = { search: "", filter: "all", sort: "name", page: 1 };
-        persist();
-        render();
-        toast("Fictional sample data loaded in this browser only.");
-    } catch (error) {
-        toast(error.message || "Could not load sample data.", "error");
-    }
-}
-
+// Everything on the Settings form is saved for the gym in the database, for every device.
 async function saveSettings(form) {
     const values = new FormData(form);
     const phone = String(values.get("phone") || "").trim();
@@ -1406,31 +1281,54 @@ async function saveSettings(form) {
     const upiPayeeName = String(values.get("upiPayeeName") || "").trim();
     if (upiPayeeName.length > 100) throw new Error("The name shown to payers must be 100 characters or fewer.");
     const address = String(values.get("address") || "").trim();
-    // Name, phone, address and UPI details are saved for the gym in the database.
-    await saveGymSettingsOnApi({ name, phone: phone || null, address: address || null, upi_id: upiId || null, upi_payee_name: upiPayeeName || null });
     const language = String(values.get("language") || "en");
-    setLanguage(language);
-    state.gym = {
-        ...state.gym,
-        currency: String(values.get("currency") || "INR"),
-        dateFormat: String(values.get("dateFormat") || "DD MMM YYYY"),
-        language,
-        preferences: {
-            expiryReminderDays: Math.max(0, Math.min(90, Number(values.get("expiryReminderDays") || 0))),
-            paymentReminders: values.has("paymentReminders"),
-            inactivityReminders: values.has("inactivityReminders")
-        }
-    };
-    safePersist("Settings saved.");
+    if (!isSupportedLanguage(language)) throw new Error("Choose English, Hindi or Marathi.");
+    const dateFormat = values.get("dateFormat") === "DD/MM/YYYY" ? "DD/MM/YYYY" : "DD MMM YYYY";
+    const reminderDays = Number(values.get("expiryReminderDays") || 0);
+    if (!Number.isInteger(reminderDays) || reminderDays < 0 || reminderDays > 90) throw new Error("The expiry reminder window must be a whole number from 0 to 90 days.");
+    const submit = form.querySelector('[type="submit"]');
+    if (submit) submit.disabled = true;
+    try {
+        await saveGymSettingsOnApi({
+            name,
+            phone: phone || null,
+            address: address || null,
+            upi_id: upiId || null,
+            upi_payee_name: upiPayeeName || null,
+            language,
+            date_format: dateFormat,
+            expiry_reminder_days: reminderDays,
+            payment_reminders: values.has("paymentReminders"),
+            inactivity_reminders: values.has("inactivityReminders")
+        });
+    } finally {
+        if (submit?.isConnected) submit.disabled = false;
+    }
+    safePersist("Settings saved for your gym.");
 }
 
 async function handleSubmit(event) {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
+    if (handleAuthPasswordSubmit(event) || handleTermsSubmit(event)) return;
+    if (form.id === "delete-gym-form") {
+        event.preventDefault();
+        await submitDeleteGym(form, activeSession, closeModal);
+        return;
+    }
+    if (form.id === "change-password-form") {
+        event.preventDefault();
+        await submitChangePassword(form, (session) => { activeSession = { ...activeSession, ...session }; });
+        return;
+    }
     if (form.id === "login-form") {
         event.preventDefault();
         const errorElement = document.querySelector("#auth-error");
+        const submit = form.querySelector('[type="submit"]');
+        // One sign-in at a time: a second tap would only use up the sign-in limit.
+        if (submit?.disabled) return;
         errorElement.hidden = true;
+        if (submit) submit.disabled = true;
         try {
             const result = await apiClient.post("/api/auth/login", {
                 email: form.elements.email.value.trim(),
@@ -1440,6 +1338,8 @@ async function handleSubmit(event) {
         } catch (error) {
             errorElement.textContent = error.message || "Sign in failed.";
             errorElement.hidden = false;
+        } finally {
+            if (submit) submit.disabled = false;
         }
         return;
     }
@@ -1477,18 +1377,15 @@ async function handleSubmit(event) {
         await saveAttendanceSettings(form, rerenderForCheckinMethod);
         return;
     }
-    if (form.id === "whatsapp-compose" || form.id === "whatsapp-template-form" || form.id === "whatsapp-click-template-form") {
+    if (form.id === "reminder-template-form") {
         event.preventDefault();
-        if (!form.reportValidity()) return;
-        handleWhatsAppSubmit(form, render);
+        await handleReminderTemplateSubmit(form);
         return;
     }
     const handlers = {
         "member-form": saveMember,
         "quick-member-form": saveQuickMember,
         "payment-form": savePayment,
-        "renew-form": saveRenewal,
-        "checkin-form": recordCheckIn,
         "settings-form": saveSettings
     };
     const handler = handlers[form.id];
@@ -1557,8 +1454,7 @@ document.addEventListener("click", (event) => {
     // The WhatsApp link still opens normally; this only records and animates the reminder.
     const reminderLink = event.target.closest("a[data-remind-key]");
     if (reminderLink) {
-        const key = markReminderSent(reminderLink);
-        if (key) recordExpiryReminder(key);
+        recordReminderClick(reminderLink);
         return;
     }
     const viewLink = event.target.closest("[data-view]");
@@ -1589,6 +1485,10 @@ document.addEventListener("click", (event) => {
         }
         // Synchronous up to window.open / navigator.share, so phones treat it as the user's tap.
         if (handleUpiPaymentAction(action.dataset.action, action)) return;
+        // "Add photo" on a check-in card pauses the card and the scanner camera first.
+        if (handlePhotoAction(action.dataset.action, action, rerenderAfterPhoto, {
+            beforeAdd: (element) => (element.dataset.context === "checkin" ? pauseCheckinForPhoto() : () => {})
+        })) return;
         if (handleAttendanceAction(action.dataset.action, action, rerenderAttendanceViews)) return;
         if (handleCheckinSettingsAction(action.dataset.action, action, rerenderForCheckinMethod)) return;
         if (action.dataset.action === "open-upi-settings") {
@@ -1604,16 +1504,15 @@ document.addEventListener("click", (event) => {
             handleWelcomeAction(action.dataset.action, action, rerenderAfterWelcome);
             return;
         }
-        if (action.dataset.action.startsWith("whatsapp-")) {
-            handleWhatsAppAction(action.dataset.action, action, render);
-            return;
-        }
-        if (action.dataset.action === "confirm-reset") { confirmReset(); return; }
-        if (action.dataset.action === "confirm-import") { confirmImport(); return; }
-        if (action.dataset.action === "retry-import-preview") { openImportPreview(); return; }
+        if (handleReminderTemplateAction(action.dataset.action, () => { if (currentView === "settings") render(); })) return;
+        if (handleLocalDataAction(action.dataset.action, afterLocalDataMove)) return;
+        if (handleImportAction(action.dataset.action, action, afterMemberImport)) return;
         if (action.dataset.action === "previous-members-page" || action.dataset.action === "next-members-page") {
             const pageDelta = action.dataset.action === "next-members-page" ? 1 : -1;
-            refreshMembersFromApi({ page: Math.max(1, memberFilters.page + pageDelta) });
+            const pages = Math.max(1, Math.ceil(filterMembers(memberFilters).length / MEMBERS_PAGE_SIZE));
+            memberFilters.page = Math.min(pages, Math.max(1, memberFilters.page + pageDelta));
+            renderMembersResults();
+            document.querySelector("#members-results")?.scrollIntoView({ block: "start", behavior: "smooth" });
             return;
         }
         if (handleMembershipAction(action.dataset.action, action)) return;
@@ -1635,7 +1534,8 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
         window.location.reload();
     }
 });
-document.querySelector("#sign-out-onboarding").addEventListener("click", async () => {
+// Sign out from the screens before the app: new gym, Terms, and a gym scheduled for deletion.
+for (const button of document.querySelectorAll("[data-sign-out]")) button.addEventListener("click", async () => {
     try {
         await apiClient.post("/api/auth/logout", {});
     } catch (error) {
@@ -1649,16 +1549,15 @@ document.querySelector("#sign-out-onboarding").addEventListener("click", async (
 });
 document.addEventListener("change", (event) => {
     const target = event.target;
-    if (target.matches("[data-whatsapp-change]")) {
-        handleWhatsAppChange(target, render);
-        return;
-    }
+    if (target.closest("#modal-root") && handleImportChange(target)) return;
     if (handleWelcomeTemplateEvent(target)) return;
+    if (handleReminderTemplateEvent(target)) return;
     if (onPaymentFormEdit(target)) return;
     if (target.id === "visits-date" && target.value) { selectVisitsDay(target.value, () => { if (currentView === "attendance") render(); }); return; }
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
     if (target.id === "expiry-days") {
         expiringDays = Number(target.value);
+        saveUiPreferences({ expiringDays });
         loadExpiringMemberships();
     }
     if (target.matches("#membership-assignment-form [name='plan_id'], #membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
@@ -1667,10 +1566,15 @@ document.addEventListener("change", (event) => {
     if (target.id === "member-filter") {
         memberFilters.filter = target.value;
         memberFilters.page = 1;
-        render();
-        refreshMembersFromApi({ page: 1 });
+        saveUiPreferences({ memberFilter: target.value });
+        renderMembersResults();
     }
-    if (target.id === "member-sort") { memberFilters.sort = target.value; render(); }
+    if (target.id === "member-sort") {
+        memberFilters.sort = target.value;
+        memberFilters.page = 1;
+        saveUiPreferences({ memberSort: target.value });
+        renderMembersResults();
+    }
     if (target.id === "renewal-filter") {
         document.querySelectorAll("[data-renewal-row]").forEach((row) => {
             const days = Number(row.dataset.days);
@@ -1688,6 +1592,8 @@ document.addEventListener("change", (event) => {
 document.addEventListener("input", (event) => {
     const target = event.target;
     if (target.id === "welcome-body") { handleWelcomeTemplateEvent(target); return; }
+    if (target.id === "reminder-body") { handleReminderTemplateEvent(target); return; }
+    if (target.dataset.importNew !== undefined) { handleImportChange(target); return; }
     if (target.id === "checkin-search") { searchCheckInMembers(target.value); return; }
     if (target.form?.id === "payment-form" && ["amount", "upiReference"].includes(target.name)) { onPaymentFormEdit(target); return; }
     if (target.id === "setting-upiId" || target.id === "setting-upiPayeeName") { updateUpiTestQr(target.form); return; }
@@ -1702,8 +1608,7 @@ document.addEventListener("input", (event) => {
     if (target.id === "member-search") {
         memberFilters.search = target.value;
         memberFilters.page = 1;
-        clearTimeout(memberSearchTimer);
-        memberSearchTimer = setTimeout(() => refreshMembersFromApi({ page: 1 }), 250);
+        renderMembersResults();
     }
     if (target.id === "plan-search") setPlanSearch(target.value, renderPlansIfCurrent);
     if (target.id === "attendance-search") {
@@ -1801,19 +1706,11 @@ document.addEventListener("keydown", (event) => {
         closeMobileMenu();
         document.querySelector("#mobile-menu").focus();
     }
-    if (event.key === "Escape") document.querySelector(".wa-inbox.show-thread .wa-back")?.click();
 });
-document.querySelector("#csv-file").addEventListener("change", async (event) => {
+document.querySelector("#import-file").addEventListener("change", (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
-    try {
-        currentFileName = file.name;
-        importedRows = parseCSV(await file.text());
-        openImportPreview();
-    } catch (error) {
-        toast(error.message || "Unable to read this CSV file.", "error");
-    }
+    if (file) handleImportFile(file);
 });
 
 async function registerServiceWorker() {
@@ -1826,6 +1723,8 @@ async function registerServiceWorker() {
     }
 }
 
+startErrorReporting({ view: () => currentView });
+bindAuthPasswordLinks();
 registerServiceWorker();
 // The camera is released whenever the app is hidden, and comes back on the Check-in screen.
 document.addEventListener("visibilitychange", () => {
@@ -1839,6 +1738,8 @@ setUnauthorizedHandler(() => {
     window.location.reload();
 });
 async function restoreSessionOnLoad() {
+    // A reset link from the email opens the new-password form, not a saved session.
+    if (startPasswordResetIfLinked()) return;
     try {
         const session = await restoreAuthSession();
         if (session) acceptSession(session);

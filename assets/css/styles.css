@@ -52,6 +52,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .auth-form input { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid #dfe6df; border-radius: 8px; background: #fff; }
 .auth-form .button { min-height: 48px; margin-top: 8px; }
 .auth-error { margin: 2px 0; color: var(--danger); }
+.auth-error.auth-success { color: var(--success, #1f7a4d); }
+.auth-form .auth-link { justify-self: center; min-height: 44px; padding: 0 8px; }
+.auth-check { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; }
+.auth-check input { width: 20px !important; min-height: 20px !important; margin-top: 3px; flex: none; }
+.auth-legal { margin: 18px 0 0; text-align: center; color: var(--text-secondary); font-size: 14px; }
+.danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.danger-zone h2 { color: var(--danger); }
+.account-download { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.account-download h3 { margin: 0 0 4px; font-size: 16px; }
+.account-download .button { margin-top: 10px; }
 .icon { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .app-shell { min-height: 100vh; }
 .sidebar {
@@ -59,7 +69,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     width: 252px; padding: 22px 15px 14px; color: #dce7e0; background: var(--forest);
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 9px 22px; color: white; text-decoration: none; font: 800 20px Manrope, sans-serif; letter-spacing: -.7px; }
-.brand-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 10px; color: var(--forest); background: var(--lime); font-size: 19px; }
 .brand-light { color: #b8f36b; }
 .gym-switcher { display: flex; align-items: center; gap: 10px; padding: 11px 10px; margin-bottom: 20px; border: 1px solid rgba(255,255,255,.13); border-radius: 11px; background: rgba(255,255,255,.055); }
 .gym-avatar, .profile-avatar, .top-avatar { display: grid; flex: 0 0 auto; place-items: center; border-radius: 50%; font-weight: 700; }
@@ -214,7 +223,7 @@ tbody tr:hover { background: #fbfcfa; }
 .assignment-end-date { display: flex; align-items: center; color: #293a30; }
 .assignment-warning { border-color: #e6c6a0; color: #765128; background: #fff8eb; }
 .note-box { padding: 14px 16px; border: 1px solid #e1e8df; border-radius: 9px; color: #48584d; background: #f9fbf7; font-size: 13px; line-height: 1.6; }
-.settings-layout { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(240px,.7fr); gap: 15px; }
+.settings-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 15px; max-width: 920px; }
 .settings-section { padding: 18px; margin-bottom: 14px; }
 .settings-section h2 { margin: 0 0 14px; font: 700 13px Manrope, sans-serif; }
 .page-content a { color: #3e7651; }
@@ -321,3 +330,8 @@ body.whatsapp-fullscreen { overflow: hidden; }
     .inline-actions { flex-wrap: wrap; }
     .inline-actions .text-button { min-width: 44px; }
 }
+
+/* GymPulse logo mark next to the name (decorative; the name is written beside it) */
+.brand-logo { display: block; flex: none; width: auto; height: 32px; }
+.brand-logo-large { height: 48px; }
+.auth-brand { gap: 14px; }
