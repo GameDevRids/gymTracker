@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v20";
+const CACHE_NAME = "gympulse-shell-v21";
 const APP_SHELL = [
     "/",
     "/index.html",

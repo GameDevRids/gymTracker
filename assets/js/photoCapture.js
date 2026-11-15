@@ -155,8 +155,12 @@ export function mountPhotoFlow(container, { needsConsent = true, onConsent = () 
         }
     }
 
+    // Each step is drawn fresh, so it starts not busy. Without this, the "Saving…" from
+    // "I agree" (or "Opening photo…" after picking) carried over and every button of the next
+    // step was ignored, although none looked disabled.
     function view(html) {
         clearListeners();
+        busy = false;
         container.innerHTML = `<div class="photo-flow">${html}<p class="photo-flow-status" data-photo-status role="status" hidden></p><p class="photo-flow-error" data-photo-error role="alert" hidden></p></div>`;
         listen(container, "click", onClick);
     }
