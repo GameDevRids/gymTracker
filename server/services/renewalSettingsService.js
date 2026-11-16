@@ -2,6 +2,7 @@ import { supabaseClient } from "../config/database.js";
 
 // Settings › Renewals and grace (migration 020): the gym's default grace period, the welcome-back
 // discount for lapsed and old members, and how long lapsed members stay on the Lapsed list.
+// Plan holds (migration 021): the minimum hold (0 = no minimum) and the optional hold fee.
 // Every login of the gym reads them (the Renew sheet needs them); only the owner changes them.
 
 export class RenewalSettingsError extends Error {
@@ -11,13 +12,13 @@ export class RenewalSettingsError extends Error {
     }
 }
 
-const columns = "id,expiry_grace_days,welcome_back_discount_type,welcome_back_discount_value,lapsed_list_days";
+const columns = "id,expiry_grace_days,welcome_back_discount_type,welcome_back_discount_value,lapsed_list_days,min_hold_days,hold_fee_enabled,hold_fee_amount";
 
 function databaseError(error) {
     if (["PGRST204", "PGRST205", "42703", "42P01"].includes(error?.code)) {
-        return new RenewalSettingsError(503, "Renewal settings need the latest database update. Run migration 020_add_grace_and_lapsed_members.sql in Supabase SQL Editor.");
+        return new RenewalSettingsError(503, "Renewal settings need the latest database update. Run migrations 020_add_grace_and_lapsed_members.sql and 021_add_plan_holds.sql in Supabase SQL Editor.");
     }
-    if (error?.code === "23514") return new RenewalSettingsError(400, "Check the values: grace 0 to 60 days, a percent of at most 100, and 7 to 365 days on the lapsed list.");
+    if (error?.code === "23514") return new RenewalSettingsError(400, "Check the values: grace 0 to 60 days, a percent of at most 100, and 7 to 365 days on the lapsed list, a minimum hold of 0 to 365 days (0 = no minimum), and a hold fee above 0 when it is on.");
     return new RenewalSettingsError(500, "The database could not complete the renewal settings request.");
 }
 
@@ -27,6 +28,9 @@ function publicSettings(row, role) {
         welcome_back_discount_type: row.welcome_back_discount_type,
         welcome_back_discount_value: Number(row.welcome_back_discount_value),
         lapsed_list_days: row.lapsed_list_days,
+        min_hold_days: Number.isInteger(row.min_hold_days) ? row.min_hold_days : 15,
+        hold_fee_enabled: row.hold_fee_enabled === true,
+        hold_fee_amount: Number(row.hold_fee_amount || 0),
         can_edit: role === "owner"
     };
 }

@@ -1,3 +1,4 @@
+// Runs on a database at migration 019: migration 021 later removes this renewal function (020 replaced it).
 // Runs migration 019 in real Postgres (PGlite): one-tap renewal creates the plan, the payment and
 // the renewal record in one transaction, works out the start date itself, never renews twice for
 // the same key, refuses overlapping plans, and stays inside one gym. Also checks that the Overview
@@ -42,7 +43,7 @@ const renew = (gymId, memberId, args = {}) => db.query("SELECT public.gympulse_r
 const failure = async (promise) => promise.then(() => null, (error) => error);
 
 before(async () => {
-    db = await createMigratedDatabase();
+    db = await createMigratedDatabase({ upTo: "019_add_one_tap_renewal.sql" });
     await db.exec(`
         INSERT INTO auth.users (id, email) VALUES ('${owner}', 'owner@example.test');
         INSERT INTO public.gyms (id, name, owner_user_id) VALUES ('${gymA}', 'Gym A', '${owner}'), ('${gymB}', 'Gym B', '${owner}');
@@ -242,7 +243,7 @@ test("the migration can be run again", async () => {
 // ---------- Overview totals ----------
 
 test("a renewed member leaves the Overview's expiring counts; every other total is unchanged", async () => {
-    const summaryDb = await createMigratedDatabase();
+    const summaryDb = await createMigratedDatabase({ upTo: "019_add_one_tap_renewal.sql" });
     const gym = "00000000-0000-4000-8000-0000000000c1";
     await summaryDb.exec(`INSERT INTO auth.users (id, email) VALUES ('${owner}', 'o@example.test');
         INSERT INTO public.gyms (id, name, owner_user_id) VALUES ('${gym}', 'Gym C', '${owner}');`);

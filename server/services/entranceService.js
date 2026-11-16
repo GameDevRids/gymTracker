@@ -185,6 +185,9 @@ function memberView(result, gym, upi) {
         checked_in_at: result.attendance?.checked_in_at || null,
         grace_days_left: result.grace_days_left,
         ended_on: result.ended_on || null,
+        // "Welcome back! Your plan now ends <date>": set when the check-in ended the member's hold.
+        resumed: result.resumed ? { new_end_date: result.resumed.new_end_date, days_held: result.resumed.hold?.days_held ?? null } : null,
+        hold: result.hold ? { since: result.hold.starts_on } : null,
         membership: membership ? { plan_name: membership.plan_name, start_date: membership.start_date, end_date: membership.end_date, days_left: membership.days_left } : null,
         renewal
     };
@@ -217,7 +220,7 @@ export async function entranceCheckIn(gym, secret, { memberRef = null, location 
         .maybeSingle();
     if (error) databaseError(error);
     if (!member) throw new EntranceError(403, "This phone is not linked yet. Ask the front desk to approve it.", { result: "not_linked" });
-    const result = await recordCheckIn(member, "entrance_poster", gym, { deviceId: device.id, client, now });
+    const result = await recordCheckIn(member, "entrance_poster", gym, { deviceId: device.id, resumeHold: true, client, now });
     await client.from("member_devices").update({ last_used_at: now.toISOString() }).eq("id", device.id).eq("gym_id", gym.id);
     const needsUpi = result.renewal_price && result.result !== "checked_in";
     const upi = needsUpi ? (await client.from("gym_settings").select("upi_id,upi_payee_name").eq("gym_id", gym.id).maybeSingle()).data : null;

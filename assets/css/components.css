@@ -452,3 +452,28 @@
 .renew-welcome.is-on { border-color: #1f7a4d; background: #e7f4ec; color: #14532d; }
 .renew-start { display: grid; gap: 6px; }
 .renew-start .text-button { justify-self: start; min-height: 40px; }
+
+/* ---------- Plan holds ---------- */
+.hold-now { display: grid; gap: 8px; }
+.hold-now p { margin: 0; }
+.hold-reason { color: #5b4300; }
+.hold-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.hold-actions .button { min-height: 44px; }
+.hold-row small { display: block; color: #536057; }
+.hold-return { display: grid; gap: 8px; margin: 0; padding: 14px; border: 1px solid #e3e9e2; border-radius: 10px; }
+.hold-return legend { padding: 0 6px; font-weight: 800; }
+.hold-return .field { margin: 0; }
+.hold-return input[type="date"] { min-height: 48px; }
+.hold-choice { display: flex; gap: 10px; align-items: center; min-height: 44px; font-weight: 600; }
+.hold-choice input { width: 22px; height: 22px; margin: 0; flex: none; }
+.hold-sheet .modal-footer { position: sticky; bottom: 0; background: #fff; flex-wrap: wrap; }
+.hold-sheet .modal-footer .button { flex: 1 1 140px; min-height: 48px; }
+.hold-sheet .modal-footer .button-secondary { flex: 0 1 96px; }
+.hold-sheet .modal-footer .button-primary, .hold-sheet .modal-footer .button-whatsapp, .hold-sheet .modal-footer .button-danger { flex: 1 1 200px; }
+@media (max-width: 600px) {
+    .modal-root:has(.hold-sheet) { padding: 0; place-items: end center; }
+    .hold-sheet { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; }
+    .hold-sheet .modal-body { padding: 14px 16px; }
+    .hold-sheet .modal-header { padding: 16px 16px 12px; }
+    .hold-actions .button { flex: 1 1 140px; }
+}

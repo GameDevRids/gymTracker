@@ -9,6 +9,11 @@
 //   lapsed     grace has run out, and the plan ended no more than lapsedListDays ago
 //   old        the plan ended more than lapsedListDays ago
 //   none       the member has never had a plan
+//   on_hold    the plan is paused (migration 021): this beats every status above
+//
+// A hold ends by itself on its planned return date (or when its maximum runs out). Nothing
+// waits for a nightly job: applyHolds() works the ended hold out from dates, and the server saves
+// it the next time the member is read (gympulse_settle_holds).
 
 export const EXPIRING_DAYS = 7;
 // "Remind on WhatsApp" is offered from this many days before the end, and all through grace.
@@ -22,7 +27,8 @@ export const STATUS_LABELS = {
     in_grace: "In grace",
     lapsed: "Lapsed",
     old: "Old member",
-    none: "No plan"
+    none: "No plan",
+    on_hold: "On hold"
 };
 
 /** Whole days from `from` to `to` (both YYYY-MM-DD). */
@@ -30,7 +36,7 @@ export function dayDiff(from, to) {
     return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 }
 
-function plusDays(date, days) {
+export function plusDays(date, days) {
     const value = new Date(`${date}T00:00:00Z`);
     value.setUTCDate(value.getUTCDate() + days);
     return value.toISOString().slice(0, 10);
@@ -50,16 +56,91 @@ function graceOf(membership, defaultGraceDays) {
 const live = (plan) => plan && plan.status !== "cancelled";
 const iso = (value) => String(value || "").slice(0, 10);
 
+/** The day a hold ends by itself: its planned return date, or (open-ended) its maximum. */
+export function holdBackOn(hold) {
+    return iso(hold.planned_return_on) || iso(hold.latest_return_on);
+}
+
+/**
+ * Applies the holds to the plans, from dates only. Holds that have already ended by themselves
+ * (return date or maximum passed) move their plan's end, and any plan booked after it, later by the
+ * days held. A hold already saved as ended, or already applied to the saved dates, changes nothing.
+ * Returns { memberships, onHold, scheduled, settled }: onHold is the hold running today, scheduled
+ * one that starts later, settled what ended by itself ([{ id, ended_on, days_held, reason }]).
+ */
+export function applyHolds(memberships, holds, today) {
+    const plans = (memberships || []).map((plan) => ({ ...plan, start_date: iso(plan.start_date), end_date: iso(plan.end_date) }));
+    let onHold = null;
+    let scheduled = null;
+    const settled = [];
+    for (const hold of holds || []) {
+        if (!hold || hold.cancelled || hold.ended_on) continue;
+        const startsOn = iso(hold.starts_on);
+        if (startsOn > today) { scheduled = scheduled || hold; continue; }
+        const back = holdBackOn(hold);
+        if (back > today) { onHold = onHold || hold; continue; }
+        const held = Math.max(0, dayDiff(startsOn, back));
+        const target = plans.find((plan) => plan.id === hold.membership_id);
+        const endBefore = iso(hold.end_before);
+        settled.push({ id: hold.id, ended_on: back, days_held: held, reason: iso(hold.planned_return_on) ? "return_date" : "max_days" });
+        if (!target || target.end_date !== endBefore || held === 0) continue;
+        for (const plan of plans) {
+            if (plan.id !== target.id && live(plan) && plan.start_date > endBefore) {
+                plan.start_date = plusDays(plan.start_date, held);
+                plan.end_date = plusDays(plan.end_date, held);
+            }
+        }
+        target.end_date = plusDays(endBefore, held);
+    }
+    return { memberships: plans, onHold, scheduled, settled };
+}
+
+/** A hold as the screens show it: since when, back by when, days so far, and where the end would be. */
+export function holdView(hold, today) {
+    const startsOn = iso(hold.starts_on);
+    const plannedReturn = iso(hold.planned_return_on);
+    const sinceDays = Math.max(0, dayDiff(startsOn, today));
+    return {
+        id: hold.id,
+        membership_id: hold.membership_id,
+        starts_on: startsOn,
+        started: startsOn <= today,
+        planned_return_on: plannedReturn || null,
+        latest_return_on: iso(hold.latest_return_on),
+        open_ended: !plannedReturn,
+        return_by: holdBackOn(hold),
+        remaining_days: Number(hold.remaining_days),
+        days_held_so_far: sinceDays,
+        end_before: iso(hold.end_before),
+        end_if_resumed_today: plusDays(iso(hold.end_before), sinceDays)
+    };
+}
+
 /**
  * The member's status from all their plans (any order). Returns
  * { status, membership, daysLeft, endedOn, daysSinceEnd, graceDays, graceUntil, graceDaysLeft, nextStart }:
  * membership is the plan that decides the status (the one covering today, the one booked, or
  * the last one that ended). defaultGraceDays only applies to plans saved before migration 020.
  */
-export function memberStatusFor(memberships, today, { lapsedListDays = DEFAULT_LAPSED_LIST_DAYS, defaultGraceDays = 0 } = {}) {
-    const plans = (memberships || []).filter(live).map((plan) => ({ ...plan, start_date: iso(plan.start_date), end_date: iso(plan.end_date) }));
+export function memberStatusFor(memberships, today, { lapsedListDays = DEFAULT_LAPSED_LIST_DAYS, defaultGraceDays = 0, holds = [] } = {}) {
+    const applied = applyHolds(memberships, holds, today);
+    const result = statusFromPlans(applied.memberships.filter(live), today, { lapsedListDays, defaultGraceDays, onHold: applied.onHold });
+    return {
+        ...result,
+        hold: result.status === "on_hold" ? holdView(applied.onHold, today) : null,
+        scheduledHold: applied.scheduled ? holdView(applied.scheduled, today) : null
+    };
+}
+
+function statusFromPlans(plans, today, { lapsedListDays, defaultGraceDays, onHold }) {
     const base = { membership: null, daysLeft: null, endedOn: "", daysSinceEnd: null, graceDays: null, graceUntil: "", graceDaysLeft: null, nextStart: "" };
     if (!plans.length) return { ...base, status: "none" };
+    if (onHold) {
+        const held = plans.find((plan) => plan.id === onHold.membership_id) || plans[0];
+        const graceDays = graceOf(held, defaultGraceDays);
+        const nextStart = plans.filter((plan) => plan.start_date > today).map((plan) => plan.start_date).sort()[0] || "";
+        return { ...base, status: "on_hold", membership: held, graceDays, graceUntil: plusDays(held.end_date, graceDays), nextStart };
+    }
     const booked = plans.filter((plan) => plan.start_date > today).sort((a, b) => a.start_date.localeCompare(b.start_date));
     const nextStart = booked[0]?.start_date || "";
     const covering = plans.filter((plan) => plan.start_date <= today && plan.end_date >= today)
@@ -102,6 +183,8 @@ export function checkInDecision(status) {
         case "in_grace": return { result: "grace", allowed: true, stored: "grace" };
         case "lapsed":
         case "old": return { result: "expired", allowed: false, stored: "expired" };
+        // On hold: not checked in until the plan is resumed (the entrance poster does that by itself).
+        case "on_hold": return { result: "on_hold", allowed: false, stored: "none" };
         default: return { result: "no_membership", allowed: false, stored: "none" };
     }
 }

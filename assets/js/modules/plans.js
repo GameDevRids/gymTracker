@@ -5,6 +5,7 @@ import { toast } from "../components/toast.js";
 import { escapeHTML, formatINR, formatPlanDuration } from "../utils.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { suggestedGraceDays } from "../renewal.js";
+import { defaultHoldLimits, holdLimitsText } from "../holds.js";
 
 const pageSize = 12;
 // 1, 3, 6 and 12 months; a year is 365 days to match the seeded plans.
@@ -107,6 +108,9 @@ export function openPlanForm(planId = "") {
             <div class="field"><label for="form-price">Price (₹) *</label><input id="form-price" name="price" type="number" value="${escapeHTML(plan?.price ?? "")}" required min="0" step="0.01" aria-describedby="plan-price-error"><span id="plan-price-error" class="helper-text plan-error" role="alert" hidden>Price must be a valid non-negative number.</span></div>
             <div class="field"><label for="form-is_active">Availability</label><select id="form-is_active" name="is_active"><option value="true" ${plan?.is_active !== false ? "selected" : ""}>Active</option><option value="false" ${plan?.is_active === false ? "selected" : ""}>Inactive</option></select></div>
             <div class="field"><label for="form-grace_days">Grace after the plan ends (days)</label><input id="form-grace_days" name="grace_days" type="number" inputmode="numeric" min="0" max="60" step="1" placeholder="Use gym default" value="${plan?.grace_days ?? ""}" aria-describedby="plan-grace-help plan-grace-error"><span class="helper-text" id="plan-grace-help">Empty uses the gym default. Changes apply to new memberships only. <button class="text-button" type="button" data-action="plan-suggested-grace">Use suggested</button></span><span id="plan-grace-error" class="helper-text plan-error" role="alert" hidden>Grace must be a whole number from 0 to 60, or empty.</span></div>
+            <div class="field"><label for="form-max_hold_days">Longest hold (days)</label><input id="form-max_hold_days" name="max_hold_days" type="number" inputmode="numeric" min="1" max="365" step="1" placeholder="Use default" value="${plan?.max_hold_days ?? ""}" aria-describedby="plan-hold-help plan-holddays-error"><span id="plan-holddays-error" class="helper-text plan-error" role="alert" hidden>The longest hold is 1 to 365 days, or empty.</span></div>
+            <div class="field"><label for="form-max_holds">Number of holds</label><input id="form-max_holds" name="max_holds" type="number" inputmode="numeric" min="0" max="12" step="1" placeholder="Use default" value="${plan?.max_holds ?? ""}" aria-describedby="plan-hold-help plan-holds-error"><span id="plan-holds-error" class="helper-text plan-error" role="alert" hidden>The number of holds is 0 to 12, or empty. 0 means no holds.</span></div>
+            <p class="helper-text full" id="plan-hold-help">${escapeHTML(holdDefaultLine(currentDays))}</p>
             <div class="field full"><label for="form-description">Description</label><textarea id="form-description" name="description" maxlength="2000">${escapeHTML(plan?.description || "")}</textarea></div>
         </form>`,
         footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-primary" type="submit" form="plan-form">Save plan</button>`
@@ -173,6 +177,21 @@ export function handlePlanAction(action, target, onRender) {
     return true;
 }
 
+/** "Default for this length: up to 30 days, 1 hold." Empty fields use it. */
+function holdDefaultLine(days) {
+    const length = Number(days);
+    if (!Number.isInteger(length) || length <= 0) return "Empty uses the default for the plan's length.";
+    return `Empty uses the default for ${formatPlanDuration(length)}: ${holdLimitsText({ ...defaultHoldLimits(length) })}.`;
+}
+
+/** Keeps the "default for this length" line in step with the chosen duration. */
+export function updatePlanHoldDefault(form) {
+    const help = form?.querySelector("#plan-hold-help");
+    if (!help) return;
+    const choice = form.elements.duration_choice.value;
+    help.textContent = holdDefaultLine(choice === "custom" ? form.elements.duration_days.value : choice);
+}
+
 /** Shows the custom days input only when "Custom days" is chosen. */
 export function updatePlanDurationField(select) {
     const form = select.form;
@@ -180,6 +199,7 @@ export function updatePlanDurationField(select) {
     if (!custom) return;
     custom.hidden = select.value !== "custom";
     setFieldError(form, "duration", false);
+    updatePlanHoldDefault(form);
     if (!custom.hidden) form.elements.duration_days.focus();
 }
 
@@ -198,6 +218,12 @@ export async function handlePlanSubmit(form, onRender) {
     const price = Number(priceValue);
     const graceValue = String(values.get("grace_days") ?? "").trim();
     const graceDays = graceValue === "" ? null : Number(graceValue);
+    const holdDaysValue = String(values.get("max_hold_days") ?? "").trim();
+    const maxHoldDays = holdDaysValue === "" ? null : Number(holdDaysValue);
+    const holdsValue = String(values.get("max_holds") ?? "").trim();
+    const maxHolds = holdsValue === "" ? null : Number(holdsValue);
+    const holdDaysInvalid = maxHoldDays !== null && (!Number.isInteger(maxHoldDays) || maxHoldDays < 1 || maxHoldDays > 365);
+    const holdsInvalid = maxHolds !== null && (!Number.isInteger(maxHolds) || maxHolds < 0 || maxHolds > 12);
     const nameInvalid = !name;
     const durationInvalid = !Number.isInteger(duration) || duration <= 0;
     const priceInvalid = !priceValue || !Number.isFinite(price) || price < 0;
@@ -206,7 +232,9 @@ export async function handlePlanSubmit(form, onRender) {
     setFieldError(form, "duration", durationInvalid);
     setFieldError(form, "price", priceInvalid);
     setFieldError(form, "grace", graceInvalid);
-    if (nameInvalid || durationInvalid || priceInvalid || graceInvalid) return;
+    setFieldError(form, "holddays", holdDaysInvalid);
+    setFieldError(form, "holds", holdsInvalid);
+    if (nameInvalid || durationInvalid || priceInvalid || graceInvalid || holdDaysInvalid || holdsInvalid) return;
 
     const payload = {
         name,
@@ -214,6 +242,8 @@ export async function handlePlanSubmit(form, onRender) {
         duration_days: duration,
         price,
         grace_days: graceDays,
+        max_hold_days: maxHoldDays,
+        max_holds: maxHolds,
         is_active: values.get("is_active") === "true"
     };
     const id = form.dataset.id;

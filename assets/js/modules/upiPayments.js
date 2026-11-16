@@ -277,12 +277,14 @@ export function receiptText(receipt) {
     const lines = [
         gym.name,
         `Payment receipt ${payment.receipt_number}`,
+        payment.kind === "hold_fee" ? "For: plan hold fee" : "",
         `Date: ${formatDate(payment.paid_on)}`,
         member ? `Member: ${member.full_name}${member.member_code ? ` (${member.member_code})` : ""}` : "",
         `Amount: ${formatINR(payment.amount)}`,
         `Method: ${method}`,
         membership ? `Plan: ${membership.plan_name}${periodText(membership) ? `, ${periodText(membership)}` : ""}` : "",
-        membership?.end_date ? `Valid till: ${validTillText(membership)}` : "",
+        membership?.end_date && payment.kind !== "hold_fee" ? `Valid till: ${validTillText(membership)}` : "",
+        payment.refunded_at ? "Refunded: this hold fee was given back." : "",
         receipt.balance === null ? "" : receipt.balance > 0 ? `Balance due: ${formatINR(receipt.balance)}` : "Paid in full",
         gym.phone ? `Questions? Call ${gym.phone}` : "",
         "This is a payment receipt, not a tax invoice."
@@ -297,11 +299,12 @@ export const RECEIPT_HEIGHT = 1350;
 export async function createReceiptCard(receipt) {
     const { payment, member, membership, gym } = receipt;
     const rows = [
+        ["For", payment.kind === "hold_fee" ? (payment.refunded_at ? "Plan hold fee (refunded)" : "Plan hold fee") : ""],
         ["Method", methodLabel(payment.method)],
         ["UPI reference", payment.upi_reference || ""],
         ["Plan", membership?.plan_name || ""],
         ["Period", periodText(membership)],
-        ["Valid till", validTillText(membership)]
+        ["Valid till", payment.kind === "hold_fee" ? "" : validTillText(membership)]
     ].filter(([, value]) => value);
     const status = receipt.balance === null ? null : receipt.balance > 0
         ? { text: `Balance due ${formatINR(receipt.balance)}`, color: CARD_COLORS.brick }
@@ -485,7 +488,7 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
                 <div><label>Member ID</label><strong>${escapeHTML(member?.member_code || "—")}</strong></div>
                 <div><label>Method</label><strong>${escapeHTML(methodLabel(payment.method))}</strong></div>
                 ${payment.upi_reference ? `<div><label>UPI reference</label><strong>${escapeHTML(payment.upi_reference)}</strong></div>` : ""}
-                ${membership ? `<div><label>Plan</label><strong>${escapeHTML(membership.plan_name)}</strong></div><div><label>Valid till</label><strong>${escapeHTML(validTillText(membership))}</strong></div>` : ""}
+                ${membership ? `<div><label>Plan</label><strong>${escapeHTML(membership.plan_name)}</strong></div>${payment.kind === "hold_fee" ? `<div><label>For</label><strong>${payment.refunded_at ? "Plan hold fee (refunded)" : "Plan hold fee"}</strong></div>` : `<div><label>Valid till</label><strong>${escapeHTML(validTillText(membership))}</strong></div>`}` : ""}
             </div>
             ${blocker ? `<p class="helper-text">${escapeHTML(blocker)} You can still share the receipt card.</p>` : ""}
         </div>`,

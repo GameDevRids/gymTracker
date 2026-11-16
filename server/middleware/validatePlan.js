@@ -8,6 +8,9 @@ const planValueSchemas = {
     price: z.number().finite().nonnegative(),
     // Days of grace after this plan ends; null = use the gym's default (migration 020).
     grace_days: z.number().int().min(0).max(60).nullable(),
+    // The longest hold and the number of holds this plan allows; null = the default for its length (migration 021).
+    max_hold_days: z.number().int().min(1).max(365).nullable(),
+    max_holds: z.number().int().min(0).max(12).nullable(),
     is_active: z.boolean()
 };
 const editableFields = new Set(Object.keys(planValueSchemas));
@@ -23,6 +26,8 @@ function planFieldError(field) {
     if (field === "duration_days") return "Duration must be a positive whole number of days.";
     if (field === "price") return "Price must be a valid non-negative number.";
     if (field === "grace_days") return "Grace must be a whole number of days from 0 to 60, or empty to use the gym default.";
+    if (field === "max_hold_days") return "The longest hold must be 1 to 365 days, or empty to use the default.";
+    if (field === "max_holds") return "The number of holds must be 0 to 12, or empty to use the default.";
     return "Plan status must be active or inactive.";
 }
 

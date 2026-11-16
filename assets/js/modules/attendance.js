@@ -148,8 +148,9 @@ export function renderVisitsPage() {
             return `<tr data-attendance-row><td data-label="Time">${escapeHTML(timeText(record.checkedInAt))}</td><td data-label="Member"><button class="text-button" data-action="profile" data-id="${escapeHTML(record.memberId)}">${escapeHTML(name)}</button><small class="cell-sub">${escapeHTML(record.memberCode)}</small></td><td data-label="Method">${escapeHTML(methodLabel(record.source))}</td><td data-label="Membership">${statusPill(record.status)}</td></tr>`;
         }).join("")}</tbody></table></div>`;
     }
-    // Who may check in follows the member's status: grace is let in with a warning, lapsed is not.
-    const policy = "Members in grace are checked in with a warning; lapsed members are asked to renew at the desk.";
+    // Who may check in follows the member's status: grace is let in with a warning, lapsed is not,
+    // and a plan on hold is resumed by the poster (or by staff) first.
+    const policy = "Members in grace are checked in with a warning; lapsed members are asked to renew at the desk; a plan on hold is resumed when the member checks in on the poster, or by staff.";
     return `<div class="page-heading"><div><h1>Visits</h1><p>Check-ins at the entrance, stored for your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="checkin-by-name">Check in manually</button><button class="button button-primary" data-view="scan">Check-in screen</button></div></div>
         ${pending ? `<div class="note-box import-note" role="status"><span><strong>${plural(pending, "check-in")}</strong> saved only in this browser by an older version.</span><button class="button button-secondary button-small" data-action="open-local-data">Move my saved data to the cloud</button></div>` : ""}
         <div class="summary-row"><span class="summary-chip"><strong>${todayCount}</strong> today</span><span class="summary-chip"><strong>${weekCount}</strong> this week</span><span class="summary-chip"><strong>${monthVisitors}</strong> unique visitors this month</span></div>
@@ -325,7 +326,9 @@ async function ensureMemberLoaded(apiMember) {
 function resultSentence(data) {
     const name = data.member?.full_name || "Member";
     const time = timeText(data.attendance?.checked_in_at);
+    if (data.result === "checked_in" && data.resumed) return [`${name} is back: checked in at ${time}. The plan now ends on ${formatDate(data.resumed.new_end_date)}.`, "success"];
     if (data.result === "checked_in") return [`${name} checked in at ${time}.`, "success"];
+    if (data.result === "on_hold") return [`${name} was not checked in: the plan has been on hold since ${formatDate(data.hold?.starts_on)}. Resume it first.`, "error"];
     if (data.result === "already_checked_in") return [`${name} already checked in today at ${time}.`, "success"];
     if (data.blocked) return [`${name} was not checked in: ${data.result === "expired" ? `the plan ended on ${formatDate(data.ended_on || data.membership?.end_date)} and grace is over` : "no active membership"}. Please renew at the desk.`, "error"];
     if (data.result === "grace") return [`${name} checked in. ${graceLine(data)}.`, "success"];
@@ -337,11 +340,13 @@ function onCheckInScreen() {
     return Boolean(document.querySelector("#checkin-root"));
 }
 
-export async function manualCheckIn(memberId, onChange = () => {}) {
+/** Staff check a member in by hand. resumeHold: "Resume and check in" for a plan that is on hold. */
+export async function manualCheckIn(memberId, onChange = () => {}, { resumeHold = false } = {}) {
     try {
-        const response = await apiClient.post("/api/attendance/manual", { member_id: memberId });
+        const response = await apiClient.post("/api/attendance/manual", resumeHold ? { member_id: memberId, resume_hold: true } : { member_id: memberId });
         addToFeed(response.data);
         if (onCheckInScreen()) showResult(response.data);
+        else if (response.data.result === "on_hold") askResumeAndCheckIn(response.data);
         else toast(...resultSentence(response.data));
         onChange();
         return response.data;
@@ -349,6 +354,17 @@ export async function manualCheckIn(memberId, onChange = () => {}) {
         toast(error.message || "The check-in could not be recorded.", "error");
         return null;
     }
+}
+
+/** Outside the Check-in screen: the plan is on hold, so ask whether to resume it and check in. */
+function askResumeAndCheckIn(data) {
+    const member = data.member || {};
+    openModal({
+        title: "Plan on hold",
+        subtitle: member.full_name || "",
+        body: `<p class="confirm-copy">The plan has been on hold since <strong>${escapeHTML(formatDate(data.hold?.starts_on))}</strong>. Resuming ends the hold today and moves the plan's end date later by the days held. ${escapeHTML(member.full_name || "The member")} was not checked in yet.</p>`,
+        footer: `<button class="button button-secondary" type="button" data-action="close-modal">Not now</button><button class="button button-primary" type="button" data-action="checkin-resume" data-id="${escapeHTML(member.id || "")}">Resume and check in</button>`
+    });
 }
 
 // ---------- "Can't scan? Check in manually" ----------
@@ -735,7 +751,9 @@ export function showResult(data) {
     if (data.result === "checked_in") {
         tone = "green";
         vibrate(80);
-        html = `<p class="scan-title">Welcome, ${escapeHTML(first)} ✓</p><p class="scan-line">Checked in ${escapeHTML(time)}</p>${plan ? `<p class="scan-sub">${escapeHTML(plan)}</p>` : ""}`;
+        html = data.resumed
+            ? `<p class="scan-title">Welcome back, ${escapeHTML(first)} ✓</p><p class="scan-line">Checked in ${escapeHTML(time)}</p><p class="scan-sub"><strong>Plan now ends ${escapeHTML(formatDate(data.resumed.new_end_date))}.</strong> The hold lasted ${plural(Number(data.resumed.hold?.days_held) || 0, "day")}.</p>`
+            : `<p class="scan-title">Welcome, ${escapeHTML(first)} ✓</p><p class="scan-line">Checked in ${escapeHTML(time)}</p>${plan ? `<p class="scan-sub">${escapeHTML(plan)}</p>` : ""}`;
     } else if (data.result === "already_checked_in") {
         tone = "amber";
         vibrate([60, 80, 60]);
@@ -751,6 +769,11 @@ export function showResult(data) {
         duration = ACTION_RESULT_MS;
         const starts = formatDate(membership?.start_date);
         html = `<p class="scan-title">${escapeHTML(name)}</p><p class="scan-line">Plan starts on ${escapeHTML(starts)}</p><p class="scan-sub">${data.blocked ? "Not checked in." : "Checked in."}</p><div class="scan-actions">${scanner ? `<button class="button button-secondary" type="button" data-action="scanner-continue">Continue scanning</button>` : `<button class="button button-secondary" type="button" data-action="checkin-result-close">Done</button>`}</div>`;
+    } else if (data.result === "on_hold") {
+        tone = "amber";
+        vibrate([60, 80, 60]);
+        duration = ACTION_RESULT_MS;
+        html = `<p class="scan-title">${escapeHTML(name)}</p><p class="scan-line">Plan on hold since ${escapeHTML(formatDate(data.hold?.starts_on))}</p><p class="scan-sub"><strong>Not checked in.</strong> Resuming ends the hold today and moves the plan's end date later.</p><div class="scan-actions"><button class="button button-primary" type="button" data-action="checkin-resume" data-id="${escapeHTML(data.member?.id || "")}">Resume and check in</button>${scanner ? `<button class="button button-secondary" type="button" data-action="scanner-continue">Continue scanning</button>` : `<button class="button button-secondary" type="button" data-action="checkin-result-close">Done</button>`}</div>`;
     } else if (data.result === "expired" || data.result === "no_membership") {
         tone = "red";
         vibrate([200, 100, 200]);
@@ -932,6 +955,7 @@ export function handleAttendanceAction(action, element, onChange) {
     switch (action) {
         case "checkin-by-name": openCheckInByName(); return true;
         case "checkin-member": closeModal(); manualCheckIn(element.dataset.id, onChange); return true;
+        case "checkin-resume": closeModal(); manualCheckIn(element.dataset.id, onChange, { resumeHold: true }); return true;
         case "scanner-continue": continueScanning(); return true;
         case "checkin-result-close": continueScanning(); return true;
         case "scanner-retry": restartScanner(); return true;

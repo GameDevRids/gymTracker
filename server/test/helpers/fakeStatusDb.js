@@ -1,21 +1,28 @@
 // A fake database for the member-status service (services/memberStatusService.js): gyms (for the
-// gym's rules), members, member_memberships and whatsapp_messages. Filters by eq/is/in, pages with
-// range, and records every query so tests can check it stayed inside one gym.
+// gym's rules), members, member_memberships, membership_holds and whatsapp_messages. Filters by eq/is/in, pages with
+// range, and records every query (and rpc call) so tests can check it stayed inside one gym.
 
 export const statusGym = "00000000-0000-4000-8000-0000000000a1";
 export const otherGym = "00000000-0000-4000-8000-0000000000b1";
 
-export function fakeStatusDb({ gyms = { [statusGym]: { expiry_grace_days: 3, lapsed_list_days: 60 } }, members = [], memberships = [], messages = [] } = {}) {
+export function fakeStatusDb({ gyms = { [statusGym]: { expiry_grace_days: 3, lapsed_list_days: 60 } }, members = [], memberships = [], messages = [], holds = [] } = {}) {
     const tables = {
         gyms: Object.entries(gyms).map(([id, row]) => ({ id, ...row })),
         members: members.map((row) => ({ gym_id: statusGym, archived_at: null, ...row })),
         member_memberships: memberships.map((row) => ({ gym_id: statusGym, status: "assigned", ...row })),
-        whatsapp_messages: messages.map((row) => ({ gym_id: statusGym, ...row }))
+        whatsapp_messages: messages.map((row) => ({ gym_id: statusGym, ...row })),
+        membership_holds: holds.map((row) => ({ gym_id: statusGym, cancelled: false, ended_on: null, ...row }))
     };
     const queries = [];
+    const rpcs = [];
     return {
         tables,
         queries,
+        rpcs,
+        rpc(name, args) {
+            rpcs.push([name, args]);
+            return Promise.resolve({ data: 0, error: null });
+        },
         from(table) {
             const query = { table, filters: [] };
             queries.push(query);

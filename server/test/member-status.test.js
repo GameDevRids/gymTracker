@@ -126,7 +126,7 @@ test("Lapsed and Old members lists, most recently ended first, with when a messa
 
 test("Overview counts come from the same rule, and archived members are left out", async () => {
     const counts = countStatuses(await memberStatuses(statusGym, db(), today));
-    assert.deepEqual(counts, { active: 1, expiring: 2, upcoming: 0, in_grace: 1, lapsed: 1, old: 1, none: 1 });
+    assert.deepEqual(counts, { active: 1, expiring: 2, upcoming: 0, in_grace: 1, lapsed: 1, old: 1, none: 1, on_hold: 0 });
 });
 
 test("every query stays inside the gym", async () => {

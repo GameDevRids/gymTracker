@@ -4,6 +4,8 @@ import { selectCurrentMembership } from "./membershipsService.js";
 import { CheckinSettingsError, loadGymCheckin } from "./checkinSettingsService.js";
 import { QR_TOKEN_PATTERN, daysLeft, indiaDate } from "../../assets/js/checkin.js";
 import { DEFAULT_LAPSED_LIST_DAYS, checkInDecision, memberStatusFor } from "../../assets/js/memberStatus.js";
+import { openHolds, settleHolds } from "./memberStatusService.js";
+import { resumeHold } from "./holdsService.js";
 
 const attendanceColumns = "id,gym_id,member_id,check_in_date,checked_in_at,method,membership_status_at_check_in,recorded_by,member_device_id,created_at";
 const memberCheckinColumns = "id,full_name,member_code,phone,whatsapp_opt_in";
@@ -97,18 +99,31 @@ async function todaysCheckIn(memberId, gymId, today, client) {
 /**
  * The one path every check-in takes (member QR, entrance poster, manual). The member's status
  * (assets/js/memberStatus.js) decides: active, expiring and upcoming are checked in; in grace is
- * checked in with a warning; lapsed, old and no plan are not. It records today's check-in, or reports the one
- * already recorded. The unique index on (gym, member, IST day) decides, so two check-ins at
+ * checked in with a warning; lapsed, old and no plan are not. A plan on hold is not checked in
+ * either, unless resumeHold is true (the entrance poster, or staff tapping "Resume and check in"):
+ * then the hold ends first (the member came back) and the check-in goes ahead with the new end
+ * date. It records today's check-in, or reports the one already recorded. The unique index on (gym, member, IST day) decides, so two check-ins at
  * the same moment cannot both be recorded. Blocked check-ins are not stored.
  */
-export async function recordCheckIn(member, method, gym, { userId = null, deviceId = null, client = supabaseClient, now = new Date() } = {}) {
+export async function recordCheckIn(member, method, gym, { userId = null, deviceId = null, resumeHold: resumeOnCheckIn = false, client = supabaseClient, now = new Date() } = {}) {
     const gymId = gym.id;
     const today = indiaDate(now);
-    const memberships = await membershipsOf([member.id], gymId, client);
-    const state = memberStatusFor(memberships, today, {
+    const rules = {
         lapsedListDays: Number.isInteger(gym.lapsed_list_days) ? gym.lapsed_list_days : DEFAULT_LAPSED_LIST_DAYS,
         defaultGraceDays: gym.expiry_grace_days || 0
-    });
+    };
+    const load = async () => {
+        await settleHolds(gymId, member.id, client);
+        const [memberships, holds] = await Promise.all([membershipsOf([member.id], gymId, client), openHolds(gymId, client, [member.id]).catch(() => [])]);
+        return { memberships, state: memberStatusFor(memberships, today, { ...rules, holds }) };
+    };
+    let { memberships, state } = await load();
+    let resumed = null;
+    if (state.status === "on_hold" && resumeOnCheckIn) {
+        const result = await resumeHold(member.id, state.hold.id, { gymId, userId, reason: "check_in" }, client);
+        resumed = { hold: result.hold, new_end_date: result.membership?.end_date || null };
+        ({ memberships, state } = await load());
+    }
     const membership = state.membership || selectCurrentMembership(memberships, today);
     const decision = checkInDecision(state.status);
     const status = decision.stored;
@@ -120,7 +135,9 @@ export async function recordCheckIn(member, method, gym, { userId = null, device
         grace_days_left: state.graceDaysLeft ?? null,
         grace_until: state.graceUntil || null,
         ended_on: state.endedOn || null,
-        renewal_price: ["active", "expiring", "upcoming"].includes(state.status) ? null : await renewalPrice(membership, gymId, client)
+        hold: state.hold,
+        resumed,
+        renewal_price: ["active", "expiring", "upcoming", "on_hold"].includes(state.status) ? null : await renewalPrice(membership, gymId, client)
     };
     if (outcome.blocked) {
         const existing = await todaysCheckIn(member.id, gymId, today, client);
@@ -173,7 +190,7 @@ export async function scanCheckIn(token, gymId, userId = null, client = supabase
 }
 
 /** Staff check a member in by hand. Works with either method; the gym's policy still applies. */
-export async function manualCheckIn(memberId, gymId, userId = null, client = supabaseClient, now = new Date()) {
+export async function manualCheckIn(memberId, gymId, userId = null, client = supabaseClient, now = new Date(), { resumeHold = false } = {}) {
     requireContext(client, gymId);
     const gym = await gymCheckin(gymId, client);
     const { data: member, error } = await client
@@ -185,7 +202,7 @@ export async function manualCheckIn(memberId, gymId, userId = null, client = sup
         .maybeSingle();
     if (error) databaseError(error);
     if (!member) throw new AttendanceError(404, "Member not found.");
-    return recordCheckIn(member, "manual", gym, { userId, client, now });
+    return recordCheckIn(member, "manual", gym, { userId, resumeHold, client, now });
 }
 
 // ---------- "Can't scan? Check in manually" ----------

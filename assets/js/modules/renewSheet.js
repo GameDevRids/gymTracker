@@ -254,6 +254,18 @@ export async function openRenewSheet(memberId, { onChanged = () => {} } = {}) {
         toast("This member could not be found. Refresh the page and try again.", "error");
         return;
     }
+    // A plan on hold cannot be renewed: the hold has to end first (the database refuses it too).
+    if (member.memberStatus === "on_hold") {
+        const hold = member.statusDetail?.hold;
+        openModal({
+            title: `Renew ${escapeHTML(member.name)}`,
+            subtitle: "",
+            body: `<div class="renew-blocked" role="alert"><p><strong>Resume the plan first.</strong></p><p class="helper-text">This plan has been on hold since ${escapeHTML(formatDate(hold?.starts_on))}. A new plan can't be added while it is on hold. Resuming moves the plan's end date later by the days held.</p></div>`,
+            footer: `<button class="button button-secondary" data-action="close-modal" type="button">Close</button>${hold?.id ? `<button class="button button-primary" data-action="hold-resume" data-id="${escapeHTML(memberId)}" data-hold="${escapeHTML(hold.id)}" type="button">Resume plan</button>` : ""}`
+        });
+        document.querySelector("#modal-root .modal")?.classList.add("hold-sheet");
+        return;
+    }
     const token = Symbol("renew");
     sheet = { token, memberId, plans: [], memberships: [], settings: NO_SETTINGS, key: newKey(), today: indiaISODate(), onChanged, saving: false, quiet: true, serverError: "", welcomeBack: false };
     openModal({ title: `Renew ${escapeHTML(member.name)}`, subtitle: "", body: loadingBody, footer: cancelFooter });

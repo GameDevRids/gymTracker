@@ -3,7 +3,8 @@ import { WELCOME_LANGUAGES, welcomeTemplateProblem } from "../../assets/js/welco
 import { reminderTemplateProblem } from "../../assets/js/reminderMessage.js";
 
 // "lapsed": the "Send renewal message" to a lapsed member (migration 020).
-const REMINDER_TYPES = ["welcome", "expiry", "payment", "inactive", "lapsed"];
+// "hold_return": the "Send welcome back message" after a plan hold ends (migration 021).
+const REMINDER_TYPES = ["welcome", "expiry", "payment", "inactive", "lapsed", "hold_return"];
 // Message templates saved per gym, and the rule each saved body must follow.
 const TEMPLATE_PROBLEMS = { welcome: welcomeTemplateProblem, expiry_reminder: reminderTemplateProblem };
 
@@ -41,7 +42,7 @@ export function validateMessagePayload(request, response, next) {
 export function validateMessageListQuery(request, response, next) {
     const type = request.query.reminder_type;
     if (type !== undefined && !REMINDER_TYPES.includes(type)) {
-        return sendValidationError(response, "reminder_type must be welcome, expiry, payment, inactive or lapsed.");
+        return sendValidationError(response, "reminder_type must be welcome, expiry, payment, inactive, lapsed or hold_return.");
     }
     request.messageListQuery = { reminderType: type };
     next();

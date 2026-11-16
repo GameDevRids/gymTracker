@@ -19,9 +19,11 @@ export function validateScan(request, response, next) {
 }
 
 export function validateManualCheckIn(request, response, next) {
-    const parsed = z.object({ member_id: uuid }).strict().safeParse(request.body);
+    // resume_hold: staff tapped "Resume and check in" for a member whose plan is on hold.
+    const parsed = z.object({ member_id: uuid, resume_hold: z.boolean().optional() }).strict().safeParse(request.body);
     if (!parsed.success) return invalid(response, "Choose a member to check in.");
     request.checkInMemberId = parsed.data.member_id;
+    request.checkInResumeHold = parsed.data.resume_hold === true;
     next();
 }
 

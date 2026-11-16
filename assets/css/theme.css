@@ -189,6 +189,11 @@ tbody tr:hover { background: #F7F9FA; }
 .status-expired, .status-overdue, .status-cancelled { color: var(--brick); background: var(--brick-tint); }
 .status-suspended, .status-pending, .status-upcoming, .status-expiring { color: var(--marigold-ink); background: var(--marigold-tint); }
 .status-inactive, .status-unassigned { color: var(--ink-3); background: var(--slate-soft); }
+/* Member statuses (assets/js/memberStatus.js): here, after the generic .status above, so they win. */
+.status-in_grace, .status-refunded { color: var(--marigold-ink); background: var(--marigold-tint); }
+.status-lapsed { color: var(--brick); background: var(--brick-tint); }
+.status-old, .status-none { color: var(--ink-3); background: var(--slate-soft); }
+.status-on_hold { color: #2f4f7a; background: #e6eefa; }
 .badge-soft { color: var(--leaf); background: var(--leaf-tint); font-size: 12px; }
 
 /* ---------- Summary chips, alerts, notes ---------- */

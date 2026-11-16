@@ -16,7 +16,7 @@ import {
 } from "./state.js";
 import { renderDashboard, drawDashboardCharts } from "./modules/dashboard.js";
 import { MEMBERS_PAGE_SIZE, filterMembers, renderMemberResults, renderMembers, renderProfile } from "./modules/members.js";
-import { renderPlansPage, loadPlans, setPlanSearch, setPlanStatus, handlePlanAction, handlePlanSubmit, updatePlanDurationField } from "./modules/plans.js";
+import { renderPlansPage, loadPlans, setPlanSearch, setPlanStatus, handlePlanAction, handlePlanSubmit, updatePlanDurationField, updatePlanHoldDefault } from "./modules/plans.js";
 import {
     handleMembershipAction,
     loadAllMemberships,
@@ -56,6 +56,7 @@ import { bindAuthPasswordLinks, checkAccountBeforeApp, downloadGymWorkbook, hand
 import { APP_VERSION } from "./version.js";
 import { startErrorReporting } from "./errorReporting.js";
 import { handleRenewSubmit, openRenewSheet } from "./modules/renewSheet.js";
+import { handleHoldAction, handleHoldSubmit, loadMemberHolds } from "./modules/holds.js";
 import { loadRenewalSettings, saveRenewalSettings } from "./modules/renewalSettingsUi.js";
 import { dropFromLapsed, handleLapsedClick, lapsedTab, loadLapsed, reloadLapsed } from "./modules/lapsed.js";
 import { hideSetupChecklist, loadSetupPlans } from "./modules/setupChecklist.js";
@@ -239,6 +240,21 @@ function afterRenewal(result) {
     render();
 }
 
+// After a hold is started, resumed or cancelled: the plan's dates, the member's status and the lists
+// behind the sheet (Expiring soon, Lapsed, totals, payments) are reloaded.
+function afterHoldChange(result) {
+    const memberId = result.hold.member_id;
+    if (result.hold.ended_on === null && !result.hold.cancelled) {
+        expiringMemberships = expiringMemberships.filter((item) => item.member?.id !== memberId);
+    }
+    reloadLapsed(rerenderLapsed);
+    refreshTotals(memberId);
+    loadAllMemberships(() => render());
+    loadExpiringMemberships();
+    loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
+    render();
+}
+
 // Totals, the member's balance and the payments list change after payments, plans and archives.
 function refreshTotals(memberId = "") {
     loadSummary(rerenderSummaryViews);
@@ -253,7 +269,9 @@ function mapPayment(payment) {
         amount: Number(payment.amount),
         date: payment.paid_on,
         method: payment.method.charAt(0).toUpperCase() + payment.method.slice(1),
-        status: "paid",
+        // A hold fee that was given back when its hold was cancelled shows as refunded.
+        kind: payment.kind || "plan",
+        status: payment.refunded_at ? "refunded" : "paid",
         notes: payment.note || "",
         receiptNumber: payment.receipt_number || "",
         upiReference: payment.upi_reference || ""
@@ -412,6 +430,7 @@ function navigate(view) {
             });
     } else if (view === "profile" && profileId) {
         loadMemberMembershipHistory(profileId);
+        loadMemberHolds(profileId, () => { if (currentView === "profile") render(); });
         loadMemberPaymentsFromApi(profileId);
         loadProfileConsent(profileId);
         loadProfileWelcome(profileId);
@@ -912,7 +931,7 @@ function handleAction(action, target) {
         case "copy-message": copyMessage(target.dataset.message || ""); break;
         // Receipts are numbered and kept by the server.
         case "receipt": openReceiptDialog(id); break;
-        default: break;
+        default: handleHoldAction(action, target, afterHoldChange); break;
     }
 }
 
@@ -1341,7 +1360,7 @@ async function saveSettings(form) {
 async function handleSubmit(event) {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    if (handleAuthPasswordSubmit(event) || handleTermsSubmit(event) || handleRenewSubmit(event)) return;
+    if (handleAuthPasswordSubmit(event) || handleTermsSubmit(event) || handleRenewSubmit(event) || handleHoldSubmit(event)) return;
     if (form.id === "delete-gym-form") {
         event.preventDefault();
         await submitDeleteGym(form, activeSession, closeModal);
@@ -1592,6 +1611,7 @@ document.addEventListener("change", (event) => {
     if (target.matches("#membership-assignment-form [name='plan_id'], #membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
     if (target.id === "plan-status-filter") { setPlanStatus(target.value, renderPlansIfCurrent); return; }
     if (target.id === "form-duration_choice") { updatePlanDurationField(target); return; }
+    if (target.id === "form-duration_days") { updatePlanHoldDefault(target.form); return; }
     if (target.id === "member-filter") {
         memberFilters.filter = target.value;
         memberFilters.page = 1;

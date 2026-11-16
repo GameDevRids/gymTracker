@@ -24,7 +24,11 @@ const renewalSettingsSchema = z.object({
     expiry_grace_days: z.number().int().min(0).max(60),
     welcome_back_discount_type: z.enum(["amount", "percent"]),
     welcome_back_discount_value: z.number().finite().min(0).max(10000000),
-    lapsed_list_days: z.number().int().min(7).max(365)
+    lapsed_list_days: z.number().int().min(7).max(365),
+    // Plan holds (migration 021): 0 turns the minimum off; the fee is charged when a hold starts.
+    min_hold_days: z.number().int().min(0).max(365),
+    hold_fee_enabled: z.boolean(),
+    hold_fee_amount: z.number().finite().min(0).max(10000000)
 }).partial().strict();
 
 export function validateRenewalSettings(request, response, next) {
@@ -35,13 +39,19 @@ export function validateRenewalSettings(request, response, next) {
             expiry_grace_days: "Grace must be a whole number of days from 0 to 60.",
             welcome_back_discount_type: "Choose an amount or a percent for the welcome-back discount.",
             welcome_back_discount_value: "Enter the welcome-back discount (0 or more).",
-            lapsed_list_days: "Keep lapsed members on the list for 7 to 365 days."
+            lapsed_list_days: "Keep lapsed members on the list for 7 to 365 days.",
+            min_hold_days: "The minimum hold must be 0 to 365 days (0 = no minimum).",
+            hold_fee_enabled: "Choose whether a hold fee is charged.",
+            hold_fee_amount: "Enter the hold fee (0 or more)."
         };
         return response.status(400).json({ status: "error", message: messages[field] || "Send only the renewal settings." });
     }
     const values = parsed.data;
     if (values.welcome_back_discount_type === "percent" && values.welcome_back_discount_value > 100) {
         return response.status(400).json({ status: "error", message: "A percent discount can be at most 100." });
+    }
+    if (values.hold_fee_enabled === true && !(values.hold_fee_amount > 0)) {
+        return response.status(400).json({ status: "error", message: "Enter a hold fee above 0, or switch the fee off." });
     }
     if (!Object.keys(values).length) return response.status(400).json({ status: "error", message: "Nothing to change." });
     request.renewalSettings = values;

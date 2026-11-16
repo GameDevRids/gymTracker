@@ -222,7 +222,13 @@ function renderResult(result) {
     const plan = result.membership ? `${result.membership.plan_name}${result.membership.days_left > 0 ? ` · ${result.membership.days_left} day${result.membership.days_left === 1 ? "" : "s"} left` : ""}` : "";
     let tone = "green";
     let html = "";
-    if (result.result === "checked_in") {
+    if (result.result === "checked_in" && result.resumed) {
+        // Coming back from a plan hold: checking in ended it. The new end date is the point of this screen.
+        html = `<h2>Welcome back, ${name}! ✓</h2><p class="big-line">${escapeHTML(time)}</p><p><strong>Your plan now ends on ${escapeHTML(dateText(result.resumed.new_end_date || result.membership?.end_date))}.</strong></p><p>Have a good workout!</p>`;
+    } else if (result.result === "on_hold") {
+        tone = "amber";
+        html = `<h2>Your plan is on hold</h2><p class="big-line">Not checked in</p><p>Please see the front desk.</p>`;
+    } else if (result.result === "checked_in") {
         html = `<h2>You're checked in ✓</h2><p class="big-line">${escapeHTML(time)}</p>${plan ? `<p>${escapeHTML(plan)}</p>` : ""}<p>Have a good workout, ${name}!</p>`;
     } else if (result.result === "already_checked_in") {
         tone = "amber";

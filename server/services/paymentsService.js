@@ -1,7 +1,7 @@
 import { supabaseClient } from "../config/database.js";
 import { getGymSettings } from "./gymSettingsService.js";
 
-const paymentColumns = "id,gym_id,member_id,membership_id,amount,method,paid_on,note,receipt_number,upi_reference,created_at";
+const paymentColumns = "id,gym_id,member_id,membership_id,amount,method,paid_on,note,receipt_number,upi_reference,kind,refunded_at,created_at";
 const PAGE_SIZE = 1000;
 
 export class PaymentsServiceError extends Error {
@@ -128,6 +128,7 @@ export async function listPayments({ page = 1, limit = 50 } = {}, gymId, client 
             .from("payments")
             .select("id,amount")
             .eq("gym_id", gymId)
+            .is("refunded_at", null)
             .gte("paid_on", monthStart)
             .order("id", { ascending: true })
             .range(offset, offset + PAGE_SIZE - 1);
@@ -185,6 +186,7 @@ export async function getReceipt(paymentId, gymId, client = supabaseClient) {
                 .select("id,amount,receipt_number")
                 .eq("membership_id", payment.membership_id)
                 .eq("gym_id", gymId)
+                .eq("kind", "plan")
         ]);
         if (membershipResult.error) databaseError(membershipResult.error);
         if (paymentsResult.error) databaseError(paymentsResult.error);
@@ -194,7 +196,9 @@ export async function getReceipt(paymentId, gymId, client = supabaseClient) {
             .filter((row) => receiptSequence(row.receipt_number) <= upTo)
             .reduce((sum, row) => sum + Number(row.amount || 0), 0);
     }
-    const rawFee = membership ? membership.total_fees ?? membership.price : null;
+    // A hold fee is not part of the plan's fee: its receipt shows no fee, balance or paid-to-date.
+    if (payment.kind === "hold_fee") paidToDate = null;
+    const rawFee = membership && payment.kind !== "hold_fee" ? membership.total_fees ?? membership.price : null;
     const fee = rawFee === null || rawFee === undefined ? null : Number(rawFee);
     const gym = await getGymSettings(gymId, client).catch(() => null);
 

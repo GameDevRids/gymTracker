@@ -14,6 +14,9 @@ export class MemberStatusError extends Error {
 const PAGE = 1000;
 const MISSING = ["PGRST204", "PGRST205", "42703", "42P01"];
 const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,grace_days,start_date,end_date,status,created_at";
+const holdColumns = "id,gym_id,member_id,membership_id,starts_on,planned_return_on,latest_return_on,remaining_days,end_before";
+// Before migration 021 there is no holds table: nobody is on hold, and everything else still works.
+const NO_HOLDS = ["PGRST202", "PGRST205", "42883", "42P01"];
 
 export function indiaToday(now = new Date()) {
     return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
@@ -21,9 +24,43 @@ export function indiaToday(now = new Date()) {
 
 function databaseError(error) {
     if (MISSING.includes(error?.code)) {
-        return new MemberStatusError(503, "Member statuses need the latest database update. Run migration 020_add_grace_and_lapsed_members.sql in Supabase SQL Editor.");
+        return new MemberStatusError(503, "Member statuses need the latest database update. Run migration 020_add_grace_and_lapsed_members.sql and then 021_add_plan_holds.sql in Supabase SQL Editor.");
     }
     return new MemberStatusError(500, "The database could not work out member statuses.");
+}
+
+/**
+ * Saves the holds whose return date (or maximum) has passed: the plan's end moves later by the
+ * days held. Done whenever members are read, so no nightly job is needed. memberId limits it to one
+ * member. Never fails the caller: statuses are also worked out from dates (applyHolds).
+ */
+export async function settleHolds(gymId, memberId = null, client = supabaseClient) {
+    try {
+        const { error } = await client.rpc("gympulse_settle_holds", { p_gym_id: gymId, p_member_id: memberId });
+        return error ? 0 : 1;
+    } catch {
+        return 0;
+    }
+}
+
+/** The gym's holds that are not cancelled or ended: running, or booked to start. */
+export async function openHolds(gymId, client = supabaseClient, memberIds = null) {
+    const rows = [];
+    const parts = memberIds ? Array.from({ length: Math.ceil(memberIds.length / 150) }, (_, index) => memberIds.slice(index * 150, index * 150 + 150)) : [null];
+    for (const part of parts) {
+        for (let from = 0; ; from += PAGE) {
+            let query = client.from("membership_holds").select(holdColumns).eq("gym_id", gymId).eq("cancelled", false).is("ended_on", null);
+            if (part) query = query.in("member_id", part);
+            const { data, error } = await query.order("id", { ascending: true }).range(from, from + PAGE - 1);
+            if (error) {
+                if (NO_HOLDS.includes(error.code)) return [];
+                throw databaseError(error);
+            }
+            rows.push(...(data || []));
+            if (!data || data.length < PAGE) break;
+        }
+    }
+    return rows;
 }
 
 /** The gym's rules for statuses: lapsed_list_days and the default grace for older plans. */
@@ -53,13 +90,17 @@ async function readAll(query) {
 export async function memberStatuses(gymId, client = supabaseClient, today = indiaToday()) {
     if (!client) throw new MemberStatusError(503, "Supabase is not configured.");
     if (!gymId) throw new MemberStatusError(403, "Gym is required.");
-    const [rules, members, memberships] = await Promise.all([
+    await settleHolds(gymId, null, client);
+    const [rules, members, memberships, holds] = await Promise.all([
         gymStatusRules(gymId, client),
         readAll(() => client.from("members").select("id,full_name,member_code,phone,whatsapp_opt_in,status")
             .eq("gym_id", gymId).is("archived_at", null).order("id", { ascending: true })),
         readAll(() => client.from("member_memberships").select(membershipColumns)
-            .eq("gym_id", gymId).order("id", { ascending: true }))
+            .eq("gym_id", gymId).order("id", { ascending: true })),
+        openHolds(gymId, client)
     ]);
+    const holdsByMember = new Map();
+    for (const hold of holds) holdsByMember.set(hold.member_id, [...(holdsByMember.get(hold.member_id) || []), hold]);
     const byMember = new Map();
     for (const membership of memberships) {
         const list = byMember.get(membership.member_id) || [];
@@ -67,14 +108,14 @@ export async function memberStatuses(gymId, client = supabaseClient, today = ind
         byMember.set(membership.member_id, list);
     }
     return members.map((member) => {
-        const state = memberStatusFor(byMember.get(member.id) || [], today, rules);
+        const state = memberStatusFor(byMember.get(member.id) || [], today, { ...rules, holds: holdsByMember.get(member.id) || [] });
         return { member: { ...member, whatsapp_opt_in: member.whatsapp_opt_in === true }, state: { ...state, remindable: remindable(state) }, rules };
     });
 }
 
 /** How many members are in each status, for the Overview. */
 export function countStatuses(rows) {
-    const counts = { active: 0, expiring: 0, upcoming: 0, in_grace: 0, lapsed: 0, old: 0, none: 0 };
+    const counts = { active: 0, expiring: 0, upcoming: 0, in_grace: 0, lapsed: 0, old: 0, none: 0, on_hold: 0 };
     for (const { state } of rows) counts[state.status] = (counts[state.status] || 0) + 1;
     return counts;
 }

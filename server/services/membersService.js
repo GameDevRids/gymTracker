@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { supabaseClient } from "../config/database.js";
 import { selectCurrentMembership } from "./membershipsService.js";
-import { gymStatusRules, indiaToday } from "./memberStatusService.js";
+import { gymStatusRules, indiaToday, openHolds, settleHolds } from "./memberStatusService.js";
 import { DEFAULT_LAPSED_LIST_DAYS, memberStatusFor } from "../../assets/js/memberStatus.js";
 import { removePhotoBeforeArchive } from "./memberPhotosService.js";
 
@@ -112,12 +112,14 @@ function toMoney(value) {
     return Math.round(Number(value || 0) * 100) / 100;
 }
 
-// Billed = fees of every non-cancelled membership; paid = every recorded payment. Both come from the database.
+// Billed = fees of every non-cancelled membership; paid = every plan payment (a hold fee is not one). Both come from the database.
 export function memberBilling(memberships, payments) {
     const billed = toMoney(memberships
         .filter((membership) => membership.status !== "cancelled")
         .reduce((sum, membership) => sum + Number(membership.total_fees ?? membership.price ?? 0), 0));
-    const paid = toMoney(payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+    const paid = toMoney(payments
+        .filter((payment) => (payment.kind || "plan") === "plan")
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
     return { billed, paid, outstanding: Math.max(0, toMoney(billed - paid)) };
 }
 
@@ -125,7 +127,8 @@ async function addCurrentMemberships(members, gymId, client) {
     if (!members.length) return members;
     const memberIds = members.map((member) => member.id);
     const today = indiaToday();
-    const [rules, data, payments] = await Promise.all([
+    await settleHolds(gymId, null, client);
+    const [rules, data, payments, holds] = await Promise.all([
         // The members list never fails over a status detail: default rules if the gym's can't be read.
         gymStatusRules(gymId, client).catch(() => ({ lapsedListDays: DEFAULT_LAPSED_LIST_DAYS, defaultGraceDays: 0 })),
         readAllRows(() => client
@@ -138,11 +141,14 @@ async function addCurrentMemberships(members, gymId, client) {
             .order("id", { ascending: false }), "membership-history"),
         readAllRows(() => client
             .from("payments")
-            .select("id,member_id,amount")
+            .select("id,member_id,amount,kind")
             .in("member_id", memberIds)
             .eq("gym_id", gymId)
-            .order("id", { ascending: true }), "payments")
+            .order("id", { ascending: true }), "payments"),
+        openHolds(gymId, client, memberIds).catch(() => [])
     ]);
+    const holdsByMember = new Map();
+    for (const hold of holds) holdsByMember.set(hold.member_id, [...(holdsByMember.get(hold.member_id) || []), hold]);
 
     const paymentsByMember = new Map();
     for (const payment of payments) {
@@ -161,14 +167,14 @@ async function addCurrentMemberships(members, gymId, client) {
     return members.map((member) => {
         const history = membershipsByMember.get(member.id) || [];
         const currentMembership = selectCurrentMembership(history);
-        const state = memberStatusFor(history, today, rules);
+        const state = memberStatusFor(history, today, { ...rules, holds: holdsByMember.get(member.id) || [] });
         return {
             ...member,
             current_membership: currentMembership,
             membership_status: currentMembership?.effective_status || "unassigned",
-            // The shared status (active, expiring, upcoming, in_grace, lapsed, old, none) and its dates.
+            // The shared status (active, expiring, upcoming, in_grace, lapsed, old, none, on_hold) and its dates.
             member_status: state.status,
-            status_detail: { days_left: state.daysLeft, ended_on: state.endedOn || null, grace_until: state.graceUntil || null, grace_days_left: state.graceDaysLeft, next_start: state.nextStart || null },
+            status_detail: { days_left: state.daysLeft, ended_on: state.endedOn || null, grace_until: state.graceUntil || null, grace_days_left: state.graceDaysLeft, next_start: state.nextStart || null, hold: state.hold, scheduled_hold: state.scheduledHold },
             billing: memberBilling(history, paymentsByMember.get(member.id) || [])
         };
     });

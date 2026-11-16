@@ -23,7 +23,7 @@ function databaseError(error) {
     }
     if (error?.code === "P0002") return new RenewalError(404, error.message || "Member or plan not found.", "not_found");
     if (error?.code === "P0001") {
-        const reason = /future_plan/.test(text) ? "future_plan" : /dates_changed/.test(text) ? "dates_changed" : /plan_inactive/.test(text) ? "plan_inactive" : "";
+        const reason = /future_plan/.test(text) ? "future_plan" : /dates_changed/.test(text) ? "dates_changed" : /plan_inactive/.test(text) ? "plan_inactive" : /on_hold/.test(text) ? "on_hold" : "";
         return new RenewalError(409, error.message || "This renewal cannot be saved.", reason);
     }
     if (error?.code === "23P01") return new RenewalError(409, "This member already has a membership during those dates.", "overlap");

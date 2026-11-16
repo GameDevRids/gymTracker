@@ -157,9 +157,11 @@ test("a receipt shows the balance as it stood just after that payment", async ()
     const membershipId = "ms-1";
     const tables = {
         payments: [
-            { id: "p1", gym_id: gymA, member_id: memberId, membership_id: membershipId, amount: "400.00", method: "cash", receipt_number: "R-000004" },
-            { id: "p2", gym_id: gymA, member_id: memberId, membership_id: membershipId, amount: "300.00", method: "upi", upi_reference: "123456789012", receipt_number: "R-000007" },
-            { id: "p3", gym_id: gymA, member_id: memberId, membership_id: membershipId, amount: "400.00", method: "upi", receipt_number: "R-000011" }
+            { id: "p1", gym_id: gymA, member_id: memberId, membership_id: membershipId, amount: "400.00", method: "cash", receipt_number: "R-000004", kind: "plan" },
+            { id: "p2", gym_id: gymA, member_id: memberId, membership_id: membershipId, amount: "300.00", method: "upi", upi_reference: "123456789012", receipt_number: "R-000007", kind: "plan" },
+            { id: "p3", gym_id: gymA, member_id: memberId, membership_id: membershipId, amount: "400.00", method: "upi", receipt_number: "R-000011", kind: "plan" },
+            // A hold fee on the same plan is not part of its fee: it never reduces the balance.
+            { id: "p4", gym_id: gymA, member_id: memberId, membership_id: membershipId, amount: "200.00", method: "cash", receipt_number: "R-000012", kind: "hold_fee" }
         ],
         members: [{ id: memberId, gym_id: gymA, full_name: "Riya Shah", member_code: "GP-1", phone: "9876543210", whatsapp_opt_in: true }],
         member_memberships: [{ id: membershipId, gym_id: gymA, plan_name: "Monthly", start_date: "2026-11-12", end_date: "2026-12-11", price: 1100, total_fees: 1100 }],
@@ -174,6 +176,12 @@ test("a receipt shows the balance as it stood just after that payment", async ()
     assert.equal(second.membership.end_date, "2026-12-11");
     const last = await getReceipt("p3", gymA, mockClient(tables));
     assert.equal(last.balance, 0);
+    const holdFee = await getReceipt("p4", gymA, mockClient(tables));
+    assert.equal(holdFee.payment.kind, "hold_fee");
+    assert.equal(holdFee.fee, null, "a hold fee receipt has no plan fee");
+    assert.equal(holdFee.balance, null);
+    assert.equal(holdFee.paid_to_date, null);
+    assert.equal(holdFee.membership.end_date, "2026-12-11", "it still names the plan and its end date");
 });
 
 test("the receipt number is never taken from the request, and a reused UTR is reported clearly", async () => {

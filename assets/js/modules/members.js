@@ -9,8 +9,9 @@ import { usesMemberQr } from "./checkinMethod.js";
 import { avatarHtml, profilePhotoHtml, renderPhotoSection } from "./memberPhotos.js";
 import { canImportMembers } from "./memberImportUi.js";
 import { STATUS_LABELS } from "../memberStatus.js";
+import { holdNote, renderHoldSection } from "./holds.js";
 
-const STATUS_FILTERS = [["active", "Active"], ["expiring", "Expiring"], ["in_grace", "In grace"], ["lapsed", "Lapsed"], ["old", "Old members"], ["upcoming", "Upcoming"], ["none", "No plan"], ["suspended", "Suspended"]];
+const STATUS_FILTERS = [["active", "Active"], ["expiring", "Expiring"], ["in_grace", "In grace"], ["lapsed", "Lapsed"], ["old", "Old members"], ["upcoming", "Upcoming"], ["on_hold", "On hold"], ["none", "No plan"], ["suspended", "Suspended"]];
 
 /** The member's status from the shared rule (server), as a pill; suspended accounts say so. */
 export function memberStatusPill(member) {
@@ -29,6 +30,7 @@ export function memberStatusNote(member) {
         case "lapsed":
         case "old": return `Plan ended ${formatDate(detail.ended_on)}`;
         case "upcoming": return detail.next_start ? `Starts ${formatDate(detail.next_start)}` : "";
+        case "on_hold": return holdNote(detail);
         default: return "";
     }
 }
@@ -102,7 +104,8 @@ export function renderProfile(memberId) {
             </div></section>
             <section class="card profile-section"><div class="card-header"><div><h2>Current membership</h2><p>Current assignment snapshot</p></div></div><div class="card-body" id="member-current-membership" data-member-id="${escapeHTML(member.id)}"><div class="empty-state">Loading membership details…</div></div></section>
             <section class="card profile-section"><div class="card-header"><div><h2>Membership history</h2><p>Plan assignments with historical plan details</p></div></div><div class="activity-list" id="member-membership-history" data-member-id="${escapeHTML(member.id)}"><div class="empty-state">Loading membership history…</div></div></section>
-            <section class="card profile-section"><div class="card-header"><div><h2>Payment history</h2><p>Collected transactions for this member</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Receipt</th></tr></thead><tbody>${payments.length ? payments.map((payment) => `<tr><td>${formatDate(payment.date)}</td><td>${formatINR(payment.amount)}</td><td>${escapeHTML(payment.method)}</td><td>${statusPill(payment.status)}</td><td><button class="text-button" data-action="receipt" data-id="${escapeHTML(payment.id)}" aria-label="Receipt ${escapeHTML(payment.receiptNumber || "")}">${escapeHTML(payment.receiptNumber ? `Receipt ${payment.receiptNumber}` : "Receipt")}</button></td></tr>`).join("") : emptyRow(5, "No payments recorded for this member yet.")}</tbody></table></div></section>
+            ${renderHoldSection(member)}
+            <section class="card profile-section"><div class="card-header"><div><h2>Payment history</h2><p>Collected transactions for this member</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Receipt</th></tr></thead><tbody>${payments.length ? payments.map((payment) => `<tr><td>${formatDate(payment.date)}</td><td>${formatINR(payment.amount)}${payment.kind === "hold_fee" ? `<small class="cell-sub">Hold fee</small>` : ""}</td><td>${escapeHTML(payment.method)}</td><td>${statusPill(payment.status)}</td><td><button class="text-button" data-action="receipt" data-id="${escapeHTML(payment.id)}" aria-label="Receipt ${escapeHTML(payment.receiptNumber || "")}">${escapeHTML(payment.receiptNumber ? `Receipt ${payment.receiptNumber}` : "Receipt")}</button></td></tr>`).join("") : emptyRow(5, "No payments recorded for this member yet.")}</tbody></table></div></section>
             ${renderLinkedPhones(member)}
             ${member.memberCode ? renderMemberVisits(member) : `<section class="card profile-section"><div class="card-header"><div><h2>Attendance history</h2><p>Recent recorded check-ins</p></div><button class="text-button" data-view="attendance">View attendance</button></div><div class="table-wrap"><table><thead><tr><th>Check-in</th><th>Check-out</th><th>Source</th></tr></thead><tbody>${visits.slice(0, 8).map((visit) => `<tr><td>${new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedInAt))}</td><td>${visit.checkedOutAt ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedOutAt)) : "—"}</td><td>${escapeHTML(visit.source)}</td></tr>`).join("") || emptyRow(3, "No check-ins recorded for this member yet.")}</tbody></table></div></section>`}
         </div><aside>

@@ -23,7 +23,7 @@ router.post("/scan", scanRateLimit, validateScan, (request, response, next) => {
 });
 
 router.post("/manual", validateManualCheckIn, (request, response, next) => {
-    attendance.manualCheckIn(request.checkInMemberId, request.gymId, request.authUser?.id || null)
+    attendance.manualCheckIn(request.checkInMemberId, request.gymId, request.authUser?.id || null, undefined, undefined, { resumeHold: request.checkInResumeHold })
         .then((result) => withCheckinPhoto(result, request.gymId))
         .then((result) => response.json({ status: "success", data: result }))
         .catch(next);
