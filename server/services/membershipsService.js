@@ -1,5 +1,7 @@
 import { supabaseClient, supabaseConfigurationError } from "../config/database.js";
 import { logger } from "../config/logger.js";
+import { hasLaterPlan } from "../../assets/js/renewal.js";
+import { renewalsForMemberships } from "./renewalsService.js";
 
 const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at,updated_at";
 
@@ -103,7 +105,9 @@ export async function listMemberMemberships(memberId, gymId, client = supabaseCl
         .order("start_date", { ascending: false })
         .order("created_at", { ascending: false });
     if (error) throwDatabaseError(error);
-    return (data || []).map(withEffectiveStatus);
+    // Each plan that came from a renewal says so (when, fee, paid), for the member's profile.
+    const renewals = await renewalsForMemberships((data || []).map((row) => row.id), gymId, client);
+    return (data || []).map((row) => ({ ...withEffectiveStatus(row), renewal: renewals.get(row.id) || null }));
 }
 
 export async function assignMemberPlan(memberId, { plan_id, start_date, total_fees }, gymId, client = supabaseClient) {
@@ -189,6 +193,8 @@ export async function listExpiringMemberships({ days, gymId }, client = supabase
         .map((history) => {
             const membership = selectCurrentMembership(history, today);
             if (!membership) return null;
+            // Already renewed: a later plan is queued, so this member is not expiring.
+            if (membership.effective_status === "active" && hasLaterPlan(history, membership)) return null;
             const member = membership.members;
             const daysLeft = Math.floor((new Date(`${membership.end_date}T00:00:00.000Z`) - todayDate) / 86400000);
             return {

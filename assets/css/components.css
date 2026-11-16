@@ -370,3 +370,44 @@
 .member-photo-actions { display: grid; gap: 6px; min-width: 0; flex: 1 1 180px; }
 .member-photo-actions .button-row { flex-wrap: wrap; }
 .member-photo-row .photo-flow { width: 100%; }
+
+/* Renew sheet: one screen to renew; a bottom sheet on a phone */
+.renew-form { display: grid; gap: 14px; }
+.renew-form .field { margin: 0; }
+.renew-form input[type="number"], .renew-form input:not([type]), .renew-form select, .renew-form input[inputmode] { min-height: 48px; }
+.renew-dates { display: grid; gap: 2px; padding: 12px 14px; border-radius: 10px; background: #f2f7f1; }
+.renew-dates span { color: #536057; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.renew-dates strong { font: 800 18px/1.3 Manrope, sans-serif; }
+.renew-dates small { color: #536057; }
+.renew-backdate { display: flex; gap: 10px; align-items: flex-start; min-height: 44px; font-weight: 600; }
+.renew-backdate input { width: 22px; height: 22px; margin-top: 1px; flex: none; }
+.renew-warning { margin: 0; padding: 10px 12px; border-radius: 8px; background: #fff6df; color: #5b4300; }
+.renew-payment { display: grid; gap: 12px; margin: 0; padding: 14px; border: 1px solid #e3e9e2; border-radius: 10px; }
+.renew-payment legend { padding: 0 6px; font-weight: 800; }
+.renew-methods { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.renew-method { position: relative; display: block; }
+.renew-method input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.renew-method span { display: grid; place-items: center; min-height: 46px; border: 1px solid #cfd8cf; border-radius: 8px; background: #fff; font-weight: 700; }
+.renew-method input:checked + span { border-color: #1f7a4d; background: #e7f4ec; box-shadow: inset 0 0 0 1px #1f7a4d; }
+.renew-method input:focus-visible + span { outline: 3px solid #1f7a4d; outline-offset: 2px; }
+.renew-balance { margin: 0; color: #35443a; }
+.renew-qr { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.renew-qr .qr-svg { width: min(100%, 240px); height: auto; border: 1px solid #e3e9e2; border-radius: 10px; }
+.renew-blocked, .renew-success { display: grid; gap: 8px; padding: 6px 0; }
+.renew-blocked p, .renew-success p, .renew-success h3 { margin: 0; }
+.renew-success { justify-items: center; text-align: center; }
+.renew-tick { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: #1f7a4d; color: #fff; font-size: 28px; font-weight: 800; }
+.renew-sheet .modal-footer { position: sticky; bottom: 0; background: #fff; flex-wrap: wrap; }
+.renew-sheet .modal-footer .button { flex: 1 1 140px; min-height: 48px; }
+/* The main action gets the room, so "Renew and record ₹1,500" fits on one line at 360px. */
+.renew-sheet .modal-footer .button-secondary { flex: 0 1 96px; }
+.renew-sheet .modal-footer .button-primary, .renew-sheet .modal-footer .button-whatsapp { flex: 1 1 200px; }
+.renewal-line { display: block; color: #35443a; }
+@media (max-width: 600px) {
+    .modal-root:has(.renew-sheet) { padding: 0; place-items: end center; }
+    .renew-sheet { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; animation: renew-sheet-up .2s ease-out; }
+    .renew-sheet .modal-body { padding: 14px 16px; }
+    .renew-sheet .modal-header { padding: 16px 16px 12px; }
+}
+@keyframes renew-sheet-up { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .renew-sheet { animation: none; } }

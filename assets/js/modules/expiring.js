@@ -59,6 +59,7 @@ export function renderExpiring(memberships = [], status = "loading", days = 7, r
                         <div class="expiring-detail"><small>${t("expiry")}</small><strong>${formatDate(membership.end_date)}</strong></div>
                         <span class="badge-soft ${membership.days_left < 0 ? "expiry-overdue" : ""}">${escapeHTML(dayLabel)}</span>
                         <div class="expiring-actions">
+                            <button class="button button-primary button-small" data-action="renew-member" data-id="${escapeHTML(member.id)}">${t("renew")}</button>
                             <button class="button button-secondary button-small" data-action="record-payment" data-id="${escapeHTML(member.id)}" data-membership-id="${escapeHTML(membership.id)}" data-amount="${escapeHTML(membership.price)}">${t("recordPayment")}</button>
                             ${whatsappAction}
                         </div>

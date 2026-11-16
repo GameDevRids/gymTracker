@@ -10,7 +10,7 @@ import { methodLabel, paymentsPage, renderUpiTestQr } from "./upiPayments.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { renderVisitsPage } from "./attendance.js";
 import { renderAttendanceSettings } from "./checkinSettingsUi.js";
-import { getCurrentMembership, planNameFor } from "./memberMemberships.js";
+import { getCurrentMembership, isRenewed, planNameFor } from "./memberMemberships.js";
 import { currentSummary, monthLabel } from "./summary.js";
 import { renderLocalDataSettings } from "./localData.js";
 
@@ -67,7 +67,7 @@ const memberExpiry = (member) => getCurrentMembership(member.id)?.end_date || me
 function renderRenewals() {
     const today = indiaISODate();
     const members = state.members
-        .filter((member) => memberExpiry(member))
+        .filter((member) => memberExpiry(member) && !isRenewed(member.id))
         .map((member) => ({ member, days: daysBetween(today, memberExpiry(member)) }))
         .filter(({ days }) => days !== null && days <= 30).sort((a, b) => a.days - b.days);
     const buckets = {

@@ -414,6 +414,25 @@ export async function createReceiptCard(receipt) {
 // Receipt shown in the open dialog, with its card drawn ahead so sharing stays inside the tap.
 let openReceipt = null;
 
+/** Draws the receipt card ahead, so a "Send receipt" button can share it from the user's tap. */
+function armReceipt(receipt) {
+    const entry = { receipt, file: null, promise: null };
+    entry.promise = createReceiptCard(receipt).then((file) => { entry.file = file; return file; });
+    entry.promise.catch(() => {});
+    openReceipt = entry;
+    return entry;
+}
+
+/**
+ * Loads a payment's receipt and gets its card ready for the "receipt-share" action, for screens
+ * that offer "Send receipt on WhatsApp" themselves (the renewal sheet). Returns the receipt.
+ */
+export async function prepareReceiptShare(paymentId) {
+    const receipt = await fetchReceipt(paymentId);
+    armReceipt(receipt);
+    return receipt;
+}
+
 function receiptBlocker(receipt) {
     if (!receipt.member) return "The member was not found.";
     if (receipt.member.whatsapp_opt_in !== true) return "This member has not agreed to receive WhatsApp updates.";
@@ -442,10 +461,7 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
         });
         return;
     }
-    const entry = { receipt, file: null, promise: null };
-    entry.promise = createReceiptCard(receipt).then((file) => { entry.file = file; return file; });
-    entry.promise.catch(() => {});
-    openReceipt = entry;
+    armReceipt(receipt);
     const { payment, member, membership } = receipt;
     const blocker = receiptBlocker(receipt);
     const status = receipt.balance === null ? "" : receipt.balance > 0

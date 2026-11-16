@@ -19,6 +19,8 @@ import {
 } from "../middleware/validateMember.js";
 import { assignMemberPlan, getMemberMemberships } from "../controllers/membershipsController.js";
 import { validateAssignmentPayload } from "../middleware/validateMembership.js";
+import { validateRenewPayload } from "../middleware/validateRenewal.js";
+import { postRenew } from "../controllers/renewalsController.js";
 import { validateMessageListQuery, validateMessagePayload } from "../middleware/validateWhatsAppMessage.js";
 import { listMemberAttendance, reissueQrToken } from "../services/attendanceService.js";
 import { listMemberDevices } from "../services/entranceService.js";
@@ -72,6 +74,9 @@ router.post("/:id/photo/reject", validateMemberId, (request, response, next) => 
     reply(rejectPendingPhoto(request.params.id, request.gymId, request.authUser?.id || null), response, next);
 });
 
+// One-tap renewal (migration 019): the new plan, the payment and the renewal record in one
+// transaction. 201 for a new renewal, 200 when the same key was already saved (a retry).
+router.post("/:id/renew", validateMemberId, validateRenewPayload, postRenew);
 router.get("/:memberId/memberships", validateMemberId, getMemberMemberships);
 router.post("/:memberId/memberships", validateMemberId, validateAssignmentPayload, assignMemberPlan);
 router.get("/", validateMemberListQuery, getMembers);

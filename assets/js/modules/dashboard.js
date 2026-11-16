@@ -3,7 +3,7 @@ import { drawChartOrEmpty, hasNonZero } from "../components/charts.js";
 import { state } from "../state.js";
 import { emptyRow } from "../components/tables.js";
 import { renderSkeletonList } from "../components/skeleton.js";
-import { getCurrentMembership, renewalMemberships } from "./memberMemberships.js";
+import { getCurrentMembership, isRenewed, renewalMemberships } from "./memberMemberships.js";
 import { currentSummary, monthLabel } from "./summary.js";
 import { paymentsPage } from "./upiPayments.js";
 import { renderSetupChecklist } from "./setupChecklist.js";
@@ -47,7 +47,7 @@ export function renderDashboard() {
     const attendanceToday = state.attendance.filter((record) => visitDay(record) === today).length;
     const expiringSoon = state.members
         .map((member) => ({ member, membership: getCurrentMembership(member.id) }))
-        .filter(({ membership }) => membership?.effective_status === "active" && daysBetween(today, membership.end_date) <= 7)
+        .filter(({ member, membership }) => membership?.effective_status === "active" && daysBetween(today, membership.end_date) <= 7 && !isRenewed(member.id))
         .sort((a, b) => a.membership.end_date.localeCompare(b.membership.end_date))
         .slice(0, 5);
     const names = new Map(state.members.map((member) => [member.id, member.name]));

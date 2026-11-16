@@ -22,7 +22,6 @@ import {
     loadAllMemberships,
     loadMemberMembershipHistory,
     getCurrentMembership,
-    openAssignmentModal,
     planNameFor,
     renewalMemberships,
     setMemberCurrentMembership,
@@ -56,6 +55,7 @@ import { readUiPreferences, saveUiPreferences } from "./storage.js";
 import { bindAuthPasswordLinks, checkAccountBeforeApp, downloadGymWorkbook, handleAuthPasswordSubmit, handleTermsSubmit, openDeleteGymDialog, reportProblemUrl, setAccountEmail, startPasswordResetIfLinked, submitChangePassword, submitDeleteGym } from "./modules/account.js";
 import { APP_VERSION } from "./version.js";
 import { startErrorReporting } from "./errorReporting.js";
+import { handleRenewSubmit, openRenewSheet } from "./modules/renewSheet.js";
 import { hideSetupChecklist, loadSetupPlans } from "./modules/setupChecklist.js";
 
 const page = document.querySelector("#page-content");
@@ -215,6 +215,20 @@ function acceptSession(session) {
 // Pages that show gym-wide totals redraw when they arrive.
 function rerenderSummaryViews() {
     if (["overview", "analytics", "payments"].includes(currentView)) render();
+}
+
+// After a renewal is saved: the member leaves Expiring soon at once when the new plan covers them
+// (the server's list follows), and the plans, totals, balance and payments are reloaded.
+function afterRenewal(result) {
+    const memberId = result.membership.member_id;
+    if (result.membership.end_date >= indiaISODate()) {
+        expiringMemberships = expiringMemberships.filter((item) => item.member?.id !== memberId);
+    }
+    refreshTotals(memberId);
+    loadAllMemberships(() => render());
+    loadExpiringMemberships();
+    loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
+    render();
 }
 
 // Totals, the member's balance and the payments list change after payments, plans and archives.
@@ -868,7 +882,8 @@ function handleAction(action, target) {
             break;
         case "qr-check-in": navigate("scan"); break;
         // A renewal is a new plan in the database, starting after the current one ends.
-        case "renew-member": openAssignmentModal(id, { renew: true }); break;
+        // One sheet: plan, price, new dates, payment and receipt. Saved in one transaction.
+        case "renew-member": openRenewSheet(id, { onChanged: afterRenewal }); break;
         case "retry-summary": loadSummary(rerenderSummaryViews); render(); break;
         case "export-members": exportMembers(); break;
         case "export-payments": exportPayments(); break;
@@ -1316,7 +1331,7 @@ async function saveSettings(form) {
 async function handleSubmit(event) {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    if (handleAuthPasswordSubmit(event) || handleTermsSubmit(event)) return;
+    if (handleAuthPasswordSubmit(event) || handleTermsSubmit(event) || handleRenewSubmit(event)) return;
     if (form.id === "delete-gym-form") {
         event.preventDefault();
         await submitDeleteGym(form, activeSession, closeModal);

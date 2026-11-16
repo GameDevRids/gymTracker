@@ -97,6 +97,8 @@ export function membersErrorHandler(error, _request, response, _next) {
     }
     response.status(status).json({
         status: "error",
-        message: status === 500 ? "The server could not process this request." : error.message
+        message: status === 500 ? "The server could not process this request." : error.message,
+        // A short code the app words its own message from (for example a renewal that would overlap).
+        ...(status !== 500 && typeof error.reason === "string" && error.reason ? { code: error.reason } : {})
     });
 }

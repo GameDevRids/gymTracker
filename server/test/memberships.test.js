@@ -67,7 +67,7 @@ function mockSupabase(results, rpcResult) {
                 const call = { table, operations: [] };
                 calls.push(call);
                 const builder = {};
-                for (const method of ["select", "eq", "is", "order", "range"]) {
+                for (const method of ["select", "eq", "is", "in", "order", "range"]) {
                     builder[method] = (...args) => {
                         call.operations.push([method, ...args]);
                         return builder;
@@ -283,14 +283,37 @@ test("expiring list returns expired and in-window current memberships, sorted by
             && select.includes("members!member_memberships_member_id_fkey!inner("))));
 });
 
+test("a renewed member leaves the expiring list, whether the new plan is queued or already running", async () => {
+    const riya = { id: memberId, full_name: "Riya Shah", phone: "9876543210" };
+    const aman = { id: exampleMemberId, full_name: "Aman Rao", phone: "9876543211" };
+    const zoya = { id: "00000000-0000-4000-8000-000000000004", full_name: "Zoya Khan", phone: "9876543212" };
+    const rows = [
+        // Riya: expiring in 3 days, but the next plan is already queued: renewed.
+        { ...assignment, id: "riya-old", member_id: riya.id, start_date: "2026-10-11", end_date: "2026-11-09", members: riya },
+        { ...assignment, id: "riya-next", member_id: riya.id, start_date: "2026-11-10", end_date: "2026-12-09", members: riya },
+        // Aman: expiring in 3 days, nothing queued: still on the list.
+        { ...assignment, id: "aman-old", member_id: aman.id, start_date: "2026-10-11", end_date: "2026-11-09", members: aman },
+        // Zoya: expired, then renewed from today: her current plan is the new one.
+        { ...assignment, id: "zoya-old", member_id: zoya.id, start_date: "2026-09-01", end_date: "2026-09-30", members: zoya },
+        { ...assignment, id: "zoya-new", member_id: zoya.id, start_date: "2026-11-06", end_date: "2026-12-05", members: zoya }
+    ];
+    const mock = mockSupabase([{ data: rows, error: null }]);
+    const memberships = await listExpiringMemberships({ days: 7, gymId }, mock.client, "2026-11-06");
+    assert.deepEqual(memberships.map((item) => item.id), ["aman-old"]);
+});
+
 test("membership history is returned newest-first with effective statuses", async () => {
     const mock = mockSupabase([
         { data: { id: memberId }, error: null },
-        { data: [assignment], error: null }
+        { data: [assignment], error: null },
+        { data: [], error: null }
     ]);
     const memberships = await listMemberMemberships(memberId, gymId, mock.client);
     assert.equal(memberships.length, 1);
     assert.equal(memberships[0].plan_name, "Monthly");
+    assert.equal(memberships[0].renewal, null, "a plan that was not renewed says so");
+    assert.ok(mock.calls.some((call) => call.table === "membership_renewals"
+        && call.operations.some(([name, field, value]) => name === "eq" && field === "gym_id" && value === gymId)), "renewals are read for this gym only");
     assert.ok(mock.calls.some((call) => call.table === "member_memberships"
         && call.operations.some(([name, field, options]) => name === "order" && field === "start_date" && options.ascending === false)));
     assert.ok(mock.calls.some((call) => call.table === "members"

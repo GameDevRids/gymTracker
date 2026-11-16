@@ -217,7 +217,7 @@ export const apiClient = {
             if (!response.ok) {
                 const message = payload?.message || payload?.error || `The API request failed with status ${response.status}.`;
                 // The server already knows about these, so the error reporter skips them.
-                throw Object.assign(new Error(message), { status: response.status, isApiError: true });
+                throw Object.assign(new Error(message), { status: response.status, isApiError: true, ...(typeof payload?.code === "string" ? { code: payload.code } : {}) });
             }
             return payload;
         };

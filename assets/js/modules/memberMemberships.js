@@ -3,7 +3,8 @@ import { fetchActivePlans } from "../api/plansApi.js";
 import { closeModal, openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { getMember, getPlan, reloadMemberFromApi } from "../state.js";
-import { addDays, escapeHTML, formatDate, formatINR, formatPlanDuration, indiaISODate, statusPill } from "../utils.js";
+import { hasLaterPlan } from "../renewal.js";
+import { escapeHTML, formatDate, formatINR, formatPlanDuration, indiaISODate, statusPill } from "../utils.js";
 
 const membershipsByMember = new Map();
 let allMemberships = [];
@@ -17,6 +18,14 @@ export function getAllMemberships() {
 
 export function areAllMembershipsLoaded() {
     return allMembershipsLoaded;
+}
+
+/** True when the member's current plan is followed by a queued one: already renewed, not expiring. */
+export function isRenewed(memberId) {
+    const current = getCurrentMembership(memberId);
+    if (!current || current.effective_status !== "active") return false;
+    const history = membershipsByMember.get(memberId) || allMemberships.filter((entry) => entry.member_id === memberId);
+    return hasLaterPlan(history, current);
 }
 
 export function getCurrentMembership(memberId) {
@@ -142,14 +151,24 @@ function renderCurrentMembership(memberships) {
     </div>`;
 }
 
+// "Renewed 16 Nov 2026 · fee ₹1,350 (₹150 off) · paid ₹1,000" under a plan that came from a renewal.
+function renewalLine(membership) {
+    const renewal = membership.renewal;
+    if (!renewal) return "";
+    const discount = Math.max(0, Number(renewal.plan_price) - Number(renewal.fee));
+    const how = { after_current: "continued from the previous plan", today: "started on the renewal day", after_old_plan: "continued from the day after the old plan ended" }[renewal.start_choice] || "";
+    return `<small class="renewal-line">Renewed ${escapeHTML(formatDate(String(renewal.created_at).slice(0, 10)))} · fee ${formatINR(renewal.fee)}${discount > 0 ? ` (${formatINR(discount)} off)` : ""} · paid ${formatINR(renewal.amount_paid)}${how ? ` · ${escapeHTML(how)}` : ""}</small>`;
+}
+
 function renderMembershipHistory(memberId, memberships) {
     if (!memberships.length) {
         return `<div class="empty-state">No plan assignments yet. <button class="text-button" data-action="assign-member-plan" data-id="${escapeHTML(memberId)}">Assign a plan</button></div>`;
     }
     return memberships.map((membership) => `<article class="membership-history-item">
         <div><strong>${escapeHTML(membership.plan_name)}</strong><span>${statusPill(membership.effective_status)}</span></div>
-        <p>${formatINR(membership.price)} · ${escapeHTML(formatPlanDuration(membership.duration_days))}</p>
+        <p>${formatINR(membership.total_fees ?? membership.price)} · ${escapeHTML(formatPlanDuration(membership.duration_days))}</p>
         <small>${formatDate(membership.start_date)} – ${formatDate(membership.end_date)}</small>
+        ${renewalLine(membership)}
     </article>`).join("");
 }
 
@@ -186,18 +205,6 @@ function updateAssignmentPreview(form) {
     summary.innerHTML = `<strong>${escapeHTML(selected.dataset.name)}</strong><p>${escapeHTML(formatPlanDuration(selected.dataset.duration))} · ${formatINR(Number(selected.dataset.price))}</p>`;
 }
 
-/**
- * For a renewal: start the day after the member's latest plan ends (today if it already
- * ended), on the same plan when it is still active.
- */
-function renewalDefaults(memberships, today = indiaISODate()) {
-    const latest = memberships
-        .filter((membership) => membership.status !== "cancelled")
-        .sort((a, b) => b.end_date.localeCompare(a.end_date))[0];
-    if (!latest) return { startDate: today, planId: "" };
-    return { startDate: latest.end_date >= today ? addDays(latest.end_date, 1) : today, planId: latest.plan_id };
-}
-
 function renderAssignmentForm(memberId, plans, { startDate = indiaISODate(), planId = "" } = {}) {
     const activePlans = plans.filter((plan) => plan.is_active);
     if (!activePlans.length) {
@@ -221,8 +228,8 @@ function renderAssignmentForm(memberId, plans, { startDate = indiaISODate(), pla
     };
 }
 
-/** Assigns a plan; with { renew: true } it renews: starts after the current plan, same plan. */
-export async function openAssignmentModal(memberId, { renew = false } = {}) {
+/** Assigns a plan with a start date the owner chooses. Renewing has its own sheet (renewSheet.js). */
+export async function openAssignmentModal(memberId) {
     const member = getMember(memberId);
     if (!member || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(memberId)) {
         toast("This member could not be found. Refresh the page and try again.", "error");
@@ -230,8 +237,8 @@ export async function openAssignmentModal(memberId, { renew = false } = {}) {
     }
     const requestId = ++assignmentModalRequest;
     openModal({
-        title: `${renew ? "Renew" : "Assign a plan to"} ${escapeHTML(member.name)}${renew ? "'s membership" : ""}`,
-        subtitle: renew ? "The new plan starts the day after the current one ends. Past memberships stay in the history." : "Choose an active plan and membership start date.",
+        title: `Assign a plan to ${escapeHTML(member.name)}`,
+        subtitle: "Choose an active plan and membership start date.",
         body: `<div class="empty-state" role="status">Loading active plans and membership history…</div>`,
         footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button>`
     });
@@ -243,8 +250,7 @@ export async function openAssignmentModal(memberId, { renew = false } = {}) {
         ]);
         if (!isCurrentAssignmentModal(requestId)) return;
         membershipsByMember.set(memberId, memberships);
-        const defaults = renew ? renewalDefaults(memberships) : {};
-        const form = renderAssignmentForm(memberId, plans, defaults);
+        const form = renderAssignmentForm(memberId, plans);
         const modal = document.querySelector("#modal-root .modal");
         if (!isCurrentAssignmentModal(requestId)) return;
         modal.querySelector(".modal-body").innerHTML = form.body;
@@ -254,7 +260,7 @@ export async function openAssignmentModal(memberId, { renew = false } = {}) {
     } catch (error) {
         const modal = document.querySelector("#modal-root .modal");
         if (!isCurrentAssignmentModal(requestId)) return;
-        modal.querySelector(".modal-body").innerHTML = `<div class="empty-state"><p>${escapeHTML(error.message || "Unable to load plans and membership history.")}</p><button class="button button-secondary" data-action="retry-assignment" data-id="${escapeHTML(memberId)}" data-renew="${renew}">Try again</button></div>`;
+        modal.querySelector(".modal-body").innerHTML = `<div class="empty-state"><p>${escapeHTML(error.message || "Unable to load plans and membership history.")}</p><button class="button button-secondary" data-action="retry-assignment" data-id="${escapeHTML(memberId)}">Try again</button></div>`;
     }
 }
 
@@ -271,7 +277,7 @@ export function handleMembershipAction(action, target) {
     } else if (action === "refresh-member-memberships") {
         loadMemberMembershipHistory(memberId);
     } else if (action === "retry-assignment") {
-        openAssignmentModal(memberId, { renew: target.dataset.renew === "true" });
+        openAssignmentModal(memberId);
     } else if (action === "go-to-plans") {
         closeModal();
         document.querySelector('[data-view="plans"]')?.click();
