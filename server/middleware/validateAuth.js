@@ -2,9 +2,11 @@ import { z } from "zod";
 import { clearRefreshCookie, readRefreshCookie } from "./sessionCookie.js";
 import { passwordProblem } from "../../assets/js/passwordRules.js";
 
+// remember = "Keep me signed in" (the default): the refresh cookie outlives the browser session.
 const credentialsSchema = z.object({
     email: z.string().trim().email().max(254),
-    password: z.string().min(1).max(256)
+    password: z.string().min(1).max(256),
+    remember: z.boolean().optional()
 }).strict();
 const gymSchema = z.object({ name: z.string().trim().min(1).max(120) }).strict();
 
@@ -15,7 +17,9 @@ function invalid(response, message) {
 export function validateCredentials(request, response, next) {
     const parsed = credentialsSchema.safeParse(request.body);
     if (!parsed.success) return invalid(response, "Enter a valid email address and password.");
-    request.validatedCredentials = parsed.data;
+    const { remember, ...credentials } = parsed.data;
+    request.validatedCredentials = credentials;
+    request.rememberSession = remember !== false;
     next();
 }
 

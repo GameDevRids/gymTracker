@@ -8,6 +8,8 @@ const ROTATED_TOKEN = "rotated-refresh-token-value-0001";
 const calls = [];
 const behaviour = {};
 const authError = (status, message) => Object.assign(new Error(message), { status });
+// The Set-Cookie header for one cookie, or undefined when the answer does not touch it.
+const cookieHeader = (response, name) => response.headers.getSetCookie().find((header) => header.startsWith(`${name}=`));
 
 // A fake Supabase auth service; each test sets how it behaves.
 const fakeService = {
@@ -53,12 +55,13 @@ beforeEach(() => {
     delete behaviour.logoutFailsFor;
 });
 
-function post(path, { cookie, bearer, origin, body, headers = {} } = {}) {
+function post(path, { cookie, remember = false, bearer, origin, body, headers = {} } = {}) {
+    const cookies = [...(cookie ? [`gympulse_refresh=${encodeURIComponent(cookie)}`] : []), ...(remember ? ["gympulse_remember=1"] : [])];
     return fetch(`${baseUrl}/api/auth/${path}`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            ...(cookie ? { Cookie: `gympulse_refresh=${encodeURIComponent(cookie)}` } : {}),
+            ...(cookies.length ? { Cookie: cookies.join("; ") } : {}),
             ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
             ...(origin ? { Origin: origin } : {}),
             ...headers
@@ -67,20 +70,39 @@ function post(path, { cookie, bearer, origin, body, headers = {} } = {}) {
     });
 }
 
-test("login stores the refresh token in an HttpOnly session cookie and leaves it out of the response", async () => {
+test("login keeps the owner signed in by default: an HttpOnly refresh cookie that lasts 60 days, never in the response", async () => {
     const response = await post("login", { body: { email: "owner@example.com", password: "secret" }, origin: baseUrl });
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("set-cookie"), `gympulse_refresh=${REFRESH_TOKEN}; Path=/api/auth; HttpOnly; SameSite=Strict`);
+    assert.equal(cookieHeader(response, "gympulse_refresh"), `gympulse_refresh=${REFRESH_TOKEN}; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=5184000`);
+    assert.equal(cookieHeader(response, "gympulse_remember"), `gympulse_remember=1; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=5184000`);
     const body = await response.json();
     assert.equal(body.data.access_token, "access-1");
     assert.equal(Object.hasOwn(body.data, "refresh_token"), false);
+});
+
+test("login with 'keep me signed in' unticked gives a session cookie that ends with the browser", async () => {
+    const response = await post("login", { body: { email: "owner@example.com", password: "secret", remember: false }, origin: baseUrl });
+    assert.equal(response.status, 200);
+    assert.equal(cookieHeader(response, "gympulse_refresh"), `gympulse_refresh=${REFRESH_TOKEN}; Path=/api/auth; HttpOnly; SameSite=Strict`);
+    assert.match(cookieHeader(response, "gympulse_remember"), /^gympulse_remember=; .*Max-Age=0$/, "an earlier choice to stay signed in is forgotten");
+});
+
+test("a refresh keeps the cookie persistent only for a browser that chose to stay signed in", async () => {
+    const kept = await post("refresh", { cookie: REFRESH_TOKEN, remember: true });
+    assert.equal(kept.status, 200);
+    assert.equal(cookieHeader(kept, "gympulse_refresh"), `gympulse_refresh=${ROTATED_TOKEN}; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=5184000`);
+    assert.match(cookieHeader(kept, "gympulse_remember"), /Max-Age=5184000$/, "the 60 days start again from every refresh");
+
+    const session = await post("refresh", { cookie: REFRESH_TOKEN });
+    assert.equal(session.status, 200);
+    assert.equal(cookieHeader(session, "gympulse_refresh"), `gympulse_refresh=${ROTATED_TOKEN}; Path=/api/auth; HttpOnly; SameSite=Strict`);
 });
 
 test("refresh reads only the cookie, rotates it, and never returns the refresh token", async () => {
     const response = await post("refresh", { cookie: REFRESH_TOKEN, body: { refresh_token: "ignored-body-token-value-123" } });
     assert.equal(response.status, 200);
     assert.deepEqual(calls, [["refresh", REFRESH_TOKEN]]);
-    assert.match(response.headers.get("set-cookie"), new RegExp(`^gympulse_refresh=${ROTATED_TOKEN}; Path=/api/auth; HttpOnly; SameSite=Strict$`));
+    assert.equal(cookieHeader(response, "gympulse_refresh"), `gympulse_refresh=${ROTATED_TOKEN}; Path=/api/auth; HttpOnly; SameSite=Strict`);
     const body = await response.json();
     assert.equal(body.data.access_token, "access-2");
     assert.equal(Object.hasOwn(body.data, "refresh_token"), false);
@@ -96,7 +118,8 @@ test("a rejected refresh token clears the cookie, but an outage keeps it for a r
     behaviour.refreshError = authError(401, "Invalid Refresh Token");
     const rejected = await post("refresh", { cookie: REFRESH_TOKEN });
     assert.equal(rejected.status, 401);
-    assert.match(rejected.headers.get("set-cookie"), /^gympulse_refresh=; Path=\/api\/auth; HttpOnly; SameSite=Strict; Max-Age=0$/);
+    assert.equal(cookieHeader(rejected, "gympulse_refresh"), "gympulse_refresh=; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=0");
+    assert.match(cookieHeader(rejected, "gympulse_remember"), /Max-Age=0$/);
 
     behaviour.refreshError = authError(503, "Authentication service is unavailable.");
     const outage = await post("refresh", { cookie: REFRESH_TOKEN });
@@ -117,11 +140,12 @@ test("cross-site requests to login, refresh and logout are rejected", async () =
     assert.equal(sameOrigin.status, 200);
 });
 
-test("logout revokes with the access token and always clears the cookie", async () => {
-    const response = await post("logout", { cookie: REFRESH_TOKEN, bearer: "access-1" });
+test("logout revokes with the access token and always clears both cookies", async () => {
+    const response = await post("logout", { cookie: REFRESH_TOKEN, remember: true, bearer: "access-1" });
     assert.equal(response.status, 200);
     assert.deepEqual(calls, [["logout", "access-1"]]);
-    assert.match(response.headers.get("set-cookie"), /Max-Age=0$/);
+    assert.match(cookieHeader(response, "gympulse_refresh"), /^gympulse_refresh=; .*Max-Age=0$/);
+    assert.match(cookieHeader(response, "gympulse_remember"), /^gympulse_remember=; .*Max-Age=0$/);
 });
 
 test("logout with an expired access token revokes through the refresh cookie", async () => {
@@ -153,5 +177,6 @@ test("logout succeeds when nothing is left to revoke", async () => {
 test("the refresh cookie is marked Secure behind an HTTPS proxy", async () => {
     const response = await post("refresh", { cookie: REFRESH_TOKEN, headers: { "X-Forwarded-Proto": "https" } });
     assert.equal(response.status, 200);
-    assert.match(response.headers.get("set-cookie"), /; Secure$/);
+    assert.match(cookieHeader(response, "gympulse_refresh"), /; Secure$/);
+    assert.match(cookieHeader(response, "gympulse_remember"), /; Secure/);
 });

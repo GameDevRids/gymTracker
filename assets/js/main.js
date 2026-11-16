@@ -33,7 +33,7 @@ import { fetchActivePlans } from "./api/plansApi.js";
 import { handleImportAction, handleImportChange, handleImportFile, openMemberImport } from "./modules/memberImportUi.js";
 import { createMemberPlanAssignment, fetchMemberMembershipHistory } from "./api/membershipsApi.js";
 import { createPayment, fetchMemberPayments } from "./api/paymentsApi.js";
-import { apiClient, clearAuthSession, restoreAuthSession, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
+import { apiClient, clearAuthSession, ensureFreshSession, restoreAuthSessionWithRetry, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
 import { markReminderSent, reminderKey, renderExpiring } from "./modules/expiring.js";
 import { renderOperationsPage, drawAnalyticsCharts, retentionRows } from "./modules/operations.js";
 import { openModal, closeModal } from "./components/modal.js";
@@ -99,6 +99,7 @@ function showAuthScreen(onboarding = false, message = "") {
     document.querySelector("#reset-password-form").hidden = true;
     document.querySelector("#terms-form").hidden = true;
     document.querySelector("#deletion-pending").hidden = true;
+    document.querySelector("#connecting-panel").hidden = true;
     document.querySelector("#auth-description").hidden = false;
     document.querySelector("#create-gym-form").hidden = !onboarding;
     document.querySelector("#auth-title").textContent = onboarding ? "Create your gym" : "Sign in to GymPulse";
@@ -838,6 +839,7 @@ function handleAction(action, target) {
     switch (action) {
         case "close-modal": closeModal(); break;
         case "hide-setup": hideSetupChecklist(); render(); break;
+        case "sign-out": signOut(); break;
         case "add-member": openMemberForm(); break;
         case "quick-add-member": openQuickAddMemberForm(); break;
         case "mobile-more": openMobileMenu(); break;
@@ -1336,7 +1338,9 @@ async function handleSubmit(event) {
         try {
             const result = await apiClient.post("/api/auth/login", {
                 email: form.elements.email.value.trim(),
-                password: form.elements.password.value
+                password: form.elements.password.value,
+                // Unticked (a shared computer): the session ends when the browser is closed.
+                remember: form.elements.remember?.checked !== false
             });
             acceptSession(result.data);
         } catch (error) {
@@ -1526,7 +1530,11 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("submit", handleSubmit);
-document.querySelector("#logout-button").addEventListener("click", async () => {
+/**
+ * Signs out everywhere it matters: the server revokes the session and clears the refresh and
+ * "keep me signed in" cookies, then this page forgets its token and reloads to the sign-in screen.
+ */
+async function signOut() {
     try {
         await apiClient.post("/api/auth/logout", {});
     } catch (error) {
@@ -1537,20 +1545,10 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
         activeSession = null;
         window.location.reload();
     }
-});
+}
+document.querySelector("#logout-button").addEventListener("click", signOut);
 // Sign out from the screens before the app: new gym, Terms, and a gym scheduled for deletion.
-for (const button of document.querySelectorAll("[data-sign-out]")) button.addEventListener("click", async () => {
-    try {
-        await apiClient.post("/api/auth/logout", {});
-    } catch (error) {
-        console.error("GymPulse could not revoke the current session.", error);
-        saveAuthNotice("You are signed out on this device, but the server could not revoke the session. Contact your administrator.");
-    } finally {
-        clearAuthSession();
-        activeSession = null;
-        window.location.reload();
-    }
-});
+for (const button of document.querySelectorAll("[data-sign-out]")) button.addEventListener("click", signOut);
 document.addEventListener("change", (event) => {
     const target = event.target;
     if (target.closest("#modal-root") && handleImportChange(target)) return;
@@ -1732,8 +1730,13 @@ bindAuthPasswordLinks();
 registerServiceWorker();
 // The camera is released whenever the app is hidden, and comes back on the Check-in screen.
 document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopCheckInScreen();
-    else if (currentView === "scan") startCheckInScreen(rerenderCheckIn);
+    if (document.hidden) {
+        stopCheckInScreen();
+        return;
+    }
+    // Phones pause timers in the background: refresh a token that ran out while the app was away.
+    if (activeSession) ensureFreshSession().catch(() => {});
+    if (currentView === "scan") startCheckInScreen(rerenderCheckIn);
 });
 setUnauthorizedHandler(() => {
     clearAuthSession();
@@ -1741,11 +1744,28 @@ setUnauthorizedHandler(() => {
     saveAuthNotice("Your session expired. Please sign in again.");
     window.location.reload();
 });
+// "Connecting…" on the sign-in card while the server wakes up or the connection comes back.
+function showConnecting(attempt) {
+    showAuthScreen(false);
+    document.querySelector("#login-form").hidden = true;
+    document.querySelector("#connecting-panel").hidden = false;
+    document.querySelector("#auth-title").textContent = "Connecting…";
+    document.querySelector("#auth-description").textContent = "";
+    document.querySelector("#auth-description").hidden = true;
+    document.querySelector("#connecting-note").textContent = attempt >= 2
+        ? "The server is taking a moment to wake up, or your connection is down. Trying again…"
+        : "Restoring your session.";
+}
+
 async function restoreSessionOnLoad() {
     // A reset link from the email opens the new-password form, not a saved session.
     if (startPasswordResetIfLinked()) return;
+    // "Connecting…" from the start, so a slow (cold) server never leaves the sign-in form
+    // showing to someone who is in fact still signed in.
+    showConnecting(0);
     try {
-        const session = await restoreAuthSession();
+        // Keeps trying through a sleeping server or no network; only a rejected session gives up.
+        const session = await restoreAuthSessionWithRetry({ onWaiting: showConnecting });
         if (session) acceptSession(session);
         else showAuthScreen(false, takeAuthNotice());
     } catch (error) {

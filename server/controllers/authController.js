@@ -1,11 +1,12 @@
 import * as authService from "../services/authService.js";
-import { clearRefreshCookie, publicSession, readRefreshCookie, setRefreshCookie } from "../middleware/sessionCookie.js";
+import { clearRefreshCookie, publicSession, readRefreshCookie, readRememberCookie, setRefreshCookie } from "../middleware/sessionCookie.js";
 import { logger } from "../config/logger.js";
 import { captureException } from "../config/monitoring.js";
 
 // Login and refresh put the refresh token in an HttpOnly cookie and return only the access token.
-function sendSession(request, response, session) {
-    if (session.refresh_token) setRefreshCookie(request, response, session.refresh_token);
+// Login decides whether the cookie outlives the browser session; every later refresh keeps that.
+function sendSession(request, response, session, { persistent = readRememberCookie(request) } = {}) {
+    if (session.refresh_token) setRefreshCookie(request, response, session.refresh_token, { persistent });
     response.json({ status: "success", data: publicSession(session) });
 }
 
@@ -13,7 +14,7 @@ function sendSession(request, response, session) {
 export function createAuthHandlers(service = authService) {
     function postLogin(request, response, next) {
         service.login(request.validatedCredentials)
-            .then((session) => sendSession(request, response, session))
+            .then((session) => sendSession(request, response, session, { persistent: request.rememberSession !== false }))
             .catch(next);
     }
 

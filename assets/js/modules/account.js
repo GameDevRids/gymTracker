@@ -55,6 +55,7 @@ export function showAuthForm(name, { message = "", kind = "error", title, descri
     $("#app-shell").hidden = true;
     $(".mobile-bottom-nav").hidden = true;
     $("#create-gym-form").hidden = true;
+    $("#connecting-panel").hidden = true;
     for (const [panel, [element, messageElement]] of Object.entries(AUTH_PANELS)) {
         $(element).hidden = panel !== name;
         setMessage(messageElement, "");
@@ -186,7 +187,7 @@ export function renderAccountSettings() {
             <div class="field"><label for="confirm-new-password">New password again</label><input id="confirm-new-password" name="confirm_password" type="password" autocomplete="new-password" required></div>
             <p class="helper-text field-error full" id="change-password-error" role="alert" hidden></p>
             <div class="field full"><button class="button button-primary" type="submit">Change password</button></div>
-        </form>${download}</section>`;
+        </form>${download}<div class="account-signout"><h3>Sign out</h3><p class="helper-text">Ends your session on this device and tells the server to stop accepting it. Use it on a shared computer.</p><button class="button button-secondary" type="button" data-action="sign-out">Sign out</button></div></section>`;
 }
 
 /** Changes the password; this device keeps the fresh session the server sends back. */

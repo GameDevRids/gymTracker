@@ -52,6 +52,7 @@
                 <input id="login-email" name="email" type="email" autocomplete="username" required>
                 <label for="login-password">Password</label>
                 <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+                <label class="auth-check auth-remember"><input type="checkbox" name="remember" checked> Keep me signed in on this device</label>
                 <p class="auth-error" id="auth-error" role="alert" hidden></p>
                 <button class="button button-primary" type="submit">Sign in</button>
                 <button class="text-button auth-link" type="button" id="forgot-password-link">Forgot password?</button>
@@ -86,6 +87,11 @@
                 <button class="button button-primary" type="submit">Agree and continue</button>
                 <button class="button button-secondary" type="button" data-sign-out>Sign out</button>
             </form>
+            <div id="connecting-panel" class="auth-form auth-connecting" hidden role="status" aria-live="polite">
+                <span class="auth-spinner" aria-hidden="true"></span>
+                <p><strong>Connecting…</strong></p>
+                <p class="helper-text" id="connecting-note">Restoring your session.</p>
+            </div>
             <div id="deletion-pending" class="auth-form" hidden>
                 <p id="deletion-pending-text"></p>
                 <p class="auth-error" id="deletion-error" role="alert" hidden></p>

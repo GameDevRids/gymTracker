@@ -14,6 +14,8 @@ export const API_BASE_URL = resolveApiOrigin();
 // The access token lives only in memory. The refresh token is kept by the server in an
 // HttpOnly cookie that page scripts cannot read; it is sent automatically to /api/auth.
 let accessToken = "";
+// When the access token runs out (ms), so a reopened app can refresh before using it.
+let sessionExpiresAt = 0;
 let refreshTimer;
 let refreshPromise;
 let unauthorizedHandler = () => {};
@@ -37,12 +39,23 @@ function isAuthEndpoint(path) {
     }
 }
 
+// status 401: the saved session is gone (revoked, expired, signed out). Anything else (0 = no
+// network, 5xx = the server is down or still waking up) is temporary, and never signs out.
 class SessionError extends Error {
     constructor(message, status) {
         super(message);
         this.status = status;
     }
 }
+
+/** True for a refresh failure worth retrying: the session itself may still be fine. */
+export function isSessionRetryable(error) {
+    return error instanceof SessionError && error.status !== 401;
+}
+
+const REFRESH_TIMEOUT_MS = 60000;
+// Between retries while the server wakes up or the connection is down.
+export const RESTORE_RETRY_DELAYS_MS = [2000, 4000, 8000, 15000, 30000];
 
 // Exchanges the refresh cookie for a new access token. Concurrent callers share one request.
 async function refreshSession() {
@@ -52,7 +65,9 @@ async function refreshSession() {
         try {
             response = await fetch(new URL("/api/auth/refresh", `${API_BASE_URL.replace(/\/$/, "")}/`), {
                 method: "POST",
-                credentials: "same-origin"
+                credentials: "same-origin",
+                cache: "no-store",
+                ...(typeof AbortSignal?.timeout === "function" ? { signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS) } : {})
             });
         } catch {
             throw new SessionError("GymPulse could not reach the server to restore your session.", 0);
@@ -72,20 +87,43 @@ async function refreshSession() {
     }
 }
 
+function scheduleRefresh(delayMs) {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+        refreshSession().catch((error) => {
+            // Only a rejected session signs out; an outage tries again shortly.
+            if (isSessionRetryable(error)) scheduleRefresh(30000);
+            else unauthorizedHandler();
+        });
+    }, delayMs);
+    refreshTimer.unref?.();
+}
+
 export function setAuthSession(session) {
     removeLegacyRefreshToken();
     accessToken = session?.access_token || "";
     clearTimeout(refreshTimer);
+    sessionExpiresAt = 0;
     if (accessToken && Number.isFinite(session?.expires_in)) {
-        refreshTimer = setTimeout(() => {
-            refreshSession().catch(() => unauthorizedHandler());
-        }, Math.max(1000, (session.expires_in - 60) * 1000));
+        sessionExpiresAt = Date.now() + session.expires_in * 1000;
+        scheduleRefresh(Math.max(1000, (session.expires_in - 60) * 1000));
     }
+}
+
+/**
+ * Refreshes now if the access token has run out or is about to (a phone pauses timers while
+ * the app is in the background). Call when the app comes back into view.
+ */
+export async function ensureFreshSession({ withinMs = 2 * 60 * 1000 } = {}) {
+    if (!accessToken || !sessionExpiresAt) return null;
+    if (sessionExpiresAt - Date.now() > withinMs) return null;
+    return refreshSession();
 }
 
 /** Forgets the in-memory session. The server clears the refresh cookie on logout. */
 export function clearAuthSession() {
     accessToken = "";
+    sessionExpiresAt = 0;
     clearTimeout(refreshTimer);
     removeLegacyRefreshToken();
 }
@@ -101,6 +139,28 @@ export async function restoreAuthSession() {
     } catch (error) {
         if (error instanceof SessionError && error.status === 401) return null;
         throw error;
+    }
+}
+
+/**
+ * Restores the session on app open, waiting out a sleeping server or a dropped connection:
+ * onWaiting(attempt, error) is called before each retry (show "Connecting…"). Resolves to the
+ * session, or null when there is no saved session. Only gives up after maxAttempts.
+ */
+export async function restoreAuthSessionWithRetry({
+    onWaiting = () => {},
+    delays = RESTORE_RETRY_DELAYS_MS,
+    maxAttempts = Infinity,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+} = {}) {
+    for (let attempt = 1; ; attempt += 1) {
+        try {
+            return await restoreAuthSession();
+        } catch (error) {
+            if (!isSessionRetryable(error) || attempt >= maxAttempts) throw error;
+            onWaiting(attempt, error);
+            await sleep(delays[Math.min(attempt - 1, delays.length - 1)]);
+        }
     }
 }
 
@@ -145,8 +205,12 @@ export const apiClient = {
                     await refreshSession();
                     return send(true);
                 } catch (error) {
-                    clearAuthSession();
-                    unauthorizedHandler();
+                    // A rejected session signs out. No network or a sleeping server does not: the
+                    // request simply fails this time, and the session is still there for the next.
+                    if (!isSessionRetryable(error)) {
+                        clearAuthSession();
+                        unauthorizedHandler();
+                    }
                     throw error;
                 }
             }
