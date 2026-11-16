@@ -28,10 +28,10 @@ export function indiaDate(date = new Date()) {
     return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
-// ---------- Check-in methods and the expired-member policy (shared with the server) ----------
+// ---------- Check-in methods (shared with the server) ----------
+// Who may check in is decided by the member's status: assets/js/memberStatus.js.
 
 export const CHECKIN_METHODS = ["member_qr", "entrance_poster"];
-export const EXPIRED_POLICIES = ["warn", "block"];
 export const MAX_GRACE_DAYS = 60;
 
 /** The first word of a name: the poster page never shows more than this. */
@@ -71,25 +71,7 @@ export function withinRadius(gym, position) {
  * The membership status at check-in: active, grace (expired, inside the gym's grace days),
  * upcoming (plan starts later), expired, or none. `membership` carries effective_status.
  */
-export function checkInStatus(membership, today, graceDays = 0) {
-    if (!membership) return { status: "none" };
-    if (membership.effective_status === "active") return { status: "active" };
-    if (membership.effective_status === "upcoming") return { status: "upcoming" };
-    if (membership.effective_status === "expired") {
-        const daysExpired = -daysLeft(membership.end_date, today);
-        if (daysExpired <= graceDays) return { status: "grace", graceDaysLeft: graceDays - daysExpired };
-        return { status: "expired" };
-    }
-    return { status: "none" };
-}
-
-const RESULT_FOR_STATUS = { active: "checked_in", grace: "grace", upcoming: "upcoming", expired: "expired", none: "no_membership" };
-
 /**
  * What happens to a check-in with this status. Active and grace are always recorded; the others
  * are recorded and flagged under "warn", and not recorded under "block".
  */
-export function checkInOutcome(status, policy = "warn") {
-    const allowed = status === "active" || status === "grace" || policy !== "block";
-    return { result: RESULT_FOR_STATUS[status] || "no_membership", recorded: allowed, blocked: !allowed };
-}

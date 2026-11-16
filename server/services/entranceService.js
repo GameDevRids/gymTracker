@@ -184,6 +184,7 @@ function memberView(result, gym, upi) {
         first_name: firstName(result.member?.full_name),
         checked_in_at: result.attendance?.checked_in_at || null,
         grace_days_left: result.grace_days_left,
+        ended_on: result.ended_on || null,
         membership: membership ? { plan_name: membership.plan_name, start_date: membership.start_date, end_date: membership.end_date, days_left: membership.days_left } : null,
         renewal
     };

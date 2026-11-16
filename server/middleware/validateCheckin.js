@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ipKeyGenerator, rateLimit } from "express-rate-limit";
-import { CHECKIN_METHODS, EXPIRED_POLICIES, MAX_GRACE_DAYS } from "../../assets/js/checkin.js";
+import { CHECKIN_METHODS, MAX_GRACE_DAYS } from "../../assets/js/checkin.js";
 import { DEVICE_SECRET_PATTERN, hashDeviceSecret } from "../services/entranceService.js";
 
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
@@ -11,9 +11,11 @@ function invalid(response, message) {
 
 // ---------- Settings > Attendance (owner only) ----------
 
+// expired_checkin_policy is retired (grace and lapsed decide now): an older app may still send it,
+// so it is accepted and ignored. The grace period is set in Settings › Renewals and grace.
 const settingsSchema = z.object({
     checkin_method: z.enum(CHECKIN_METHODS),
-    expired_checkin_policy: z.enum(EXPIRED_POLICIES),
+    expired_checkin_policy: z.enum(["warn", "block"]),
     expiry_grace_days: z.number().int().min(0).max(MAX_GRACE_DAYS),
     entrance_require_location: z.boolean(),
     latitude: z.number().min(-90).max(90).nullable(),
@@ -27,7 +29,6 @@ export function validateCheckinSettings(request, response, next) {
         const field = parsed.error.issues[0]?.path[0];
         const messages = {
             checkin_method: "Choose member QR cards or the entrance poster.",
-            expired_checkin_policy: "Choose Allow with warning or Block check-in.",
             expiry_grace_days: `Grace period must be 0 to ${MAX_GRACE_DAYS} days.`,
             location_radius_m: "The radius must be 25 to 2000 metres.",
             latitude: "The location is not valid.",
@@ -35,7 +36,7 @@ export function validateCheckinSettings(request, response, next) {
         };
         return invalid(response, messages[field] || "Send only the check-in settings.");
     }
-    const values = parsed.data;
+    const { expired_checkin_policy: _retired, ...values } = parsed.data;
     if ((values.latitude === null) !== (values.longitude === null) || ("latitude" in values) !== ("longitude" in values)) {
         return invalid(response, "Send the latitude and longitude together.");
     }

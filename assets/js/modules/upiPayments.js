@@ -8,6 +8,7 @@ import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { escapeHTML, formatDate, formatINR } from "../utils.js";
 import { buildUpiLink, upiNote } from "../upi.js";
+import { graceUntil } from "../memberStatus.js";
 import { welcomePhone } from "../welcomeMessage.js";
 import { CARD_COLORS, cardFontFamilies, cardFontsReady, drawQr, fitTextBlock, roundedRect, setFont, shareImageFile } from "./cardCanvas.js";
 
@@ -258,6 +259,13 @@ export async function fetchReceipt(paymentId) {
     return response.data;
 }
 
+/** "19 Dec 2026 (grace till 22 Dec 2026)", or just the end date when the plan has no grace. */
+export function validTillText(membership) {
+    if (!membership?.end_date) return "";
+    const grace = Number(membership.grace_days) > 0 ? graceUntil(membership) : "";
+    return `${formatDate(membership.end_date)}${grace ? ` (grace till ${formatDate(grace)})` : ""}`;
+}
+
 function periodText(membership) {
     return membership?.start_date && membership?.end_date ? `${formatDate(membership.start_date)} – ${formatDate(membership.end_date)}` : "";
 }
@@ -274,7 +282,7 @@ export function receiptText(receipt) {
         `Amount: ${formatINR(payment.amount)}`,
         `Method: ${method}`,
         membership ? `Plan: ${membership.plan_name}${periodText(membership) ? `, ${periodText(membership)}` : ""}` : "",
-        membership?.end_date ? `Valid until: ${formatDate(membership.end_date)}` : "",
+        membership?.end_date ? `Valid till: ${validTillText(membership)}` : "",
         receipt.balance === null ? "" : receipt.balance > 0 ? `Balance due: ${formatINR(receipt.balance)}` : "Paid in full",
         gym.phone ? `Questions? Call ${gym.phone}` : "",
         "This is a payment receipt, not a tax invoice."
@@ -293,7 +301,7 @@ export async function createReceiptCard(receipt) {
         ["UPI reference", payment.upi_reference || ""],
         ["Plan", membership?.plan_name || ""],
         ["Period", periodText(membership)],
-        ["Valid until", membership?.end_date ? formatDate(membership.end_date) : ""]
+        ["Valid till", validTillText(membership)]
     ].filter(([, value]) => value);
     const status = receipt.balance === null ? null : receipt.balance > 0
         ? { text: `Balance due ${formatINR(receipt.balance)}`, color: CARD_COLORS.brick }
@@ -477,7 +485,7 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
                 <div><label>Member ID</label><strong>${escapeHTML(member?.member_code || "—")}</strong></div>
                 <div><label>Method</label><strong>${escapeHTML(methodLabel(payment.method))}</strong></div>
                 ${payment.upi_reference ? `<div><label>UPI reference</label><strong>${escapeHTML(payment.upi_reference)}</strong></div>` : ""}
-                ${membership ? `<div><label>Plan</label><strong>${escapeHTML(membership.plan_name)}</strong></div><div><label>Valid until</label><strong>${escapeHTML(formatDate(membership.end_date))}</strong></div>` : ""}
+                ${membership ? `<div><label>Plan</label><strong>${escapeHTML(membership.plan_name)}</strong></div><div><label>Valid till</label><strong>${escapeHTML(validTillText(membership))}</strong></div>` : ""}
             </div>
             ${blocker ? `<p class="helper-text">${escapeHTML(blocker)} You can still share the receipt card.</p>` : ""}
         </div>`,

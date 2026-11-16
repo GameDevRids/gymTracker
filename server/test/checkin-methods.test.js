@@ -10,7 +10,8 @@ import { gymForEntranceToken } from "../services/checkinSettingsService.js";
 import { createEntranceRouter, ASKED_COOKIE, DEVICE_COOKIE, NOT_ACTIVE } from "../routes/entrance.js";
 import { createEntranceLimits, createNumberLockout, validateCheckinSettings } from "../middleware/validateCheckin.js";
 import { requireOwner } from "../middleware/requireOwner.js";
-import { checkInOutcome, checkInStatus, distanceMeters, normalizeIndianMobile, withinRadius } from "../../assets/js/checkin.js";
+import { distanceMeters, normalizeIndianMobile, withinRadius } from "../../assets/js/checkin.js";
+import { checkInDecision } from "../../assets/js/memberStatus.js";
 
 // 07:42 IST on 12 Nov 2026.
 const morning = new Date("2026-11-12T02:12:00Z");
@@ -42,19 +43,13 @@ test("mobile numbers are normalised; distances and the radius allowance are in m
     assert.equal(withinRadius(gym, { latitude: 18.5217, longitude: 73.85, accuracy: 60 }).ok, true, "189 m: inside 150 m plus the 50 m allowance");
 });
 
-test("grace days and the warn/block policy decide what is recorded", () => {
-    const expired = (end) => ({ effective_status: "expired", end_date: end });
-    assert.deepEqual(checkInStatus(expired("2026-11-09"), "2026-11-12", 3), { status: "grace", graceDaysLeft: 0 });
-    assert.deepEqual(checkInStatus(expired("2026-11-10"), "2026-11-12", 3), { status: "grace", graceDaysLeft: 1 });
-    assert.deepEqual(checkInStatus(expired("2026-11-08"), "2026-11-12", 3), { status: "expired" });
-    assert.deepEqual(checkInStatus(expired("2026-11-11"), "2026-11-12", 0), { status: "expired" });
-    assert.deepEqual(checkInStatus(null, "2026-11-12", 3), { status: "none" });
-    assert.deepEqual(checkInStatus({ effective_status: "upcoming" }, "2026-11-12"), { status: "upcoming" });
-    for (const status of ["active", "grace"]) assert.equal(checkInOutcome(status, "block").recorded, true, status);
-    for (const status of ["expired", "none", "upcoming"]) {
-        assert.equal(checkInOutcome(status, "warn").recorded, true, `${status} warn`);
-        assert.deepEqual([checkInOutcome(status, "block").recorded, checkInOutcome(status, "block").blocked], [false, true], `${status} block`);
-    }
+test("the member's status decides check-in: grace is let in, lapsed, old and no plan are not", () => {
+    for (const status of ["active", "expiring", "upcoming", "in_grace"]) assert.equal(checkInDecision(status).allowed, true, status);
+    for (const status of ["lapsed", "old", "none"]) assert.equal(checkInDecision(status).allowed, false, status);
+    assert.deepEqual(checkInDecision("in_grace"), { result: "grace", allowed: true, stored: "grace" });
+    assert.deepEqual(checkInDecision("expiring"), { result: "checked_in", allowed: true, stored: "active" });
+    assert.deepEqual(checkInDecision("lapsed"), { result: "expired", allowed: false, stored: "expired" });
+    assert.deepEqual(checkInDecision("none"), { result: "no_membership", allowed: false, stored: "none" });
 });
 
 // ---------- Only the chosen method ----------
@@ -86,48 +81,52 @@ test("only the owner can change check-in settings, and the values are checked", 
     }
     assert.equal(run(requireOwner, { gymRole: "owner" }).passed, true);
     const valid = { checkin_method: "entrance_poster", expired_checkin_policy: "block", expiry_grace_days: 3, entrance_require_location: true, latitude: 18.52, longitude: 73.85, location_radius_m: 150 };
-    assert.equal(run(validateCheckinSettings, { body: valid }).passed, true);
+    const request = { body: valid };
+    assert.equal(run(validateCheckinSettings, request).passed, true);
+    assert.equal(Object.hasOwn(request.checkinSettings, "expired_checkin_policy"), false, "the retired policy is accepted from an older app and ignored");
     for (const body of [
         { checkin_method: "kiosk" }, { expired_checkin_policy: "ignore" }, { expiry_grace_days: 61 }, { expiry_grace_days: -1 },
         { location_radius_m: 10 }, { latitude: 18.5 }, { latitude: 95, longitude: 73 }, { entrance_token: "mine" }, {}
     ]) assert.equal(run(validateCheckinSettings, { body }).passed, false, JSON.stringify(body));
 });
 
-// ---------- Grace period and warn/block ----------
+// ---------- Grace and lapsed ----------
 
-test("expired within grace is allowed with the days left; beyond grace follows warn or block", async () => {
-    const warn = fakeCheckinDb({ gyms: { a: { expiry_grace_days: 3 } } });
+test("in grace is let in with the days left and the last grace day; the day after, lapsed is refused", async () => {
+    const db = fakeCheckinDb({ gyms: { a: { expiry_grace_days: 3 } } });
     // Dev's plan ended 9 Nov: 3 days ago on 12 Nov, the last grace day.
-    const grace = await scanCheckIn(tokenOf(warn, ids.dev), gymA, owner, warn, morning);
-    assert.deepEqual([grace.result, grace.recorded, grace.grace_days_left, grace.status], ["grace", true, 0, "grace"]);
+    const grace = await scanCheckIn(tokenOf(db, ids.dev), gymA, owner, db, morning);
+    assert.deepEqual([grace.result, grace.recorded, grace.grace_days_left, grace.status, grace.member_status], ["grace", true, 0, "grace", "in_grace"]);
+    assert.equal(grace.grace_until, "2026-11-12");
     const nextDay = new Date("2026-11-13T02:12:00Z");
-    const beyond = await scanCheckIn(tokenOf(warn, ids.dev), gymA, owner, warn, nextDay);
-    assert.deepEqual([beyond.result, beyond.recorded, beyond.blocked], ["expired", true, false]);
-    assert.deepEqual(warn.tables.attendance.map((row) => row.membership_status_at_check_in), ["grace", "expired"]);
-    assert.equal(beyond.renewal_price, 1200, "renewal at the plan's current price");
-
-    const block = fakeCheckinDb({ gyms: { a: { expired_checkin_policy: "block" } } });
-    const blocked = await scanCheckIn(tokenOf(block, ids.dev), gymA, owner, block, morning);
-    assert.deepEqual([blocked.result, blocked.recorded, blocked.blocked, blocked.attendance], ["expired", false, true, null]);
-    const none = await manualCheckIn(ids.neha, gymA, owner, block, morning);
-    assert.deepEqual([none.result, none.blocked], ["no_membership", true], "manual check-ins follow the policy too");
-    assert.equal(block.tables.attendance.length, 0, "blocked check-ins are not stored");
-    assert.equal((await scanCheckIn(tokenOf(block, ids.riya), gymA, owner, block, morning)).result, "checked_in", "active members are never blocked");
+    const lapsed = await scanCheckIn(tokenOf(db, ids.dev), gymA, owner, db, nextDay);
+    assert.deepEqual([lapsed.result, lapsed.recorded, lapsed.blocked, lapsed.member_status], ["expired", false, true, "lapsed"]);
+    assert.deepEqual(db.tables.attendance.map((row) => row.membership_status_at_check_in), ["grace"], "the refused check-in is not stored");
+    assert.equal(lapsed.renewal_price, 1200, "renewal at the plan's current price");
+    const none = await manualCheckIn(ids.neha, gymA, owner, db, nextDay);
+    assert.deepEqual([none.result, none.blocked], ["no_membership", true], "manual check-ins follow the same rule");
+    assert.equal((await scanCheckIn(tokenOf(db, ids.riya), gymA, owner, db, nextDay)).result, "checked_in", "active members are never refused");
 });
 
-test("a plan that starts later is amber: recorded under warn, refused under block", async () => {
+test("the membership's own grace days win over the gym's default", async () => {
+    const db = fakeCheckinDb({ gyms: { a: { expiry_grace_days: 0 } } });
+    db.tables.member_memberships.find((row) => row.id === "ms-dev").grace_days = 5;
+    const result = await scanCheckIn(tokenOf(db, ids.dev), gymA, owner, db, new Date("2026-11-13T02:12:00Z"));
+    assert.deepEqual([result.result, result.grace_days_left, result.grace_until], ["grace", 1, "2026-11-14"]);
+});
+
+test("a plan that starts later is let in (already paid for) and flagged as upcoming", async () => {
     const memberships = [{ id: "ms-dev-next", gym_id: gymA, member_id: ids.dev, plan_id: null, plan_name: "Quarterly", price: 3000, start_date: "2026-11-20", end_date: "2027-02-17", status: "assigned", created_at: "2026-11-10" }];
-    const warn = fakeCheckinDb({ memberships });
-    const upcoming = await scanCheckIn(tokenOf(warn, ids.dev), gymA, owner, warn, morning);
-    assert.deepEqual([upcoming.result, upcoming.recorded, upcoming.membership.start_date], ["upcoming", true, "2026-11-20"]);
-    const block = fakeCheckinDb({ memberships, gyms: { a: { expired_checkin_policy: "block" } } });
-    assert.deepEqual([(await scanCheckIn(tokenOf(block, ids.dev), gymA, owner, block, morning)).blocked, block.tables.attendance.length], [true, 0]);
+    const db = fakeCheckinDb({ memberships });
+    const upcoming = await scanCheckIn(tokenOf(db, ids.dev), gymA, owner, db, morning);
+    assert.deepEqual([upcoming.result, upcoming.recorded, upcoming.membership.start_date, upcoming.member_status], ["upcoming", true, "2026-11-20", "upcoming"]);
+    assert.deepEqual(db.tables.attendance.map((row) => row.membership_status_at_check_in), ["upcoming"]);
 });
 
-test("a member already checked in today is told so even after the policy turns to block", async () => {
-    const db = fakeCheckinDb();
+test("a member checked in today is told so even after the grace setting changes", async () => {
+    const db = fakeCheckinDb({ gyms: { a: { expiry_grace_days: 3 } } });
     await scanCheckIn(tokenOf(db, ids.dev), gymA, owner, db, morning);
-    gymOf(db, gymA).expired_checkin_policy = "block";
+    gymOf(db, gymA).expiry_grace_days = 0;
     const again = await scanCheckIn(tokenOf(db, ids.dev), gymA, owner, db, new Date("2026-11-12T10:00:00Z"));
     assert.equal(again.result, "already_checked_in");
     assert.equal(again.attendance.checked_in_at, morning.toISOString());
@@ -200,7 +199,7 @@ test("the location check uses the gym's radius, and asks when no position is sen
 });
 
 test("an expired member's phone gets the renewal price and the gym's UPI details", async () => {
-    const db = posterDb({ expired_checkin_policy: "block" });
+    const db = posterDb();
     const secret = await approvedPhone(db, gymA, "9876543211");
     const result = await entranceCheckIn(gymOf(db, gymA), secret, { now: morning }, db);
     assert.deepEqual([result.result, result.blocked, result.recorded, result.first_name], ["expired", true, false, "Dev"]);

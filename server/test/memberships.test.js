@@ -13,7 +13,6 @@ import {
     getMembership,
     listMemberMemberships,
     listMemberships,
-    listExpiringMemberships,
     selectCurrentMembership
 } from "../services/membershipsService.js";
 
@@ -115,12 +114,12 @@ test("membership list pagination defaults to 25", () => {
     assert.deepEqual(result.request.membershipListQuery, { page: 1, limit: 25 });
 });
 
-test("expiring membership query accepts only supported windows and defaults to seven days", () => {
+test("the expiring list has a fixed window now; an older app's days value is accepted and ignored", () => {
     const defaults = invoke(validateExpiringMembershipQuery, { query: {} });
     assert.equal(defaults.nextCalled, true);
-    assert.deepEqual(defaults.request.expiringMembershipQuery, { days: 7 });
+    assert.deepEqual(defaults.request.expiringMembershipQuery, {});
     for (const days of ["3", "7", "15", "30"]) {
-        assert.deepEqual(invoke(validateExpiringMembershipQuery, { query: { days } }).request.expiringMembershipQuery, { days: Number(days) });
+        assert.deepEqual(invoke(validateExpiringMembershipQuery, { query: { days } }).request.expiringMembershipQuery, {});
     }
     assert.equal(invoke(validateExpiringMembershipQuery, { query: { days: "8" } }).response.statusCode, 400);
 });
@@ -264,42 +263,6 @@ test("current membership selection prefers active, then nearest upcoming, then l
     assert.equal(selectCurrentMembership([expired, cancelled], "2026-11-06").id, "cancelled");
     assert.equal(selectCurrentMembership([expired], "2026-11-06").effective_status, "expired");
     assert.equal(selectCurrentMembership([], "2026-11-06"), null);
-});
-
-test("expiring list returns expired and in-window current memberships, sorted by end date", async () => {
-    const rows = [
-        { ...assignment, id: "expiring", member_id: memberId, end_date: "2026-11-09", members: { id: memberId, full_name: "Riya Shah", phone: "9876543210" } },
-        { ...assignment, id: "expired", member_id: exampleMemberId, end_date: "2026-11-05", members: { id: exampleMemberId, full_name: "Aman Rao", phone: "9876543211" } },
-        { ...assignment, id: "later", member_id: "00000000-0000-4000-8000-000000000004", end_date: "2026-11-15", members: { id: "00000000-0000-4000-8000-000000000004", full_name: "Zoya Khan", phone: "9876543212" } }
-    ];
-    const mock = mockSupabase([{ data: rows, error: null }]);
-    const memberships = await listExpiringMemberships({ days: 7, gymId }, mock.client, "2026-11-06");
-    assert.deepEqual(memberships.map((item) => item.id), ["expired", "expiring"]);
-    assert.deepEqual(memberships.map((item) => item.days_left), [-1, 3]);
-    assert.equal(memberships[1].member.full_name, "Riya Shah");
-    assert.equal(memberships[1].effective_status, "active");
-    assert.ok(mock.calls.some((call) => call.table === "member_memberships"
-        && call.operations.some(([name, select]) => name === "select"
-            && select.includes("members!member_memberships_member_id_fkey!inner("))));
-});
-
-test("a renewed member leaves the expiring list, whether the new plan is queued or already running", async () => {
-    const riya = { id: memberId, full_name: "Riya Shah", phone: "9876543210" };
-    const aman = { id: exampleMemberId, full_name: "Aman Rao", phone: "9876543211" };
-    const zoya = { id: "00000000-0000-4000-8000-000000000004", full_name: "Zoya Khan", phone: "9876543212" };
-    const rows = [
-        // Riya: expiring in 3 days, but the next plan is already queued: renewed.
-        { ...assignment, id: "riya-old", member_id: riya.id, start_date: "2026-10-11", end_date: "2026-11-09", members: riya },
-        { ...assignment, id: "riya-next", member_id: riya.id, start_date: "2026-11-10", end_date: "2026-12-09", members: riya },
-        // Aman: expiring in 3 days, nothing queued: still on the list.
-        { ...assignment, id: "aman-old", member_id: aman.id, start_date: "2026-10-11", end_date: "2026-11-09", members: aman },
-        // Zoya: expired, then renewed from today: her current plan is the new one.
-        { ...assignment, id: "zoya-old", member_id: zoya.id, start_date: "2026-09-01", end_date: "2026-09-30", members: zoya },
-        { ...assignment, id: "zoya-new", member_id: zoya.id, start_date: "2026-11-06", end_date: "2026-12-05", members: zoya }
-    ];
-    const mock = mockSupabase([{ data: rows, error: null }]);
-    const memberships = await listExpiringMemberships({ days: 7, gymId }, mock.client, "2026-11-06");
-    assert.deepEqual(memberships.map((item) => item.id), ["aman-old"]);
 });
 
 test("membership history is returned newest-first with effective statuses", async () => {

@@ -1,6 +1,7 @@
 import express from "express";
 import {
     getExpiringMemberships,
+    getLapsedMembers,
     getMembership,
     getMemberships,
     membershipsErrorHandler
@@ -10,6 +11,7 @@ import { validateExpiringMembershipQuery, validateMembershipId, validateMembersh
 const router = express.Router();
 
 router.get("/expiring", validateExpiringMembershipQuery, getExpiringMemberships);
+router.get("/lapsed", getLapsedMembers);
 router.get("/", validateMembershipListQuery, getMemberships);
 router.get("/:id", validateMembershipId, getMembership);
 router.use(membershipsErrorHandler);

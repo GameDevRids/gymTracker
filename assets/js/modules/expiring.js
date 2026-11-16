@@ -19,8 +19,9 @@ export function reminderBlocker(member) {
     return remindablePhone(member || {}) ? "" : "invalid-phone";
 }
 
+// Only members the board offers a reminder for (3 days or fewer left, or in grace) and who can get one.
 function renderSummary(memberships, remindedKeys) {
-    const remindable = memberships.filter((membership) => !reminderBlocker(membership.member));
+    const remindable = memberships.filter((membership) => membership.remindable && !reminderBlocker(membership.member));
     if (!remindable.length) return "";
     const reminded = remindable.filter((membership) => remindedKeys.has(reminderKey(membership))).length;
     return `<div class="board-summary" data-reminder-summary data-total="${remindable.length}">
@@ -30,7 +31,12 @@ function renderSummary(memberships, remindedKeys) {
     </div>`;
 }
 
-export function renderExpiring(memberships = [], status = "loading", days = 7, reminderTemplate = "", remindedKeys = new Set()) {
+/**
+ * Expiring soon: members whose plan ends within 7 days, and members in grace (the server works this
+ * out with the shared status rule). The WhatsApp reminder is offered from 3 days before the end and
+ * all through grace, to members who agreed to messages.
+ */
+export function renderExpiring(memberships = [], status = "loading", reminderTemplate = "", remindedKeys = new Set()) {
     const content = status === "loading"
         ? renderSkeletonList({ count: 4, label: t("loading"), variant: "card" })
         : status && typeof status === "object"
@@ -40,24 +46,27 @@ export function renderExpiring(memberships = [], status = "loading", days = 7, r
                     const member = membership.member;
                     const key = reminderKey(membership);
                     const isReminded = remindedKeys.has(key);
-                    const dayLabel = membership.days_left < 0
-                        ? `${Math.abs(membership.days_left)} ${t("expiredDays")}`
+                    const inGrace = membership.member_status === "in_grace";
+                    const dayLabel = inGrace
+                        ? `${t("inGrace")} · ${membership.grace_days_left > 0 ? `${membership.grace_days_left} ${t(membership.grace_days_left === 1 ? "graceDayLeft" : "graceDaysLeft")}` : t("graceLastDay")}`
                         : membership.days_left === 0 ? t("expiresToday") : `${membership.days_left} ${t("daysLeft").toLowerCase()}`;
                     const phoneDigits = remindablePhone(member);
                     const message = buildReminderMessage(reminderTemplate, {
                         name: member.full_name,
                         plan: membership.plan_name,
-                        expiry_date: formatDate(membership.end_date)
+                        expiry_date: formatDate(membership.end_date),
+                        grace_date: formatDate(membership.grace_until || membership.end_date)
                     });
                     const blocker = reminderBlocker(member);
-                    const whatsappAction = !blocker
+                    const whatsappAction = !membership.remindable ? ""
+                        : !blocker
                         ? `<a class="button button-secondary button-small" href="https://wa.me/91${phoneDigits}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer" data-remind-key="${escapeHTML(key)}" data-member-id="${escapeHTML(member.id)}" data-membership-id="${escapeHTML(membership.id)}">${escapeHTML(isReminded ? t("reminded") : t("remindWhatsApp"))}</a>`
                         : `<span class="helper-text reminder-blocked">${blocker === "no-consent" ? escapeHTML(t("noWhatsAppConsent")) : "Invalid phone"}</span>`;
                     return `<article class="card expiring-card${isReminded ? " is-reminded" : ""}">
                         <div class="expiring-member"><span class="member-avatar">${escapeHTML(member.full_name.slice(0, 1))}</span><div><strong>${escapeHTML(member.full_name)}</strong><small>${escapeHTML(formatPhone(member.phone))}</small></div></div>
                         <div class="expiring-detail"><small>${t("plan")}</small><strong>${escapeHTML(membership.plan_name)}</strong></div>
-                        <div class="expiring-detail"><small>${t("expiry")}</small><strong>${formatDate(membership.end_date)}</strong></div>
-                        <span class="badge-soft ${membership.days_left < 0 ? "expiry-overdue" : ""}">${escapeHTML(dayLabel)}</span>
+                        <div class="expiring-detail"><small>${inGrace ? t("ended") : t("expiry")}</small><strong>${formatDate(membership.end_date)}</strong>${membership.grace_until && membership.grace_days > 0 ? `<small>${escapeHTML(t("graceTill"))} ${formatDate(membership.grace_until)}</small>` : ""}</div>
+                        <span class="badge-soft ${inGrace ? "expiry-overdue" : ""}">${escapeHTML(dayLabel)}</span>
                         <div class="expiring-actions">
                             <button class="button button-primary button-small" data-action="renew-member" data-id="${escapeHTML(member.id)}">${t("renew")}</button>
                             <button class="button button-secondary button-small" data-action="record-payment" data-id="${escapeHTML(member.id)}" data-membership-id="${escapeHTML(membership.id)}" data-amount="${escapeHTML(membership.price)}">${t("recordPayment")}</button>
@@ -67,7 +76,7 @@ export function renderExpiring(memberships = [], status = "loading", days = 7, r
                 }).join("")}</div>`
                 : `<div class="empty-state">${t("noExpiring")}</div>`;
     return `<div class="page-heading"><div><h1>${t("expiring")}</h1><p>${t("expiryDescription")}</p></div></div>
-        <div class="toolbar"><label for="expiry-days">${t("windowLabel")}</label><select class="field-control" id="expiry-days">${[3, 7, 15, 30].map((window) => `<option value="${window}" ${window === Number(days) ? "selected" : ""}>${window} ${t("days")}</option>`).join("")}</select></div>
+        <p class="board-links"><button class="text-button" data-view="renewals">${escapeHTML(t("seeLapsed"))}</button></p>
         ${content}`;
 }
 

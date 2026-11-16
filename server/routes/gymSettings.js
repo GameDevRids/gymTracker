@@ -5,7 +5,9 @@ import { importExpiryReminders, saveTemplateIfUnset } from "../services/whatsapp
 import { membersErrorHandler } from "../controllers/membersController.js";
 import { getCheckinSettings, replaceEntranceToken, saveCheckinSettings } from "../services/checkinSettingsService.js";
 import { validateCheckinSettings } from "../middleware/validateCheckin.js";
-import { requireOwner } from "../middleware/requireOwner.js";
+import { ownerOnly, requireOwner } from "../middleware/requireOwner.js";
+import { getRenewalSettings, saveRenewalSettings } from "../services/renewalSettingsService.js";
+import { validateRenewalSettings } from "../middleware/validateRenewal.js";
 
 const router = express.Router();
 
@@ -47,6 +49,20 @@ router.get("/attendance", (request, response, next) => {
 
 router.put("/attendance", requireOwner, validateCheckinSettings, (request, response, next) => {
     saveCheckinSettings(request.gymId, request.checkinSettings, request.gymRole)
+        .then((settings) => response.json({ status: "success", data: settings }))
+        .catch(next);
+});
+
+// Settings > Renewals and grace (migration 020). Every login reads them (the Renew sheet uses
+// the welcome-back discount); only the owner changes them.
+router.get("/renewals", (request, response, next) => {
+    getRenewalSettings(request.gymId, request.gymRole)
+        .then((settings) => response.json({ status: "success", data: settings }))
+        .catch(next);
+});
+
+router.put("/renewals", ownerOnly("Only the gym owner can change the renewal settings."), validateRenewalSettings, (request, response, next) => {
+    saveRenewalSettings(request.gymId, request.renewalSettings, request.gymRole)
         .then((settings) => response.json({ status: "success", data: settings }))
         .catch(next);
 });

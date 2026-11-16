@@ -68,6 +68,9 @@ export function memberFromApiRow(member) {
         startDate: currentMembership?.start_date || "",
         expiryDate: currentMembership?.end_date || "",
         status: member.status === "suspended" ? "suspended" : "active",
+        // The shared status (assets/js/memberStatus.js) worked out by the server, and its dates.
+        memberStatus: member.member_status || "",
+        statusDetail: member.status_detail || null,
         // Lifetime totals calculated by the server from memberships and recorded payments.
         totalFees: Number(member.billing?.billed ?? 0),
         paidTotal: Number(member.billing?.paid ?? 0),

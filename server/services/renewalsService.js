@@ -19,7 +19,7 @@ const MISSING = ["PGRST202", "PGRST204", "PGRST205", "42883", "42P01", "42703"];
 function databaseError(error) {
     const text = `${error?.message || ""} ${error?.details || ""}`;
     if (MISSING.includes(error?.code)) {
-        return new RenewalError(503, "One-tap renewal is unavailable. Run migration 019_add_one_tap_renewal.sql in Supabase SQL Editor.", "unavailable");
+        return new RenewalError(503, "Renewing needs the latest database update. Run migration 020_add_grace_and_lapsed_members.sql in Supabase SQL Editor.", "unavailable");
     }
     if (error?.code === "P0002") return new RenewalError(404, error.message || "Member or plan not found.", "not_found");
     if (error?.code === "P0001") {
@@ -41,9 +41,10 @@ function databaseError(error) {
 }
 
 /**
- * Renews a member in one transaction. input: { idempotency_key, plan_id, backdate, expected_start,
- * total_fees, amount_paid, method, upi_reference }. Returns { replayed, renewal, membership,
- * payment, balance }; replayed is true when this key was already saved (nothing new was created).
+ * Renews a member in one transaction (migration 020). input: { idempotency_key, plan_id,
+ * start_date (an owner-chosen start, optional), expected_start, total_fees, discount_reason,
+ * amount_paid, method, upi_reference }. Returns { replayed, renewal, membership, payment, balance };
+ * replayed is true when this key was already saved (nothing new was created).
  */
 export async function renewMember(memberId, input, { gymId, userId = null }, client = supabaseClient) {
     if (!client) throw new RenewalError(503, "Supabase is not configured.");
@@ -53,9 +54,10 @@ export async function renewMember(memberId, input, { gymId, userId = null }, cli
         p_member_id: memberId,
         p_idempotency_key: input.idempotency_key,
         p_plan_id: input.plan_id,
-        p_backdate: input.backdate === true,
+        p_start_date: input.start_date ?? null,
         p_expected_start: input.expected_start ?? null,
         p_total_fees: input.total_fees ?? null,
+        p_discount_reason: input.discount_reason ?? null,
         p_amount_paid: input.amount_paid ?? 0,
         p_method: input.method || "cash",
         p_upi_reference: input.upi_reference ?? null,

@@ -72,16 +72,18 @@ test("a token from another gym, an unknown token and a malformed one all return 
     assert.equal(db.calls.filter((call) => call.table === "members").length, 2, "malformed tokens are not even looked up");
 });
 
-test("expired members are recorded and flagged; members without a plan too", async () => {
+test("lapsed members and members without a plan are not checked in, and say why", async () => {
     const db = fakeDb();
-    const expired = await scanCheckIn(tokens.dev, gymA, owner, db, morning);
-    assert.equal(expired.result, "expired");
-    assert.equal(expired.membership.days_left, -3);
-    assert.equal(expired.member.phone, "9876543211");
+    // Dev's plan ended 3 days ago and the gym has no grace: lapsed.
+    const lapsed = await scanCheckIn(tokens.dev, gymA, owner, db, morning);
+    assert.deepEqual([lapsed.result, lapsed.blocked, lapsed.recorded, lapsed.member_status], ["expired", true, false, "lapsed"]);
+    assert.equal(lapsed.membership.days_left, -3);
+    assert.equal(lapsed.ended_on, "2026-11-09");
+    assert.equal(lapsed.member.phone, "9876543211");
     const none = await scanCheckIn(tokens.neha, gymA, owner, db, morning);
-    assert.equal(none.result, "no_membership");
+    assert.deepEqual([none.result, none.blocked, none.member_status], ["no_membership", true, "none"]);
     assert.equal(none.membership, null);
-    assert.deepEqual(db.tables.attendance.map((row) => row.membership_status_at_check_in), ["expired", "none"]);
+    assert.deepEqual(db.tables.attendance, [], "refused check-ins are not stored");
 });
 
 test("check-ins either side of midnight IST are two different days", async () => {

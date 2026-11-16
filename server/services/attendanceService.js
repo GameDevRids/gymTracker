@@ -2,11 +2,12 @@ import { randomBytes } from "node:crypto";
 import { supabaseClient } from "../config/database.js";
 import { selectCurrentMembership } from "./membershipsService.js";
 import { CheckinSettingsError, loadGymCheckin } from "./checkinSettingsService.js";
-import { QR_TOKEN_PATTERN, checkInOutcome, checkInStatus, daysLeft, indiaDate } from "../../assets/js/checkin.js";
+import { QR_TOKEN_PATTERN, daysLeft, indiaDate } from "../../assets/js/checkin.js";
+import { DEFAULT_LAPSED_LIST_DAYS, checkInDecision, memberStatusFor } from "../../assets/js/memberStatus.js";
 
 const attendanceColumns = "id,gym_id,member_id,check_in_date,checked_in_at,method,membership_status_at_check_in,recorded_by,member_device_id,created_at";
 const memberCheckinColumns = "id,full_name,member_code,phone,whatsapp_opt_in";
-const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,price,total_fees,start_date,end_date,status,created_at";
+const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,price,total_fees,grace_days,start_date,end_date,status,created_at";
 const PAGE_SIZE = 1000;
 const ID_CHUNK = 150;
 
@@ -94,22 +95,32 @@ async function todaysCheckIn(memberId, gymId, today, client) {
 }
 
 /**
- * The one path every check-in takes (member QR, entrance poster, manual). It applies the gym's
- * grace days and expired-member policy, then records today's check-in, or reports the one
+ * The one path every check-in takes (member QR, entrance poster, manual). The member's status
+ * (assets/js/memberStatus.js) decides: active, expiring and upcoming are checked in; in grace is
+ * checked in with a warning; lapsed, old and no plan are not. It records today's check-in, or reports the one
  * already recorded. The unique index on (gym, member, IST day) decides, so two check-ins at
  * the same moment cannot both be recorded. Blocked check-ins are not stored.
  */
 export async function recordCheckIn(member, method, gym, { userId = null, deviceId = null, client = supabaseClient, now = new Date() } = {}) {
     const gymId = gym.id;
     const today = indiaDate(now);
-    const membership = selectCurrentMembership(await membershipsOf([member.id], gymId, client), today);
-    const { status, graceDaysLeft } = checkInStatus(membership, today, gym.expiry_grace_days || 0);
-    const outcome = checkInOutcome(status, gym.expired_checkin_policy);
+    const memberships = await membershipsOf([member.id], gymId, client);
+    const state = memberStatusFor(memberships, today, {
+        lapsedListDays: Number.isInteger(gym.lapsed_list_days) ? gym.lapsed_list_days : DEFAULT_LAPSED_LIST_DAYS,
+        defaultGraceDays: gym.expiry_grace_days || 0
+    });
+    const membership = state.membership || selectCurrentMembership(memberships, today);
+    const decision = checkInDecision(state.status);
+    const status = decision.stored;
+    const outcome = { result: decision.result, blocked: !decision.allowed };
     const details = {
         ...describe(member, membership, today),
         status,
-        grace_days_left: graceDaysLeft ?? null,
-        renewal_price: ["active", "upcoming"].includes(status) ? null : await renewalPrice(membership, gymId, client)
+        member_status: state.status,
+        grace_days_left: state.graceDaysLeft ?? null,
+        grace_until: state.graceUntil || null,
+        ended_on: state.endedOn || null,
+        renewal_price: ["active", "expiring", "upcoming"].includes(state.status) ? null : await renewalPrice(membership, gymId, client)
     };
     if (outcome.blocked) {
         const existing = await todaysCheckIn(member.id, gymId, today, client);
@@ -357,7 +368,7 @@ export async function importAttendance(records, gymId, userId = null, client = s
         const key = `${record.member_id}:${day}`;
         const current = perDay.get(key);
         if (!current || at < new Date(current.checked_in_at)) {
-            const status = checkInStatus(selectCurrentMembership(byMember.get(record.member_id) || [], day), day).status;
+            const status = checkInDecision(memberStatusFor(byMember.get(record.member_id) || [], day).status).stored;
             perDay.set(key, { gym_id: gymId, member_id: record.member_id, checked_in_at: at.toISOString(), method: "manual", membership_status_at_check_in: status, recorded_by: userId });
         }
     }

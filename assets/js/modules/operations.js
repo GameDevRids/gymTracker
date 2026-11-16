@@ -10,9 +10,11 @@ import { methodLabel, paymentsPage, renderUpiTestQr } from "./upiPayments.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { renderVisitsPage } from "./attendance.js";
 import { renderAttendanceSettings } from "./checkinSettingsUi.js";
-import { getCurrentMembership, isRenewed, planNameFor } from "./memberMemberships.js";
+import { getCurrentMembership, planNameFor } from "./memberMemberships.js";
 import { currentSummary, monthLabel } from "./summary.js";
 import { renderLocalDataSettings } from "./localData.js";
+import { renderLapsedPage } from "./lapsed.js";
+import { renderRenewalSettings } from "./renewalSettingsUi.js";
 
 const pageHeading = (title, description, actions = "") =>
     `<div class="page-heading"><div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`;
@@ -21,7 +23,8 @@ export function renderOperationsPage(view) {
     const renderers = {
         attendance: renderAttendance,
         payments: renderPayments,
-        renewals: renderRenewals,
+        // The view id stays "renewals" (saved preferences); the page is Lapsed members now.
+        renewals: renderLapsedPage,
         retention: renderRetention,
         analytics: renderAnalytics,
         reports: renderReports,
@@ -63,25 +66,6 @@ function renderPayments() {
 }
 
 const memberExpiry = (member) => getCurrentMembership(member.id)?.end_date || member.expiryDate || "";
-
-function renderRenewals() {
-    const today = indiaISODate();
-    const members = state.members
-        .filter((member) => memberExpiry(member) && !isRenewed(member.id))
-        .map((member) => ({ member, days: daysBetween(today, memberExpiry(member)) }))
-        .filter(({ days }) => days !== null && days <= 30).sort((a, b) => a.days - b.days);
-    const buckets = {
-        expired: members.filter(({ days }) => days < 0).length,
-        today: members.filter(({ days }) => days === 0).length,
-        three: members.filter(({ days }) => days >= 1 && days <= 3).length,
-        seven: members.filter(({ days }) => days >= 1 && days <= 7).length,
-        thirty: members.filter(({ days }) => days >= 1 && days <= 30).length
-    };
-    return `${pageHeading("Renewals", "Stay ahead of upcoming expiries and keep memberships active.", `<button class="button button-secondary" data-action="export-renewals">↓ Export list</button>`)}
-        <div class="summary-row"><span class="summary-chip"><strong>${buckets.expired}</strong> expired</span><span class="summary-chip"><strong>${buckets.today}</strong> expire today</span><span class="summary-chip"><strong>${buckets.three}</strong> within 3 days</span><span class="summary-chip"><strong>${buckets.seven}</strong> within 7 days</span><span class="summary-chip"><strong>${buckets.thirty}</strong> within 30 days</span></div>
-        <div class="toolbar"><select class="field-control" id="renewal-filter"><option value="all">All due</option><option value="expired">Expired</option><option value="today">Today</option><option value="3">Within 3 days</option><option value="7">Within 7 days</option><option value="30">Within 30 days</option></select></div>
-        <section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expiry</th><th>Days</th><th>Balance</th><th>Action</th></tr></thead><tbody>${members.length ? members.map(({ member, days }) => `<tr data-renewal-row data-days="${days}"><td>${escapeHTML(member.name)}</td><td>${escapeHTML(formatPhone(member.phone))}</td><td>${escapeHTML(planNameFor(member) || "—")}</td><td>${formatDate(memberExpiry(member))}</td><td>${days < 0 ? `${Math.abs(days)} days ago` : days === 0 ? "Today" : `${days} days`}</td><td>${formatINR(memberBalance(member))}</td><td><button class="button button-secondary button-small" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew</button></td></tr>`).join("") : emptyRow(7, "No memberships due in this window.")}</tbody></table></div></section>`;
-}
 
 // Each member's check-in days (India time), newest first.
 function visitDaysByMember() {
@@ -312,6 +296,7 @@ function renderSettings() {
             <div class="field full"><button class="button button-primary" type="submit">Save settings</button></div>
         </form></section>
         ${renderAttendanceSettings()}
+        ${renderRenewalSettings()}
         ${renderWelcomeTemplateSettings()}
         ${renderReminderTemplateSettings()}
         ${renderAccountSettings()}

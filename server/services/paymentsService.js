@@ -177,7 +177,7 @@ export async function getReceipt(paymentId, gymId, client = supabaseClient) {
     if (payment.membership_id) {
         const [membershipResult, paymentsResult] = await Promise.all([
             client.from("member_memberships")
-                .select("id,plan_name,start_date,end_date,price,total_fees")
+                .select("id,plan_name,start_date,end_date,price,total_fees,grace_days")
                 .eq("id", payment.membership_id)
                 .eq("gym_id", gymId)
                 .maybeSingle(),

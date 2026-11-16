@@ -1,6 +1,6 @@
 import { supabaseClient } from "../config/database.js";
 
-const planColumns = "id,gym_id,name,description,duration_days,price,is_active,created_at,updated_at";
+const planColumns = "id,gym_id,name,description,duration_days,price,grace_days,is_active,created_at,updated_at";
 
 export class PlansServiceError extends Error {
     constructor(status, message) {

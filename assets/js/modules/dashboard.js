@@ -1,9 +1,9 @@
-import { escapeHTML, formatINR, formatDate, formatPhone, indiaISODate, addDays, daysBetween, statusPill, visitDay } from "../utils.js";
+import { escapeHTML, formatINR, formatDate, formatPhone, indiaISODate, addDays, statusPill, visitDay } from "../utils.js";
 import { drawChartOrEmpty, hasNonZero } from "../components/charts.js";
 import { state } from "../state.js";
 import { emptyRow } from "../components/tables.js";
 import { renderSkeletonList } from "../components/skeleton.js";
-import { getCurrentMembership, isRenewed, renewalMemberships } from "./memberMemberships.js";
+import { getCurrentMembership, renewalMemberships } from "./memberMemberships.js";
 import { currentSummary, monthLabel } from "./summary.js";
 import { paymentsPage } from "./upiPayments.js";
 import { renderSetupChecklist } from "./setupChecklist.js";
@@ -47,7 +47,7 @@ export function renderDashboard() {
     const attendanceToday = state.attendance.filter((record) => visitDay(record) === today).length;
     const expiringSoon = state.members
         .map((member) => ({ member, membership: getCurrentMembership(member.id) }))
-        .filter(({ member, membership }) => membership?.effective_status === "active" && daysBetween(today, membership.end_date) <= 7 && !isRenewed(member.id))
+        .filter(({ member, membership }) => member.memberStatus === "expiring" && membership)
         .sort((a, b) => a.membership.end_date.localeCompare(b.membership.end_date))
         .slice(0, 5);
     const names = new Map(state.members.map((member) => [member.id, member.name]));
@@ -65,13 +65,14 @@ export function renderDashboard() {
 
     return `${heading}
         ${renderSetupChecklist(summary)}
+        ${statusCounts(summary.status_counts)}
         <div class="grid kpi-grid">
             ${kpi("Total members", summary.total_members, `${summary.active_members} currently active`, "♙")}
             ${kpi("New members", summary.new_members_this_month, "Joined this month", "✚")}
             ${kpi("Today's attendance", attendanceToday, "Check-ins recorded today", "◷")}
             ${kpi("Revenue collected", formatINR(summary.collected_this_month), "Payments received this month", "₹")}
             ${kpi("Pending payments", formatINR(summary.outstanding_total), "Outstanding member balances", "◌")}
-            ${kpi("Expiring soon", summary.expiring_in_30_days, "Memberships due within 30 days", "⟳")}
+            ${kpi("Expiring soon", summary.status_counts?.expiring ?? summary.expiring_in_7_days, "Plans ending within 7 days", "⟳")}
             ${kpi("Inactive members", summary.inactive_members, "No visit recorded in 14+ days", "♡")}
             ${kpi("Active members", summary.active_members, "Valid membership today", "✓")}
         </div>
@@ -90,6 +91,13 @@ export function renderDashboard() {
             </section>
         </div>
         <section class="card table-card dashboard-watch-card"><div class="card-header"><div><h2>Memberships to keep an eye on</h2><p>Expiring in the next 7 days</p></div><button class="text-button" data-view="renewals">View renewals</button></div><div class="table-wrap"><table><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expires</th><th>Status</th><th>Action</th></tr></thead><tbody>${expiringSoon.map(({ member, membership }) => `<tr><td>${escapeHTML(member.name)} <small class="helper-text">${escapeHTML(member.memberCode || "")}</small></td><td>${escapeHTML(formatPhone(member.phone) || "—")}</td><td>${escapeHTML(membership.plan_name)}</td><td>${formatDate(membership.end_date)}</td><td>${statusPill(membership.effective_status)}</td><td><button class="text-button" data-action="profile" data-id="${escapeHTML(member.id)}">View</button></td></tr>`).join("") || emptyRow(6, "No memberships expiring this week.")}</tbody></table></div></section>`;
+}
+
+/** "Expiring this week / In grace / Lapsed", each opening its list. Hidden until the counts arrive. */
+function statusCounts(counts) {
+    if (!counts) return "";
+    const item = (view, value, label) => `<button class="status-count" type="button" data-view="${view}"><strong>${Number(value) || 0}</strong><span>${label}</span></button>`;
+    return `<div class="status-counts" aria-label="Members to follow up">${item("expiring", counts.expiring, "Expiring this week")}${item("expiring", counts.in_grace, "In grace")}${item("renewals", counts.lapsed, "Lapsed")}</div>`;
 }
 
 function kpi(label, value, note, icon) {

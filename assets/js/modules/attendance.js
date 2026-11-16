@@ -148,9 +148,8 @@ export function renderVisitsPage() {
             return `<tr data-attendance-row><td data-label="Time">${escapeHTML(timeText(record.checkedInAt))}</td><td data-label="Member"><button class="text-button" data-action="profile" data-id="${escapeHTML(record.memberId)}">${escapeHTML(name)}</button><small class="cell-sub">${escapeHTML(record.memberCode)}</small></td><td data-label="Method">${escapeHTML(methodLabel(record.source))}</td><td data-label="Membership">${statusPill(record.status)}</td></tr>`;
         }).join("")}</tbody></table></div>`;
     }
-    const policy = checkinSettings.data?.expired_checkin_policy === "block"
-        ? "Expired members are not checked in (Settings › Attendance)."
-        : "Expired memberships are still recorded and flagged.";
+    // Who may check in follows the member's status: grace is let in with a warning, lapsed is not.
+    const policy = "Members in grace are checked in with a warning; lapsed members are asked to renew at the desk.";
     return `<div class="page-heading"><div><h1>Visits</h1><p>Check-ins at the entrance, stored for your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="checkin-by-name">Check in manually</button><button class="button button-primary" data-view="scan">Check-in screen</button></div></div>
         ${pending ? `<div class="note-box import-note" role="status"><span><strong>${plural(pending, "check-in")}</strong> saved only in this browser by an older version.</span><button class="button button-secondary button-small" data-action="open-local-data">Move my saved data to the cloud</button></div>` : ""}
         <div class="summary-row"><span class="summary-chip"><strong>${todayCount}</strong> today</span><span class="summary-chip"><strong>${weekCount}</strong> this week</span><span class="summary-chip"><strong>${monthVisitors}</strong> unique visitors this month</span></div>
@@ -328,11 +327,9 @@ function resultSentence(data) {
     const time = timeText(data.attendance?.checked_in_at);
     if (data.result === "checked_in") return [`${name} checked in at ${time}.`, "success"];
     if (data.result === "already_checked_in") return [`${name} already checked in today at ${time}.`, "success"];
-    if (data.blocked) return [`${name} was not checked in: ${data.result === "upcoming" ? "the plan has not started yet" : data.result === "expired" ? "the membership has expired" : "no active membership"}. Please renew at the desk.`, "error"];
-    if (data.result === "grace") return [`${name} checked in. The plan has expired; ${plural(data.grace_days_left, "grace day")} left.`, "success"];
-    if (data.result === "upcoming") return [`${name} checked in, but the plan starts on ${formatDate(data.membership?.start_date)}.`, "error"];
-    if (data.result === "expired") return [`${name} checked in, but the membership has expired.`, "error"];
-    if (data.result === "no_membership") return [`${name} checked in, but has no active membership.`, "error"];
+    if (data.blocked) return [`${name} was not checked in: ${data.result === "expired" ? `the plan ended on ${formatDate(data.ended_on || data.membership?.end_date)} and grace is over` : "no active membership"}. Please renew at the desk.`, "error"];
+    if (data.result === "grace") return [`${name} checked in. ${graceLine(data)}.`, "success"];
+    if (data.result === "upcoming") return [`${name} checked in; the plan starts on ${formatDate(data.membership?.start_date)}.`, "success"];
     return ["Member not found.", "error"];
 }
 
@@ -675,6 +672,13 @@ function planLine(membership) {
     return `${membership.plan_name}${left > 0 ? ` · ${plural(left, "day")} left` : left === 0 ? " · last day today" : ""}`;
 }
 
+/** "Plan ended 14 Nov – 2 days of grace left" (or "last day of grace"). */
+function graceLine(data) {
+    const ended = formatDate(data.ended_on || data.membership?.end_date);
+    const left = Number(data.grace_days_left);
+    return `Plan ended ${ended} – ${left > 0 ? `${plural(left, "day")} of grace left` : "last day of grace today"}`;
+}
+
 function renewalActions(data) {
     const member = data.member;
     const id = escapeHTML(member.id);
@@ -740,21 +744,20 @@ export function showResult(data) {
         tone = "amber";
         vibrate([60, 80, 60]);
         duration = ACTION_RESULT_MS;
-        const ago = Math.max(0, -(membership?.days_left ?? 0));
-        html = `<p class="scan-title">Welcome, ${escapeHTML(first)}</p><p class="scan-line">Checked in ${escapeHTML(time)} · plan expired ${ago === 1 ? "yesterday" : `${ago} days ago`}</p><p class="scan-sub">${data.grace_days_left > 0 ? `${plural(data.grace_days_left, "grace day")} left` : "Last grace day today"}. Please renew.</p>${renewalActions(data)}`;
+        html = `<p class="scan-title">Welcome, ${escapeHTML(first)}</p><p class="scan-line">Checked in ${escapeHTML(time)}</p><p class="scan-sub"><strong>${escapeHTML(graceLine(data))}.</strong> Please renew.</p>${renewalActions(data)}`;
     } else if (data.result === "upcoming") {
         tone = "amber";
         vibrate([60, 80, 60]);
         duration = ACTION_RESULT_MS;
         const starts = formatDate(membership?.start_date);
-        html = `<p class="scan-title">${escapeHTML(name)}</p><p class="scan-line">Plan starts on ${escapeHTML(starts)}</p><p class="scan-sub">${data.blocked ? "Not checked in." : "Check-in recorded and flagged."}</p><div class="scan-actions">${scanner ? `<button class="button button-secondary" type="button" data-action="scanner-continue">Continue scanning</button>` : `<button class="button button-secondary" type="button" data-action="checkin-result-close">Done</button>`}</div>`;
+        html = `<p class="scan-title">${escapeHTML(name)}</p><p class="scan-line">Plan starts on ${escapeHTML(starts)}</p><p class="scan-sub">${data.blocked ? "Not checked in." : "Checked in."}</p><div class="scan-actions">${scanner ? `<button class="button button-secondary" type="button" data-action="scanner-continue">Continue scanning</button>` : `<button class="button button-secondary" type="button" data-action="checkin-result-close">Done</button>`}</div>`;
     } else if (data.result === "expired" || data.result === "no_membership") {
         tone = "red";
         vibrate([200, 100, 200]);
         duration = ACTION_RESULT_MS;
-        const ago = Math.max(0, -(membership?.days_left ?? 0));
-        const headline = data.result === "expired" ? `Membership expired ${ago === 1 ? "yesterday" : `${ago} days ago`}` : "No active membership";
-        html = `<p class="scan-title">${escapeHTML(name)}</p><p class="scan-line">${escapeHTML(headline)}</p><p class="scan-sub">${data.blocked ? "<strong>Not checked in.</strong> Please renew at the desk." : "Check-in recorded and flagged."}${data.renewal_price ? ` Renewal ${escapeHTML(formatINR(data.renewal_price))}.` : ""}</p>${renewalActions(data)}`;
+        const ended = data.ended_on || membership?.end_date;
+        const headline = data.result === "expired" ? `Plan ended ${formatDate(ended)}${data.member_status === "old" ? " (old member)" : " · grace is over"}` : "No active membership";
+        html = `<p class="scan-title">${escapeHTML(name)}</p><p class="scan-line">${escapeHTML(headline)}</p><p class="scan-sub"><strong>Not checked in.</strong> Please renew at the desk.${data.renewal_price ? ` Renewal ${escapeHTML(formatINR(data.renewal_price))}.` : ""}</p>${renewalActions(data)}`;
     } else if (data.result === "error") {
         vibrate(300);
         html = `<p class="scan-title">Couldn't check in</p><p class="scan-line">${escapeHTML(data.message || "Please try again.")}</p>`;

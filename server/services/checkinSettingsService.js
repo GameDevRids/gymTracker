@@ -3,8 +3,9 @@ import { supabaseClient } from "../config/database.js";
 import { QR_TOKEN_PATTERN } from "../../assets/js/checkin.js";
 
 // The gym's check-in settings (migration 013). Every check-in reads them, so the method that is
-// switched off is refused and the expired-member policy is applied on the server.
-export const checkinColumns = "id,name,checkin_method,expired_checkin_policy,expiry_grace_days,entrance_token,entrance_require_location,latitude,longitude,location_radius_m";
+// switched off is refused. Who may check in is decided by the member's status (grace and lapsed,
+// migration 020); expired_checkin_policy is no longer used.
+export const checkinColumns = "id,name,checkin_method,expiry_grace_days,lapsed_list_days,entrance_token,entrance_require_location,latitude,longitude,location_radius_m";
 
 export class CheckinSettingsError extends Error {
     constructor(status, message) {
@@ -47,7 +48,6 @@ export async function gymForEntranceToken(token, client = supabaseClient) {
 export function publicCheckinSettings(gym, role) {
     return {
         checkin_method: gym.checkin_method,
-        expired_checkin_policy: gym.expired_checkin_policy,
         expiry_grace_days: gym.expiry_grace_days,
         entrance_require_location: gym.entrance_require_location === true,
         latitude: gym.latitude,

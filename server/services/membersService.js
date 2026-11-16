@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { supabaseClient } from "../config/database.js";
 import { selectCurrentMembership } from "./membershipsService.js";
+import { gymStatusRules, indiaToday } from "./memberStatusService.js";
+import { DEFAULT_LAPSED_LIST_DAYS, memberStatusFor } from "../../assets/js/memberStatus.js";
 import { removePhotoBeforeArchive } from "./memberPhotosService.js";
 
 const memberColumns = [
@@ -91,7 +93,7 @@ function withoutMembershipDates(member) {
     return editableMember;
 }
 
-const currentMembershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at,updated_at";
+const currentMembershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,grace_days,start_date,end_date,status,created_at,updated_at";
 
 // PostgREST returns at most 1000 rows per request, so read in pages until a short page arrives.
 const READ_PAGE_SIZE = 1000;
@@ -122,7 +124,10 @@ export function memberBilling(memberships, payments) {
 async function addCurrentMemberships(members, gymId, client) {
     if (!members.length) return members;
     const memberIds = members.map((member) => member.id);
-    const [data, payments] = await Promise.all([
+    const today = indiaToday();
+    const [rules, data, payments] = await Promise.all([
+        // The members list never fails over a status detail: default rules if the gym's can't be read.
+        gymStatusRules(gymId, client).catch(() => ({ lapsedListDays: DEFAULT_LAPSED_LIST_DAYS, defaultGraceDays: 0 })),
         readAllRows(() => client
             .from("member_memberships")
             .select(currentMembershipColumns)
@@ -156,10 +161,14 @@ async function addCurrentMemberships(members, gymId, client) {
     return members.map((member) => {
         const history = membershipsByMember.get(member.id) || [];
         const currentMembership = selectCurrentMembership(history);
+        const state = memberStatusFor(history, today, rules);
         return {
             ...member,
             current_membership: currentMembership,
             membership_status: currentMembership?.effective_status || "unassigned",
+            // The shared status (active, expiring, upcoming, in_grace, lapsed, old, none) and its dates.
+            member_status: state.status,
+            status_detail: { days_left: state.daysLeft, ended_on: state.endedOn || null, grace_until: state.graceUntil || null, grace_days_left: state.graceDaysLeft, next_start: state.nextStart || null },
             billing: memberBilling(history, paymentsByMember.get(member.id) || [])
         };
     });

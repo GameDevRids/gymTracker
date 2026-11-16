@@ -83,6 +83,7 @@ export function validateMembershipListQuery(request, response, next) {
 export function validateExpiringMembershipQuery(request, response, next) {
     const parsed = expiringQuerySchema.safeParse(request.query);
     if (!parsed.success) return sendValidationError(response, "Days must be one of 3, 7, 15, or 30.");
-    request.expiringMembershipQuery = { days: Number(parsed.data.days) };
+    // The window is fixed now (7 days, plus grace); an older app may still send days.
+    request.expiringMembershipQuery = {};
     next();
 }

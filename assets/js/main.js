@@ -56,12 +56,14 @@ import { bindAuthPasswordLinks, checkAccountBeforeApp, downloadGymWorkbook, hand
 import { APP_VERSION } from "./version.js";
 import { startErrorReporting } from "./errorReporting.js";
 import { handleRenewSubmit, openRenewSheet } from "./modules/renewSheet.js";
+import { loadRenewalSettings, saveRenewalSettings } from "./modules/renewalSettingsUi.js";
+import { dropFromLapsed, handleLapsedClick, lapsedTab, loadLapsed, reloadLapsed } from "./modules/lapsed.js";
 import { hideSetupChecklist, loadSetupPlans } from "./modules/setupChecklist.js";
 
 const page = document.querySelector("#page-content");
 const viewTitles = {
     expiring: "Expiring soon", overview: "Overview", members: "Members", plans: "Membership plans", attendance: "Attendance", payments: "Payments",
-    renewals: "Renewals", retention: "Retention", analytics: "Analytics", reports: "Reports",
+    renewals: "Lapsed members", retention: "Retention", analytics: "Analytics", reports: "Reports",
     notifications: "Notifications", integrations: "Integrations", settings: "Settings", profile: "Member profile", scan: "Check-in"
 };
 // Conveniences remembered in this browser (storage.js): the last page, member filters and the
@@ -80,7 +82,6 @@ let memberFilters = {
 let memberRequestVersion = 0;
 let memberPlanRequest = 0;
 let memberSaving = false;
-let expiringDays = [3, 7, 15, 30].includes(uiPreferences.expiringDays) ? uiPreferences.expiringDays : 7;
 let expiringMemberships = [];
 let expiringStatus = "loading";
 // "loading" until every member has loaded after sign-in, so the list shows skeletons, not "No members yet".
@@ -163,6 +164,7 @@ function startAuthenticatedApp(session) {
     loadExpiringMemberships();
     loadSummary(rerenderSummaryViews);
     loadSetupPlans(() => { if (currentView === "overview") render(); });
+    if (currentView === "renewals") loadLapsed(lapsedTab(), rerenderLapsed);
     // Loaded early so the "Member added" dialog and Expiring soon can open WhatsApp without waiting.
     loadWelcomeTemplates();
     loadReminderTemplates().then(() => { if (["expiring", "settings"].includes(currentView)) render(); });
@@ -212,6 +214,10 @@ function acceptSession(session) {
     });
 }
 
+function rerenderLapsed() {
+    if (currentView === "renewals") render();
+}
+
 // Pages that show gym-wide totals redraw when they arrive.
 function rerenderSummaryViews() {
     if (["overview", "analytics", "payments"].includes(currentView)) render();
@@ -223,7 +229,9 @@ function afterRenewal(result) {
     const memberId = result.membership.member_id;
     if (result.membership.end_date >= indiaISODate()) {
         expiringMemberships = expiringMemberships.filter((item) => item.member?.id !== memberId);
+        dropFromLapsed(memberId);
     }
+    reloadLapsed(rerenderLapsed);
     refreshTotals(memberId);
     loadAllMemberships(() => render());
     loadExpiringMemberships();
@@ -278,7 +286,7 @@ function render() {
     const now = new Date();
     document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(now);
     if (currentView === "expiring") {
-        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiringDays, expiryReminderTemplate(), remindedKeys());
+        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiryReminderTemplate(), remindedKeys());
     } else if (currentView === "overview") {
         page.innerHTML = renderDashboard();
         drawDashboardCharts();
@@ -378,6 +386,7 @@ function navigate(view) {
     if (view === "overview") loadSetupPlans(() => { if (currentView === "overview") render(); });
     render();
     if (view === "expiring") loadExpiringMemberships();
+    if (view === "renewals") loadLapsed(lapsedTab(), rerenderLapsed);
     if (view === "plans") loadPlans(renderPlansIfCurrent);
     if (["overview", "analytics", "payments"].includes(view)) loadSummary(rerenderSummaryViews);
     if (view === "settings") {
@@ -386,6 +395,7 @@ function navigate(view) {
         loadReminderTemplates({ force: true }).then(renderSettings);
         loadGymSettings().then(renderSettings);
         loadCheckinSettings().then(renderSettings);
+        loadRenewalSettings().then(renderSettings);
     }
     if (view === "attendance") loadAttendanceFeed(rerenderAttendanceViews);
     if (["payments", "notifications"].includes(view)) loadPaymentsPage(() => { if (currentView === view) render(); });
@@ -421,7 +431,7 @@ async function loadExpiringMemberships() {
     expiringStatus = "loading";
     if (currentView === "expiring") render();
     try {
-        const response = await apiClient.get("/api/memberships/expiring", { params: { days: expiringDays } });
+        const response = await apiClient.get("/api/memberships/expiring");
         if (requestVersion !== expiringRequestVersion) return;
         expiringMemberships = Array.isArray(response.data) ? response.data : [];
         expiringStatus = "ready";
@@ -1395,6 +1405,11 @@ async function handleSubmit(event) {
         await handleWelcomeTemplateSubmit(form);
         return;
     }
+    if (form.id === "renewal-settings-form") {
+        event.preventDefault();
+        await saveRenewalSettings(form, () => { if (currentView === "settings") render(); });
+        return;
+    }
     if (form.id === "attendance-settings-form") {
         event.preventDefault();
         await saveAttendanceSettings(form, rerenderForCheckinMethod);
@@ -1480,6 +1495,8 @@ document.addEventListener("click", (event) => {
         recordReminderClick(reminderLink);
         return;
     }
+    // Lapsed members: the tabs, and logging a renewal message as its WhatsApp link opens.
+    if (currentView === "renewals" && handleLapsedClick(event.target, rerenderLapsed)) return;
     const viewLink = event.target.closest("[data-view]");
     if (viewLink) { navigate(viewLink.dataset.view); return; }
     const action = event.target.closest("[data-action]");
@@ -1572,11 +1589,6 @@ document.addEventListener("change", (event) => {
     if (onPaymentFormEdit(target)) return;
     if (target.id === "visits-date" && target.value) { selectVisitsDay(target.value, () => { if (currentView === "attendance") render(); }); return; }
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
-    if (target.id === "expiry-days") {
-        expiringDays = Number(target.value);
-        saveUiPreferences({ expiringDays });
-        loadExpiringMemberships();
-    }
     if (target.matches("#membership-assignment-form [name='plan_id'], #membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
     if (target.id === "plan-status-filter") { setPlanStatus(target.value, renderPlansIfCurrent); return; }
     if (target.id === "form-duration_choice") { updatePlanDurationField(target); return; }

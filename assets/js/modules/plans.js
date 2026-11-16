@@ -4,6 +4,7 @@ import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { escapeHTML, formatINR, formatPlanDuration } from "../utils.js";
 import { renderSkeletonList } from "../components/skeleton.js";
+import { suggestedGraceDays } from "../renewal.js";
 
 const pageSize = 12;
 // 1, 3, 6 and 12 months; a year is 365 days to match the seeded plans.
@@ -105,6 +106,7 @@ export function openPlanForm(planId = "") {
             <div class="field" id="plan-custom-days" ${customDays ? "" : "hidden"}><label for="form-duration_days">Number of days *</label><input id="form-duration_days" name="duration_days" type="number" inputmode="numeric" value="${customDays ? currentDays : ""}" min="1" step="1" aria-describedby="plan-duration-error"><span id="plan-duration-error" class="helper-text plan-error" role="alert" hidden>Duration must be a positive whole number of days.</span></div>
             <div class="field"><label for="form-price">Price (₹) *</label><input id="form-price" name="price" type="number" value="${escapeHTML(plan?.price ?? "")}" required min="0" step="0.01" aria-describedby="plan-price-error"><span id="plan-price-error" class="helper-text plan-error" role="alert" hidden>Price must be a valid non-negative number.</span></div>
             <div class="field"><label for="form-is_active">Availability</label><select id="form-is_active" name="is_active"><option value="true" ${plan?.is_active !== false ? "selected" : ""}>Active</option><option value="false" ${plan?.is_active === false ? "selected" : ""}>Inactive</option></select></div>
+            <div class="field"><label for="form-grace_days">Grace after the plan ends (days)</label><input id="form-grace_days" name="grace_days" type="number" inputmode="numeric" min="0" max="60" step="1" placeholder="Use gym default" value="${plan?.grace_days ?? ""}" aria-describedby="plan-grace-help plan-grace-error"><span class="helper-text" id="plan-grace-help">Empty uses the gym default. Changes apply to new memberships only. <button class="text-button" type="button" data-action="plan-suggested-grace">Use suggested</button></span><span id="plan-grace-error" class="helper-text plan-error" role="alert" hidden>Grace must be a whole number from 0 to 60, or empty.</span></div>
             <div class="field full"><label for="form-description">Description</label><textarea id="form-description" name="description" maxlength="2000">${escapeHTML(plan?.description || "")}</textarea></div>
         </form>`,
         footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-primary" type="submit" form="plan-form">Save plan</button>`
@@ -137,6 +139,14 @@ export function handlePlanAction(action, target, onRender) {
     } else if (action === "previous-plans-page" || action === "next-plans-page") {
         pagination.page += action === "next-plans-page" ? 1 : -1;
         loadPlans(onRender);
+    } else if (action === "plan-suggested-grace") {
+        // Monthly 3, quarterly 4, six-month and yearly 5, from the length chosen in the form.
+        const form = target.closest("#plan-form");
+        if (!form) return true;
+        const choice = form.elements.duration_choice.value;
+        const days = Number(choice === "custom" ? form.elements.duration_days.value : choice);
+        if (Number.isInteger(days) && days > 0) form.elements.grace_days.value = suggestedGraceDays(days);
+        else toast("Choose the plan's length first.", "error");
     } else if (action === "toggle-plan") {
         const plan = plans.find((item) => item.id === id);
         if (!plan) {
@@ -186,19 +196,24 @@ export async function handlePlanSubmit(form, onRender) {
     const duration = Number(choice === "custom" ? values.get("duration_days") : choice);
     const priceValue = String(values.get("price") || "").trim();
     const price = Number(priceValue);
+    const graceValue = String(values.get("grace_days") ?? "").trim();
+    const graceDays = graceValue === "" ? null : Number(graceValue);
     const nameInvalid = !name;
     const durationInvalid = !Number.isInteger(duration) || duration <= 0;
     const priceInvalid = !priceValue || !Number.isFinite(price) || price < 0;
+    const graceInvalid = graceDays !== null && (!Number.isInteger(graceDays) || graceDays < 0 || graceDays > 60);
     setFieldError(form, "name", nameInvalid);
     setFieldError(form, "duration", durationInvalid);
     setFieldError(form, "price", priceInvalid);
-    if (nameInvalid || durationInvalid || priceInvalid) return;
+    setFieldError(form, "grace", graceInvalid);
+    if (nameInvalid || durationInvalid || priceInvalid || graceInvalid) return;
 
     const payload = {
         name,
         description: String(values.get("description") || "").trim() || null,
         duration_days: duration,
         price,
+        grace_days: graceDays,
         is_active: values.get("is_active") === "true"
     };
     const id = form.dataset.id;

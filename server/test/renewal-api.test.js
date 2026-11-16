@@ -71,14 +71,23 @@ test("the same request again answers 200 and says it was a repeat", async () => 
     assert.equal((await response.json()).data.replayed, true);
 });
 
-test("a gym or a start date sent by the browser is refused: only the checked fields are accepted", async () => {
+test("a gym, member or staff member sent by the browser is refused: only the checked fields are accepted", async () => {
     calls.length = 0;
-    for (const extra of [{ gym_id: "00000000-0000-4000-8000-0000000000b1" }, { start_date: "2020-01-01" }, { member_id: memberId }, { recorded_by: userId }]) {
+    for (const extra of [{ gym_id: "00000000-0000-4000-8000-0000000000b1" }, { member_id: memberId }, { recorded_by: userId }, { backdate: true }, { discount_reason: "friends" }, { start_date: "2026-02-30" }]) {
         const response = await post({ ...body, ...extra });
         assert.equal(response.status, 400, JSON.stringify(extra));
         assert.equal((await response.json()).code, "invalid");
     }
     assert.equal(calls.length, 0, "the service was never reached");
+});
+
+test("the owner's own start date and the welcome-back reason go through", async () => {
+    calls.length = 0;
+    behaviour = () => savedResult();
+    const response = await post({ ...body, start_date: "2026-11-18", discount_reason: "welcome_back" });
+    assert.equal(response.status, 201);
+    assert.equal(calls[0][1].start_date, "2026-11-18");
+    assert.equal(calls[0][1].discount_reason, "welcome_back");
 });
 
 test("bad fields are refused before anything is saved", async () => {
@@ -137,11 +146,12 @@ function fakeClient(answer) {
 
 test("the database function gets the gym and staff member from the caller, and the request as sent", async () => {
     const client = fakeClient({ data: savedResult(), error: null });
-    const result = await renewMember(memberId, { ...body, backdate: true }, { gymId, userId }, client);
+    const result = await renewMember(memberId, { ...body, start_date: "2026-11-18", discount_reason: "welcome_back" }, { gymId, userId }, client);
     assert.equal(client.rpcCalls[0][0], "gympulse_renew_member");
     assert.deepEqual(client.rpcCalls[0][1], {
-        p_gym_id: gymId, p_member_id: memberId, p_idempotency_key: key, p_plan_id: planId, p_backdate: true,
-        p_expected_start: "2026-11-20", p_total_fees: 1350, p_amount_paid: 1000, p_method: "upi", p_upi_reference: "123456789012", p_recorded_by: userId
+        p_gym_id: gymId, p_member_id: memberId, p_idempotency_key: key, p_plan_id: planId, p_start_date: "2026-11-18",
+        p_expected_start: "2026-11-20", p_total_fees: 1350, p_discount_reason: "welcome_back", p_amount_paid: 1000, p_method: "upi",
+        p_upi_reference: "123456789012", p_recorded_by: userId
     });
     assert.equal(typeof result.membership.effective_status, "string", "the plan arrives with its status");
     assert.equal(result.payment.receipt_number, "R-000007");
@@ -151,7 +161,7 @@ test("defaults: no fee means the plan's price, no payment means zero, cash, no U
     const client = fakeClient({ data: savedResult(), error: null });
     await renewMember(memberId, { idempotency_key: key, plan_id: planId }, { gymId }, client);
     const args = client.rpcCalls[0][1];
-    assert.deepEqual([args.p_total_fees, args.p_amount_paid, args.p_method, args.p_upi_reference, args.p_backdate, args.p_expected_start, args.p_recorded_by], [null, 0, "cash", null, false, null, null]);
+    assert.deepEqual([args.p_total_fees, args.p_amount_paid, args.p_method, args.p_upi_reference, args.p_start_date, args.p_expected_start, args.p_discount_reason, args.p_recorded_by], [null, 0, "cash", null, null, null, null, null]);
 });
 
 test("no gym, or no database, is refused before any call", async () => {
@@ -163,8 +173,8 @@ test("no gym, or no database, is refused before any call", async () => {
 
 test("every database error becomes a clear answer", async () => {
     const cases = [
-        [{ code: "PGRST202", message: "Could not find the function" }, 503, "unavailable", /019_add_one_tap_renewal/],
-        [{ code: "42883", message: "function does not exist" }, 503, "unavailable", /019_add_one_tap_renewal/],
+        [{ code: "PGRST202", message: "Could not find the function" }, 503, "unavailable", /020_add_grace_and_lapsed_members/],
+        [{ code: "42883", message: "function does not exist" }, 503, "unavailable", /020_add_grace_and_lapsed_members/],
         [{ code: "P0002", message: "Member not found." }, 404, "not_found", /Member not found/],
         [{ code: "P0001", message: "This member already has a plan starting on 20 Nov 2026.", details: "future_plan" }, 409, "future_plan", /already has a plan/],
         [{ code: "P0001", message: "The plan dates changed since this screen opened.", details: "dates_changed" }, 409, "dates_changed", /dates changed/],

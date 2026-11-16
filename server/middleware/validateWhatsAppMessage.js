@@ -2,7 +2,8 @@ import { z } from "zod";
 import { WELCOME_LANGUAGES, welcomeTemplateProblem } from "../../assets/js/welcomeMessage.js";
 import { reminderTemplateProblem } from "../../assets/js/reminderMessage.js";
 
-const REMINDER_TYPES = ["welcome", "expiry", "payment", "inactive"];
+// "lapsed": the "Send renewal message" to a lapsed member (migration 020).
+const REMINDER_TYPES = ["welcome", "expiry", "payment", "inactive", "lapsed"];
 // Message templates saved per gym, and the rule each saved body must follow.
 const TEMPLATE_PROBLEMS = { welcome: welcomeTemplateProblem, expiry_reminder: reminderTemplateProblem };
 
@@ -24,7 +25,7 @@ const messagePayloadSchema = z.object({
 export function validateMessagePayload(request, response, next) {
     const parsed = messagePayloadSchema.safeParse(request.body);
     if (!parsed.success) {
-        return sendValidationError(response, "Send reminder_type (welcome, expiry, payment or inactive), and optionally language and body. An expiry reminder also needs membership_id.");
+        return sendValidationError(response, "Send reminder_type (welcome, expiry, payment, inactive or lapsed), and optionally language and body. An expiry reminder also needs membership_id.");
     }
     request.validatedMessage = {
         reminderType: parsed.data.reminder_type,
@@ -40,7 +41,7 @@ export function validateMessagePayload(request, response, next) {
 export function validateMessageListQuery(request, response, next) {
     const type = request.query.reminder_type;
     if (type !== undefined && !REMINDER_TYPES.includes(type)) {
-        return sendValidationError(response, "reminder_type must be welcome, expiry, payment or inactive.");
+        return sendValidationError(response, "reminder_type must be welcome, expiry, payment, inactive or lapsed.");
     }
     request.messageListQuery = { reminderType: type };
     next();

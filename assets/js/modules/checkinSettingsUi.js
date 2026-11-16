@@ -1,12 +1,10 @@
-// Settings > Attendance: the gym's one check-in method, the expired-member policy, and for the
-// entrance poster its printable A4 poster, "Replace poster QR" and the optional location check.
+// Settings > Attendance: the gym's one check-in method, and for the entrance poster its printable A4 poster, "Replace poster QR" and the optional location check.
 // Only the owner can change these; other logins see them read-only.
 import { state } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { escapeHTML } from "../utils.js";
-import { MAX_GRACE_DAYS } from "../checkin.js";
 import { checkinSettings, canEditCheckinSettings } from "./checkinMethod.js";
 import { qrSvg } from "./upiPayments.js";
 
@@ -35,10 +33,6 @@ export function posterUrl() {
 const METHODS = [
     ["member_qr", "Member QR card", "Members show their QR card, staff scan it"],
     ["entrance_poster", "Entrance poster", "Members scan a QR poster at the entrance with their phone"]
-];
-const POLICIES = [
-    ["warn", "Allow with warning", "The check-in is recorded and flagged for staff."],
-    ["block", "Block check-in", "Not recorded. The member is asked to renew at the desk."]
 ];
 
 function choice(name, [value, title, description], selected) {
@@ -92,13 +86,7 @@ export function renderAttendanceSettings() {
                 ${METHODS.map((method) => choice("checkin_method", method, data.checkin_method)).join("")}
                 <span class="helper-text">Switching keeps every past visit; only new check-ins use the new method. The other method stops working at once.</span>
             </fieldset>
-            <fieldset class="field full choice-group" ${editable ? "" : "disabled"}>
-                <legend>Expired members</legend>
-                ${POLICIES.map((policy) => choice("expired_checkin_policy", policy, data.expired_checkin_policy)).join("")}
-            </fieldset>
-            <fieldset class="field full plain-fieldset" ${editable ? "" : "disabled"}>
-                <div class="field"><label for="grace-days">Grace period (days after expiry)</label><input id="grace-days" name="expiry_grace_days" type="number" min="0" max="${MAX_GRACE_DAYS}" step="1" inputmode="numeric" value="${Number(data.expiry_grace_days) || 0}"><span class="helper-text">During these days expired members can still check in, with a warning.</span></div>
-            </fieldset>
+            <p class="field full helper-text">Members in grace are checked in with a warning; lapsed members are asked to renew at the desk. Set the grace period in Renewals and grace below.</p>
             ${data.checkin_method === "entrance_poster"
                 ? `<fieldset class="field full plain-fieldset poster-fieldset" ${editable ? "" : "disabled"}>${renderPosterOptions(data)}</fieldset>`
                 : `<p class="field full helper-text">Choose "Entrance poster" and save to get the printable poster.</p>`}
@@ -116,13 +104,7 @@ function showError(form, id, message) {
 
 export async function saveAttendanceSettings(form, onChange = () => {}) {
     const values = new FormData(form);
-    const grace = Number(values.get("expiry_grace_days"));
-    if (!Number.isInteger(grace) || grace < 0 || grace > MAX_GRACE_DAYS) return showError(form, "attendance-settings-error", `Grace period must be a whole number from 0 to ${MAX_GRACE_DAYS}.`);
-    const body = {
-        checkin_method: String(values.get("checkin_method") || ""),
-        expired_checkin_policy: String(values.get("expired_checkin_policy") || ""),
-        expiry_grace_days: grace
-    };
+    const body = { checkin_method: String(values.get("checkin_method") || "") };
     if (form.querySelector("[name=location_radius_m]")) {
         const radius = Number(values.get("location_radius_m"));
         if (!Number.isInteger(radius) || radius < 25 || radius > 2000) return showError(form, "attendance-settings-error", "The allowed distance must be 25 to 2000 metres.");

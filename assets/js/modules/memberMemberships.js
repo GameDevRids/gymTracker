@@ -3,7 +3,6 @@ import { fetchActivePlans } from "../api/plansApi.js";
 import { closeModal, openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { getMember, getPlan, reloadMemberFromApi } from "../state.js";
-import { hasLaterPlan } from "../renewal.js";
 import { escapeHTML, formatDate, formatINR, formatPlanDuration, indiaISODate, statusPill } from "../utils.js";
 
 const membershipsByMember = new Map();
@@ -18,14 +17,6 @@ export function getAllMemberships() {
 
 export function areAllMembershipsLoaded() {
     return allMembershipsLoaded;
-}
-
-/** True when the member's current plan is followed by a queued one: already renewed, not expiring. */
-export function isRenewed(memberId) {
-    const current = getCurrentMembership(memberId);
-    if (!current || current.effective_status !== "active") return false;
-    const history = membershipsByMember.get(memberId) || allMemberships.filter((entry) => entry.member_id === memberId);
-    return hasLaterPlan(history, current);
 }
 
 export function getCurrentMembership(memberId) {

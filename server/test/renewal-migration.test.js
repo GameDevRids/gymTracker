@@ -5,7 +5,6 @@
 import test, { before } from "node:test";
 import assert from "node:assert/strict";
 import { createMigratedDatabase } from "./helpers/database.js";
-import { renewalPlan } from "../../assets/js/renewal.js";
 
 const owner = "00000000-0000-4000-8000-00000000000a";
 const gymA = "00000000-0000-4000-8000-0000000000a1";
@@ -112,30 +111,8 @@ test("the start date the screen showed is checked: a different one is refused, t
     assert.equal(day(result.membership.start_date), shift(today, 10));
 });
 
-test("the shared JS start-date rules give the same dates as the database", async () => {
-    const scenarios = [
-        { label: "expiring", start: -26, end: 3 },
-        { label: "active", start: -10, end: 19 },
-        { label: "ends today", start: -29, end: 0 },
-        { label: "ended yesterday", start: -30, end: -1 },
-        { label: "long expired", start: -90, end: -60 },
-        { label: "no plan", start: 0, end: 0, none: true }
-    ];
-    for (const scenario of scenarios) {
-        for (const backdate of [false, true]) {
-            const id = await member(gymA, scenario.start, scenario.end, scenario.none ? null : monthly);
-            const history = (await db.query("SELECT id, status, start_date::text AS start_date, end_date::text AS end_date, created_at::text AS created_at FROM public.member_memberships WHERE member_id = $1", [id])).rows;
-            const expected = renewalPlan(history, today, { backdate });
-            const result = await renew(gymA, id, { backdate, paid: 0 });
-            assert.equal(day(result.membership.start_date), expected.startDate, `${scenario.label}, backdate ${backdate}`);
-            assert.equal(result.renewal.start_choice, expected.choice, `${scenario.label}, backdate ${backdate}`);
-        }
-    }
-    const queued = await member(gymA, -20, 9, monthly);
-    await renew(gymA, queued, { paid: 0 });
-    const history = (await db.query("SELECT id, status, start_date::text AS start_date, end_date::text AS end_date FROM public.member_memberships WHERE member_id = $1", [queued])).rows;
-    assert.equal(renewalPlan(history, today).blocked, "future_plan", "the JS rules also see the queued plan");
-});
+// The shared JS start-date rules are checked against the current renew function (migration 020)
+// in member-status.test.js.
 
 // ---------- Plan, price and payment ----------
 

@@ -6,6 +6,8 @@ const planValueSchemas = {
     description: z.string().max(2000).nullable().transform((value) => value?.trim() || null),
     duration_days: z.number().int().positive(),
     price: z.number().finite().nonnegative(),
+    // Days of grace after this plan ends; null = use the gym's default (migration 020).
+    grace_days: z.number().int().min(0).max(60).nullable(),
     is_active: z.boolean()
 };
 const editableFields = new Set(Object.keys(planValueSchemas));
@@ -20,6 +22,7 @@ function planFieldError(field) {
     if (field === "description") return "Plan description must be 2000 characters or fewer.";
     if (field === "duration_days") return "Duration must be a positive whole number of days.";
     if (field === "price") return "Price must be a valid non-negative number.";
+    if (field === "grace_days") return "Grace must be a whole number of days from 0 to 60, or empty to use the gym default.";
     return "Plan status must be active or inactive.";
 }
 

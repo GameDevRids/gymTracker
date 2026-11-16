@@ -1,6 +1,5 @@
 import { supabaseClient, supabaseConfigurationError } from "../config/database.js";
 import { logger } from "../config/logger.js";
-import { hasLaterPlan } from "../../assets/js/renewal.js";
 import { renewalsForMemberships } from "./renewalsService.js";
 
 const membershipColumns = "id,gym_id,member_id,plan_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at,updated_at";
@@ -160,57 +159,3 @@ export async function listMemberships({ page, limit, gymId }, client = supabaseC
     return { memberships: (data || []).map(withEffectiveStatus), total: count ?? 0 };
 }
 
-export async function listExpiringMemberships({ days, gymId }, client = supabaseClient, today = currentIndiaDate()) {
-    requireSupabaseClient(client);
-    if (!gymId) throw new MembershipsServiceError(403, "Gym is required.");
-    const records = [];
-    const pageSize = 1000;
-    for (let offset = 0; ; offset += pageSize) {
-        const { data, error } = await client
-            .from("member_memberships")
-            .select(`${membershipColumns},members!member_memberships_member_id_fkey!inner(id,full_name,phone,archived_at,status,whatsapp_opt_in)`)
-            .eq("gym_id", gymId)
-            .eq("members.gym_id", gymId)
-            .is("members.archived_at", null)
-            .eq("status", "assigned")
-            .order("end_date", { ascending: true })
-            .order("created_at", { ascending: false })
-            .range(offset, offset + pageSize - 1);
-        if (error) throwDatabaseError(error);
-        records.push(...(data || []));
-        if (!data || data.length < pageSize) break;
-    }
-
-    const membershipsByMember = new Map();
-    for (const membership of records) {
-        const history = membershipsByMember.get(membership.member_id) || [];
-        history.push(membership);
-        membershipsByMember.set(membership.member_id, history);
-    }
-
-    const todayDate = new Date(`${today}T00:00:00.000Z`);
-    return [...membershipsByMember.values()]
-        .map((history) => {
-            const membership = selectCurrentMembership(history, today);
-            if (!membership) return null;
-            // Already renewed: a later plan is queued, so this member is not expiring.
-            if (membership.effective_status === "active" && hasLaterPlan(history, membership)) return null;
-            const member = membership.members;
-            const daysLeft = Math.floor((new Date(`${membership.end_date}T00:00:00.000Z`) - todayDate) / 86400000);
-            return {
-                ...membership,
-                member: {
-                    id: member.id,
-                    full_name: member.full_name,
-                    phone: member.phone,
-                    whatsapp_opt_in: member.whatsapp_opt_in === true
-                },
-                days_left: daysLeft
-            };
-        })
-        .filter((membership) => membership
-            && (membership.effective_status === "expired"
-                || (membership.effective_status === "active" && membership.days_left <= days)))
-        .sort((first, second) => first.end_date.localeCompare(second.end_date)
-            || first.member.full_name.localeCompare(second.member.full_name));
-}

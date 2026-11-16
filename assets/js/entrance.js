@@ -230,13 +230,13 @@ function renderResult(result) {
         if (result.renewal) html += renewalPanel(result);
     } else if (result.result === "grace") {
         tone = "amber";
-        html = `<h2>You're checked in</h2><p class="big-line">${escapeHTML(time)}</p><p>${result.grace_days_left > 0 ? `${result.grace_days_left} grace day${result.grace_days_left === 1 ? "" : "s"} left.` : "Today is your last grace day."}</p>${renewalPanel(result)}`;
+        html = `<h2>You're checked in</h2><p class="big-line">${escapeHTML(time)}</p><p>${result.ended_on ? `Your plan ended on ${escapeHTML(dateText(result.ended_on))}. ` : ""}${result.grace_days_left > 0 ? `${result.grace_days_left} day${result.grace_days_left === 1 ? "" : "s"} of grace left.` : "Today is your last day of grace."} Please renew.</p>${renewalPanel(result)}`;
     } else if (result.result === "upcoming") {
         tone = "amber";
         html = `<h2>${result.blocked ? "Not checked in" : "You're checked in"}</h2><p class="big-line">Your plan starts on ${escapeHTML(dateText(result.membership?.start_date))}</p>${result.blocked ? `<p>Please see the front desk.</p>` : ""}`;
     } else if (result.result === "expired") {
         tone = "red";
-        html = `<h2>${result.blocked ? "Not checked in" : "Checked in, but your plan has expired"}</h2>${result.blocked ? `<p class="big-line">Please renew at the desk.</p>` : ""}${renewalPanel(result)}`;
+        html = `<h2>Not checked in</h2><p class="big-line">Please renew at the desk.</p>${result.ended_on ? `<p>Your plan ended on ${escapeHTML(dateText(result.ended_on))}.</p>` : ""}${renewalPanel(result)}`;
     } else if (result.result === "no_membership") {
         tone = "red";
         html = `<h2>${result.blocked ? "Not checked in" : "Checked in"}</h2><p class="big-line">No active membership</p>${result.renewal ? renewalPanel(result) : `<p>Please see the front desk.</p>`}`;
