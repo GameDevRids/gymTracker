@@ -168,6 +168,15 @@ export function setUnauthorizedHandler(handler) {
     unauthorizedHandler = typeof handler === "function" ? handler : () => {};
 }
 
+// While any request has been waiting more than SLOW_MS (a sleeping server waking up), the page gets
+// data-server-slow, which shows "Waking up the server…". It goes away when the request ends.
+const SLOW_MS = 3000;
+let slowRequests = 0;
+function markSlow(delta) {
+    slowRequests = Math.max(0, slowRequests + delta);
+    globalThis.document?.documentElement?.toggleAttribute?.("data-server-slow", slowRequests > 0);
+}
+
 export const apiClient = {
     async request(path, { method = "GET", body, params = {}, headers = {}, timeoutMs = 15000, responseType = "json" } = {}) {
         const url = new URL(path, `${API_BASE_URL.replace(/\/$/, "")}/`);
@@ -178,6 +187,8 @@ export const apiClient = {
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        let slow = false;
+        const slowTimer = setTimeout(() => { slow = true; markSlow(1); }, SLOW_MS);
 
         const rawBody = typeof Blob !== "undefined" && body instanceof Blob;
         const send = async (retry = false) => {
@@ -233,6 +244,8 @@ export const apiClient = {
             throw new Error("The API request could not be completed.");
         } finally {
             clearTimeout(timeout);
+            clearTimeout(slowTimer);
+            if (slow) markSlow(-1);
         }
     },
 

@@ -1,7 +1,7 @@
 {
   "name": "GymPulse",
   "short_name": "GymPulse",
-  "description": "A local gym management workspace.",
+  "description": "Manage your gym's members, renewals, payments and check-ins.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

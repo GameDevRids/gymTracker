@@ -36,3 +36,9 @@ export function monthLabel(month) {
     const [year, index] = String(month).split("-").map(Number);
     return new Intl.DateTimeFormat("en-IN", { month: "short", timeZone: "UTC" }).format(new Date(Date.UTC(year, index - 1, 1)));
 }
+
+/** Members with a plan running today (Active or Expiring), from the shared status rule when available. */
+export function currentMemberCount(summary) {
+    const counts = summary?.status_counts;
+    return counts ? (counts.active || 0) + (counts.expiring || 0) : Number(summary?.active_members || 0);
+}

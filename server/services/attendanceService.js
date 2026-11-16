@@ -241,7 +241,7 @@ export async function searchCheckInMembers(text, gymId, client = supabaseClient,
         let request = client.from("members").select("id,full_name,member_code,phone_last4").eq("gym_id", gymId).is("archived_at", null);
         if (/^\d{1,4}$/.test(digits)) request = request.like("phone_last4", `${digits}%`);
         else if (/^\d{5,10}$/.test(digits)) request = request.like("phone_last10", `%${digits}%`);
-        else request = request.or(`full_name.ilike.${orPattern(query)},member_code.ilike.${orPattern(query)}`);
+        else request = request.or(`full_name.ilike.${orPattern(query)},member_code.ilike.${orPattern(query)},previous_member_code.ilike.${orPattern(query)}`);
         const { data, error } = await request.order("full_name", { ascending: true }).range(0, 49);
         if (error) databaseError(error);
         candidates = data || [];

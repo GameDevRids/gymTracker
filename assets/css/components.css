@@ -419,16 +419,10 @@
 .status-none { color: #748078; background: #eef1ee; }
 .status-expiring { color: #977632; background: #fbf3df; }
 
-/* Overview: Expiring this week / In grace / Lapsed */
-.status-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 15px; }
-.status-count { display: grid; gap: 2px; min-height: 64px; padding: 10px 12px; border: 1px solid #e3e9e2; border-radius: 10px; background: #fff; text-align: left; cursor: pointer; }
-.status-count strong { font: 800 22px/1.1 Manrope, sans-serif; }
-.status-count span { color: #536057; font-size: 13px; }
-.status-count:hover, .status-count:focus-visible { border-color: #1f7a4d; }
 
 /* Lapsed members */
 .board-links { margin: 0 0 10px; }
-.tab-row { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; }
+.tab-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .tab-button { min-height: 44px; padding: 0 14px; border: 1px solid #cfd8cf; border-radius: 999px; background: #fff; font-weight: 700; white-space: nowrap; }
 .tab-button.is-active { border-color: #1f7a4d; background: #e7f4ec; color: #14532d; }
 .lapsed-list { display: grid; gap: 10px; }
@@ -438,9 +432,6 @@
 .lapsed-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
 .lapsed-actions small { flex-basis: 100%; text-align: right; }
 @media (max-width: 600px) {
-    .status-counts { gap: 8px; }
-    .status-count { padding: 8px 10px; }
-    .status-count strong { font-size: 20px; }
     .lapsed-card { grid-template-columns: minmax(0, 1fr); }
     .lapsed-actions { justify-content: flex-start; }
     .lapsed-actions .button { flex: 1 1 140px; min-height: 44px; }

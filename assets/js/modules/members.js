@@ -11,11 +11,16 @@ import { canImportMembers } from "./memberImportUi.js";
 import { STATUS_LABELS } from "../memberStatus.js";
 import { holdNote, renderHoldSection } from "./holds.js";
 
-const STATUS_FILTERS = [["active", "Active"], ["expiring", "Expiring"], ["in_grace", "In grace"], ["lapsed", "Lapsed"], ["old", "Old members"], ["upcoming", "Upcoming"], ["on_hold", "On hold"], ["none", "No plan"], ["suspended", "Suspended"]];
+const STATUS_FILTERS = [["active", "Active"], ["expiring", "Expiring"], ["in_grace", "In grace"], ["lapsed", "Lapsed"], ["old", "Old members"], ["upcoming", "Upcoming"], ["on_hold", "On hold"], ["none", "No plan"], ["blocked", "Blocked"]];
 
-/** The member's status from the shared rule (server), as a pill; suspended accounts say so. */
+// "Blocked" is the old "Suspended" account flag (members.status), no longer set from the app. It is
+// shown as a tag beside the member's real status, never instead of it.
+export function blockedTag(member) {
+    return member.status === "suspended" ? `<span class="tag tag-blocked" title="Marked Suspended in an earlier version">Blocked</span>` : "";
+}
+
+/** The member's status from the shared rule (server), as a pill. */
 export function memberStatusPill(member) {
-    if (member.status === "suspended") return statusPill("suspended");
     const status = member.memberStatus;
     if (!status) return statusPill(getCurrentMembership(member.id)?.effective_status || "unassigned");
     return `<span class="status status-${escapeHTML(status)}">${escapeHTML(STATUS_LABELS[status] || status)}</span>`;
@@ -46,10 +51,10 @@ export function filterMembers({ search = "", filter = "all", sort = "name" } = {
     const digits = query.replace(/\D/g, "");
     const members = state.members.filter((member) => {
         const matches = !query
-            || [member.name, member.email, member.memberCode].some((value) => String(value || "").toLowerCase().includes(query))
+            || [member.name, member.email, member.memberCode, member.previousCode].some((value) => String(value || "").toLowerCase().includes(query))
             || (digits.length >= 3 && String(member.phone || "").replace(/\D/g, "").includes(digits));
         const matchesFilter = filter === "all"
-            || (filter === "suspended" ? member.status === "suspended" : member.memberStatus === filter);
+            || (filter === "blocked" ? member.status === "suspended" : member.memberStatus === filter);
         return matches && matchesFilter;
     });
     const expiry = (member) => getCurrentMembership(member.id)?.end_date || member.expiryDate || "9999-12-31";
@@ -78,7 +83,7 @@ export function renderMemberResults({ search = "", filter = "all", sort = "name"
         ? `${total} member${total === 1 ? "" : "s"}`
         : `${members.length} of ${total} member${total === 1 ? "" : "s"} match`;
     return `<p class="helper-text members-count">${count}</p>
-        <section class="card table-card"><div class="table-wrap"><table class="members-table"><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead><tbody>${shown.length ? shown.map((member) => memberRow(member)).join("") : emptyRow(6, total ? "No members match these filters." : "No members yet. Add your first member to get started.")}</tbody></table></div></section>
+        <section class="card table-card"><div class="table-wrap"><table class="members-table"><thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead><tbody>${shown.length ? shown.map((member) => memberRow(member)).join("") : emptyRow(6, total ? "No members match this search or filter." : "No members yet. Add your first member, or import a spreadsheet.", total ? "" : `<button class="button button-primary" type="button" data-action="add-member">Add member</button>${canImportMembers() ? `<button class="button button-secondary" type="button" data-action="import-csv">Import members</button>` : ""}`)}</tbody></table></div></section>
         ${pages > 1 ? `<div class="toolbar" aria-label="Member pages"><span class="toolbar-spacer"></span><button class="button button-secondary" data-action="previous-members-page" ${current <= 1 ? "disabled" : ""}>Previous</button><span class="helper-text">Page ${current} of ${pages}</span><button class="button button-secondary" data-action="next-members-page" ${current >= pages ? "disabled" : ""}>Next</button></div>` : ""}`;
 }
 
@@ -86,7 +91,30 @@ function memberRow(member) {
     const membership = getCurrentMembership(member.id);
     const planName = membership?.plan_name || "Unassigned";
     const expiryDate = membership?.end_date || "";
-    return `<tr><td data-label="Member"><button class="text-button member-cell" data-action="profile" data-id="${escapeHTML(member.id)}">${avatarHtml(member)}<span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.memberCode || member.id)}</small></span></button></td><td data-label="Phone">${escapeHTML(formatPhone(member.phone))}</td><td data-label="Plan">${escapeHTML(planName)}</td><td data-label="Expires">${formatDate(expiryDate)}</td><td data-label="Status">${memberStatusPill(member)}${memberStatusNote(member) ? `<small class="cell-sub">${escapeHTML(memberStatusNote(member))}</small>` : ""}</td><td data-label="Actions"><div class="inline-actions"><button class="text-button" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew</button><button class="text-button" data-action="assign-member-plan" data-id="${escapeHTML(member.id)}">Assign plan</button><button class="text-button" data-action="edit-member" data-id="${escapeHTML(member.id)}">Edit</button><button class="text-button" data-action="record-payment" data-id="${escapeHTML(member.id)}">Payment</button></div></td></tr>`;
+    return `<tr><td data-label="Member"><button class="text-button member-cell${member.nameMissing ? " name-missing" : ""}" data-action="${member.nameMissing ? "edit-member" : "profile"}" data-id="${escapeHTML(member.id)}">${avatarHtml(member)}<span><strong>${escapeHTML(member.name)}</strong><small>${escapeHTML(member.memberCode || member.id)}</small></span></button></td><td data-label="Phone">${escapeHTML(formatPhone(member.phone))}</td><td data-label="Plan">${escapeHTML(planName)}</td><td data-label="Expires">${formatDate(expiryDate)}</td><td data-label="Status">${memberStatusPill(member)}${blockedTag(member)}${memberStatusNote(member) ? `<small class="cell-sub">${escapeHTML(memberStatusNote(member))}</small>` : ""}</td><td data-label="Actions">${rowActions(member)}</td></tr>`;
+}
+
+/**
+ * The actions in a member's row: one clear button (Renew) and a "⋯" menu with the rest: Edit,
+ * Record payment, Assign plan (only when the member has no plan), Put on hold (only while a plan is
+ * running) and Delete. Renew also tells a member whose plan is on hold to resume it first.
+ */
+export function memberMenuItems(member) {
+    const items = [
+        { action: "edit-member", label: "Edit" },
+        { action: "record-payment", label: "Record payment" }
+    ];
+    if (member.memberStatus === "none") items.push({ action: "assign-member-plan", label: "Assign plan" });
+    if (member.memberStatus === "active" || member.memberStatus === "expiring") items.push({ action: "hold-start", label: "Put on hold" });
+    items.push({ action: "delete-member", label: "Delete member", danger: true });
+    return items;
+}
+
+function rowActions(member) {
+    const id = escapeHTML(member.id);
+    const name = escapeHTML(member.name);
+    const items = memberMenuItems(member).map((item) => `<button class="row-menu-item${item.danger ? " is-danger" : ""}" type="button" role="menuitem" data-action="${item.action}" data-id="${id}">${escapeHTML(item.label)}</button>`).join("");
+    return `<div class="row-actions"><button class="button button-primary button-small" type="button" data-action="renew-member" data-id="${id}">Renew</button><div class="row-menu-wrap"><button class="row-menu-button" type="button" data-action="row-menu" data-id="${id}" aria-haspopup="menu" aria-expanded="false" aria-label="More actions for ${name}">⋯</button><div class="row-menu" role="menu" aria-label="Actions for ${name}" hidden>${items}</div></div></div>`;
 }
 
 export function renderProfile(memberId) {
@@ -99,21 +127,21 @@ export function renderProfile(memberId) {
     const balance = memberBalance(member);
     return `<div class="page-heading"><div><button class="text-button" data-view="members">← All members</button><h1 class="profile-page-title">Member profile</h1><p>Membership details, attendance and payment history.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="edit-member" data-id="${escapeHTML(member.id)}">Edit profile</button><button class="button button-primary" data-action="assign-member-plan" data-id="${escapeHTML(member.id)}">Assign Plan</button></div></div>
         <div class="profile-layout"><div>
-            <section class="card"><div class="card-body"><div class="profile-hero">${profilePhotoHtml(member)}<div><h2>${escapeHTML(member.name)}</h2><p>${escapeHTML(member.memberCode || member.id)} · Account ${statusPill(member.status === "suspended" ? "suspended" : "active")}</p></div><span class="toolbar-spacer"></span><button class="button button-secondary button-small" data-action="record-payment" data-id="${escapeHTML(member.id)}">＋ Record payment</button></div></div><div class="card-body profile-fields">
+            <section class="card"><div class="card-body"><div class="profile-hero">${profilePhotoHtml(member)}<div><h2>${member.nameMissing ? `<button class="text-button name-missing" type="button" data-action="edit-member" data-id="${escapeHTML(member.id)}">${escapeHTML(member.name)}</button>` : escapeHTML(member.name)}</h2><p>${escapeHTML(member.memberCode || member.id)}${blockedTag(member) ? ` · ${blockedTag(member)}` : ""}</p></div><span class="toolbar-spacer"></span><button class="button button-secondary button-small" data-action="record-payment" data-id="${escapeHTML(member.id)}">Record payment</button></div></div><div class="card-body profile-fields">
                 ${detail("Phone", formatPhone(member.phone) || "—")}${detail("Email", member.email || "—")}${detail("Date of birth", formatDate(member.dob))}${detail("Gender", member.gender || "—")}${detail("Emergency contact", member.emergencyContact || "—")}${detail("Joined", formatDate(member.joinedAt))}
             </div></section>
             <section class="card profile-section"><div class="card-header"><div><h2>Current membership</h2><p>Current assignment snapshot</p></div></div><div class="card-body" id="member-current-membership" data-member-id="${escapeHTML(member.id)}"><div class="empty-state">Loading membership details…</div></div></section>
             <section class="card profile-section"><div class="card-header"><div><h2>Membership history</h2><p>Plan assignments with historical plan details</p></div></div><div class="activity-list" id="member-membership-history" data-member-id="${escapeHTML(member.id)}"><div class="empty-state">Loading membership history…</div></div></section>
             ${renderHoldSection(member)}
-            <section class="card profile-section"><div class="card-header"><div><h2>Payment history</h2><p>Collected transactions for this member</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Receipt</th></tr></thead><tbody>${payments.length ? payments.map((payment) => `<tr><td>${formatDate(payment.date)}</td><td>${formatINR(payment.amount)}${payment.kind === "hold_fee" ? `<small class="cell-sub">Hold fee</small>` : ""}</td><td>${escapeHTML(payment.method)}</td><td>${statusPill(payment.status)}</td><td><button class="text-button" data-action="receipt" data-id="${escapeHTML(payment.id)}" aria-label="Receipt ${escapeHTML(payment.receiptNumber || "")}">${escapeHTML(payment.receiptNumber ? `Receipt ${payment.receiptNumber}` : "Receipt")}</button></td></tr>`).join("") : emptyRow(5, "No payments recorded for this member yet.")}</tbody></table></div></section>
+            <section class="card profile-section"><div class="card-header"><div><h2>Payment history</h2><p>Collected transactions for this member</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Receipt</th></tr></thead><tbody>${payments.length ? payments.map((payment) => `<tr><td>${formatDate(payment.date)}</td><td>${formatINR(payment.amount)}${payment.kind === "hold_fee" ? `<small class="cell-sub">Hold fee</small>` : ""}</td><td>${escapeHTML(payment.method)}</td><td>${statusPill(payment.status)}</td><td><button class="text-button" data-action="receipt" data-id="${escapeHTML(payment.id)}" aria-label="Receipt ${escapeHTML(payment.receiptNumber || "")}">${escapeHTML(payment.receiptNumber ? `Receipt ${payment.receiptNumber}` : "Receipt")}</button></td></tr>`).join("") : emptyRow(5, "No payments yet. They appear here when you renew or record one.", `<button class="button button-secondary" type="button" data-action="record-payment" data-id="${escapeHTML(member.id)}">Record payment</button>`)}</tbody></table></div></section>
             ${renderLinkedPhones(member)}
-            ${member.memberCode ? renderMemberVisits(member) : `<section class="card profile-section"><div class="card-header"><div><h2>Attendance history</h2><p>Recent recorded check-ins</p></div><button class="text-button" data-view="attendance">View attendance</button></div><div class="table-wrap"><table><thead><tr><th>Check-in</th><th>Check-out</th><th>Source</th></tr></thead><tbody>${visits.slice(0, 8).map((visit) => `<tr><td>${new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedInAt))}</td><td>${visit.checkedOutAt ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedOutAt)) : "—"}</td><td>${escapeHTML(visit.source)}</td></tr>`).join("") || emptyRow(3, "No check-ins recorded for this member yet.")}</tbody></table></div></section>`}
+            ${member.memberCode ? renderMemberVisits(member) : `<section class="card profile-section"><div class="card-header"><div><h2>Attendance history</h2><p>Recent recorded check-ins</p></div><button class="text-button" data-view="attendance">View attendance</button></div><div class="table-wrap"><table><thead><tr><th>Check-in</th><th>Check-out</th><th>Source</th></tr></thead><tbody>${visits.slice(0, 8).map((visit) => `<tr><td>${new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedInAt))}</td><td>${visit.checkedOutAt ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(visit.checkedOutAt)) : "—"}</td><td>${escapeHTML(visit.source)}</td></tr>`).join("") || emptyRow(3, "No check-ins yet. They appear here as this member checks in.", `<button class="button button-secondary" type="button" data-action="check-in" data-id="${escapeHTML(member.id)}">Check in</button>`)}</tbody></table></div></section>`}
         </div><aside>
-            <section class="card"><div class="card-header"><h2>Membership</h2></div><div class="card-body profile-fields membership-fields">${detail("Plan", planName)}${detail("Membership period", `${formatDate(membership?.start_date)} – ${formatDate(membership?.end_date)}`)}${detail("Status", `${STATUS_LABELS[member.memberStatus] || membership?.effective_status || "No plan"}${memberStatusNote(member) ? ` · ${memberStatusNote(member)}` : ""}`)}${detail("Total fees", formatINR(member.totalFees))}${detail("Amount paid", formatINR(member.totalFees - balance))}${detail("Outstanding", formatINR(balance))}</div><div class="card-body profile-card-actions"><button class="button button-primary button-full" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew membership</button></div></section>
+            <section class="card"><div class="card-header"><h2>Membership</h2></div><div class="card-body profile-fields membership-fields">${detail("Plan", planName)}${detail("Membership period", `${formatDate(membership?.start_date)} – ${formatDate(membership?.end_date)}`)}${detail("Status", `${STATUS_LABELS[member.memberStatus] || membership?.effective_status || "No plan"}${memberStatusNote(member) ? ` · ${memberStatusNote(member)}` : ""}`)}${detail("Total fees", formatINR(member.totalFees))}${detail("Amount paid", formatINR(member.totalFees - balance))}${detail("Outstanding", formatINR(balance))}</div><div class="card-body profile-card-actions"><button class="button button-primary button-full" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew</button></div></section>
             ${renderPhotoSection(member)}
             ${renderConsentSection(member)}
             ${renderWelcomeSection(member)}
-            <section class="card profile-section"><div class="card-header"><h2>Member actions</h2></div><div class="card-body profile-action-list"><button class="button button-secondary" data-action="check-in" data-id="${escapeHTML(member.id)}">Record check-in</button>${member.memberCode && usesMemberQr() ? `<button class="button button-secondary" data-action="member-card" data-id="${escapeHTML(member.id)}">Member card</button><button class="button button-secondary" data-action="member-qr-reissue" data-id="${escapeHTML(member.id)}">Reissue QR</button>` : ""}<button class="button button-secondary" data-action="delete-member" data-id="${escapeHTML(member.id)}">Archive member</button></div></section>
+            <section class="card profile-section"><div class="card-header"><h2>Member actions</h2></div><div class="card-body profile-action-list"><button class="button button-secondary" data-action="check-in" data-id="${escapeHTML(member.id)}">Check in</button>${member.memberCode && usesMemberQr() ? `<button class="button button-secondary" data-action="member-card" data-id="${escapeHTML(member.id)}">Member card</button><button class="button button-secondary" data-action="member-qr-reissue" data-id="${escapeHTML(member.id)}">Reissue QR</button>` : ""}<button class="button button-secondary" data-action="delete-member" data-id="${escapeHTML(member.id)}">Delete member</button></div></section>
         </aside></div>`;
 }
 

@@ -33,16 +33,19 @@ import { handleImportAction, handleImportChange, handleImportFile, openMemberImp
 import { createMemberPlanAssignment, fetchMemberMembershipHistory } from "./api/membershipsApi.js";
 import { createPayment, fetchMemberPayments } from "./api/paymentsApi.js";
 import { apiClient, clearAuthSession, ensureFreshSession, restoreAuthSessionWithRetry, setAuthSession, setUnauthorizedHandler } from "./api/apiClient.js";
-import { markReminderSent, reminderKey, renderExpiring } from "./modules/expiring.js";
-import { renderOperationsPage, drawAnalyticsCharts, retentionRows } from "./modules/operations.js";
+import { markReminderSent, reminderBlocker, reminderKey, renderExpiring } from "./modules/expiring.js";
+import { renderOperationsPage, drawAnalyticsCharts, renderFollowups, retentionRows } from "./modules/operations.js";
+import { DEFAULT_VIEW, renewalsBadgeCount, resolveTab, resolveView } from "./navigation.js";
+import { renderRenewalsPage } from "./modules/renewalsPage.js";
+import { settingsPage, showSettingsList, showSettingsSection } from "./modules/settingsPage.js";
 import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
-import { applyNavigationTranslations, isSupportedLanguage, setLanguage, t } from "./i18n.js";
+import { applyNavigationTranslations, getLanguage, isSupportedLanguage, setLanguage, t } from "./i18n.js";
 import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
 import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel, whenGymSettingsApplied } from "./modules/upiPayments.js";
 import { upiIdProblem, UTR_PATTERN } from "./upi.js";
 import { welcomePayment } from "./welcomeMessage.js";
-import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, pauseCheckinForPhoto, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
+import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, pauseCheckinForPhoto, refreshVisitsSection, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
 import { handleCheckinSettingsAction, loadCheckinSettings, saveAttendanceSettings } from "./modules/checkinSettingsUi.js";
 import { editPhotoField, handlePhotoAction, hydratePhotos, loadProfilePhoto, mountEditPhoto, mountFormPhoto, photoFormField, saveFormPhoto } from "./modules/memberPhotos.js";
 import { usesMemberQr } from "./modules/checkinMethod.js";
@@ -50,29 +53,34 @@ import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateS
 import { expiryReminderTemplate, handleReminderTemplateAction, handleReminderTemplateEvent, handleReminderTemplateSubmit, loadReminderTemplates, recordExpiryReminder } from "./modules/expiryReminder.js";
 import { currentSummary, loadSummary } from "./modules/summary.js";
 import { forgetEmptyLocalData, handleLocalDataAction, localDataToMove, openLocalDataDialog } from "./modules/localData.js";
-import { escapeHTML, localISODate, indiaISODate, addDays, formatINR, formatDate, formatPlanDuration, downloadCSV, isValidIndianPhone, normalizeIndianPhone, cleanMemberName, memberNameIssue, MEMBER_NAME_MESSAGES, setDateFormat, visitDay } from "./utils.js";
+import { MEMBER_NAME_MESSAGES, addDays, cleanMemberName, displayName, downloadCSV, escapeHTML, formatDate, formatINR, formatPlanDuration, indiaISODate, isValidIndianPhone, localISODate, memberNameIssue, normalizeIndianPhone, setDateFormat, visitDay } from "./utils.js";
 import { readUiPreferences, saveUiPreferences } from "./storage.js";
 import { bindAuthPasswordLinks, checkAccountBeforeApp, downloadGymWorkbook, handleAuthPasswordSubmit, handleTermsSubmit, openDeleteGymDialog, reportProblemUrl, setAccountEmail, startPasswordResetIfLinked, submitChangePassword, submitDeleteGym } from "./modules/account.js";
 import { APP_VERSION } from "./version.js";
 import { startErrorReporting } from "./errorReporting.js";
 import { handleRenewSubmit, openRenewSheet } from "./modules/renewSheet.js";
 import { handleHoldAction, handleHoldSubmit, loadMemberHolds } from "./modules/holds.js";
+import { STATUS_LABELS } from "./memberStatus.js";
 import { loadRenewalSettings, saveRenewalSettings } from "./modules/renewalSettingsUi.js";
-import { dropFromLapsed, handleLapsedClick, lapsedTab, loadLapsed, reloadLapsed } from "./modules/lapsed.js";
+import { dropFromLapsed, handleLapsedClick, lapsedCount, loadLapsed, reloadLapsed, renderLapsedBody, setLapsedList } from "./modules/lapsed.js";
 import { hideSetupChecklist, loadSetupPlans } from "./modules/setupChecklist.js";
 
 const page = document.querySelector("#page-content");
+// The pages: Today, Members, Check-in, Payments, Renewals, Plans, Reports, Settings (and a member's
+// profile). Older page ids still work as links and saved pages: see navigation.js.
 const viewTitles = {
-    expiring: "Expiring soon", overview: "Overview", members: "Members", plans: "Membership plans", attendance: "Attendance", payments: "Payments",
-    renewals: "Lapsed members", retention: "Retention", analytics: "Analytics", reports: "Reports",
-    notifications: "Notifications", integrations: "Integrations", settings: "Settings", profile: "Member profile", scan: "Check-in"
+    overview: "Today", members: "Members", scan: "Check-in", payments: "Payments", renewals: "Renewals",
+    plans: "Membership plans", reports: "Reports", settings: "Settings", profile: "Member profile"
 };
 // Conveniences remembered in this browser (storage.js): the last page, member filters and the
 // Expiring soon window. Everything else comes from the database.
 const uiPreferences = readUiPreferences();
-const MEMBER_FILTERS = ["all", "active", "upcoming", "expired", "cancelled", "unassigned", "suspended"];
+const MEMBER_FILTERS = ["all", "active", "expiring", "in_grace", "lapsed", "old", "upcoming", "on_hold", "none", "blocked"];
 const MEMBER_SORTS = ["name", "expiry", "joined"];
-let currentView = viewTitles[uiPreferences.view] && uiPreferences.view !== "profile" ? uiPreferences.view : "expiring";
+// A link like #renewals wins over the last page; an old page id (a bookmark, a saved page) opens its new home.
+const startPage = resolveView(window.location.hash) || resolveView(uiPreferences.view);
+let currentView = startPage && startPage.view !== "profile" ? startPage.view : DEFAULT_VIEW;
+let renewalsTab = resolveTab(startPage?.tab || uiPreferences.renewalsTab);
 let profileId = "";
 let memberFilters = {
     search: "",
@@ -152,7 +160,6 @@ function startAuthenticatedApp(session) {
     document.querySelector(".gym-avatar").textContent = session.gym.name.trim().slice(0, 1).toUpperCase() || "G";
     const ownerName = session.user.email || "Gym owner";
     document.querySelector(".sidebar-profile strong").textContent = ownerName;
-    document.querySelector(".top-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
     document.querySelector(".profile-avatar").textContent = ownerName.slice(0, 1).toUpperCase();
     state.gym.name = session.gym.name;
     state.gym.id = session.gym.id;
@@ -165,10 +172,11 @@ function startAuthenticatedApp(session) {
     loadExpiringMemberships();
     loadSummary(rerenderSummaryViews);
     loadSetupPlans(() => { if (currentView === "overview") render(); });
-    if (currentView === "renewals") loadLapsed(lapsedTab(), rerenderLapsed);
+    if (currentView === "renewals") setLapsedList(renewalsTab);
+    if (currentView === "renewals" && (renewalsTab === "lapsed" || renewalsTab === "old")) loadLapsed(renewalsTab, rerenderLapsed);
     // Loaded early so the "Member added" dialog and Expiring soon can open WhatsApp without waiting.
     loadWelcomeTemplates();
-    loadReminderTemplates().then(() => { if (["expiring", "settings"].includes(currentView)) render(); });
+    loadReminderTemplates().then(() => { if (["renewals", "settings"].includes(currentView)) render(); });
     loadAttendanceFeed(rerenderAttendanceViews);
     // The gym's one check-in method decides what the Check-in screen, profile and cards show.
     loadCheckinSettings().then(() => {
@@ -182,9 +190,9 @@ function startAuthenticatedApp(session) {
         offerLocalDataMove();
     });
     loadAllMemberships(() => {
-        if (["overview", "members", "renewals", "retention", "notifications"].includes(currentView)) render();
+        if (["overview", "members", "renewals"].includes(currentView)) render();
     });
-    loadPaymentsPage(() => { if (["payments", "overview", "notifications"].includes(currentView)) render(); });
+    loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
 }
 
 // Once per page load: an older version's data still in this browser is offered for the move.
@@ -221,7 +229,7 @@ function rerenderLapsed() {
 
 // Pages that show gym-wide totals redraw when they arrive.
 function rerenderSummaryViews() {
-    if (["overview", "analytics", "payments"].includes(currentView)) render();
+    if (["overview", "reports", "payments"].includes(currentView)) render();
 }
 
 // After a renewal is saved: the member leaves Expiring soon at once when the new plan covers them
@@ -287,24 +295,59 @@ function render() {
     setDateFormat(state.gym.dateFormat || "DD MMM YYYY");
     applyNavigationTranslations();
     document.querySelectorAll(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === currentView));
-    // Keep the active page visible: open "More" whenever the current page lives inside it.
-    if (document.querySelector(`#nav-more [data-view="${currentView}"]`)) setNavMoreOpen(true);
-    const mobilePrimaryViews = ["expiring", "members", "scan", "attendance"];
+    const mobilePrimaryViews = ["overview", "members", "scan", "renewals"];
     document.querySelectorAll(".mobile-nav-link[data-view]").forEach((link) => {
         const active = link.dataset.view === currentView;
         link.classList.toggle("active", active);
         link.setAttribute("aria-current", active ? "page" : "false");
     });
     document.querySelector('[data-action="mobile-more"]')?.classList.toggle("active", !mobilePrimaryViews.includes(currentView));
-    const translatedViews = ["expiring", "overview", "members", "plans", "attendance", "payments", "renewals", "retention", "analytics", "reports", "notifications", "integrations", "settings"];
-    document.querySelector("#current-page").textContent = translatedViews.includes(currentView) ? t(currentView) : viewTitles[currentView] || "Overview";
-    document.querySelector("#member-count").textContent = membersStatus === "ready" ? state.members.length : "";
+    const titleKeys = { overview: "today", scan: "checkin", members: "members", plans: "plans", payments: "payments", renewals: "renewals", reports: "reports", settings: "settings" };
+    document.querySelector("#current-page").textContent = titleKeys[currentView] ? t(titleKeys[currentView]) : viewTitles[currentView] || "Today";
+    updateRenewalsBadge();
     document.querySelector("#gym-name-label").textContent = state.gym.name;
     document.querySelector(".gym-avatar").textContent = state.gym.name.trim().slice(0, 1).toUpperCase() || "G";
     const now = new Date();
     document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(now);
-    if (currentView === "expiring") {
-        page.innerHTML = renderExpiring(expiringMemberships, expiringStatus, expiryReminderTemplate(), remindedKeys());
+    try {
+        renderPage(page);
+    } catch (error) {
+        // A screen that cannot be drawn says so (with Retry) instead of leaving the last skeleton up.
+        console.error(error);
+        page.innerHTML = `<div class="empty-state" role="alert"><p>This page could not be shown. ${escapeHTML(error?.message || "")}</p><button class="button button-secondary" type="button" data-action="retry-render">Try again</button></div>`;
+    }
+    // Member photos load after the page is drawn, from short-lived signed URLs.
+    hydratePhotos(page);
+}
+
+// The Renewals badge: members still to remind plus members in grace (the number that needs action).
+function updateRenewalsBadge() {
+    const count = expiringStatus === "ready" ? renewalsBadgeCount(expiringMemberships, reminderBlocker) : 0;
+    for (const badge of document.querySelectorAll("#renewals-count, #renewals-count-mobile")) {
+        badge.textContent = count > 99 ? "99+" : String(count);
+        badge.hidden = count === 0;
+    }
+}
+
+// The tab's own list, drawn inside the Renewals page.
+function renewalsBody() {
+    if (renewalsTab === "expiring") return renderExpiring(expiringMemberships, expiringStatus, expiryReminderTemplate(), remindedKeys());
+    if (renewalsTab === "followups") return renderFollowups();
+    return renderLapsedBody(renewalsTab);
+}
+
+function renewalsCounts() {
+    return {
+        expiring: expiringStatus === "ready" ? expiringMemberships.length : null,
+        lapsed: lapsedCount("lapsed"),
+        old: lapsedCount("old"),
+        followups: membersStatus === "ready" ? retentionRows().length : null
+    };
+}
+
+function renderPage(page) {
+    if (currentView === "renewals") {
+        page.innerHTML = renderRenewalsPage({ tab: renewalsTab, counts: renewalsCounts(), body: renewalsBody() });
     } else if (currentView === "overview") {
         page.innerHTML = renderDashboard();
         drawDashboardCharts();
@@ -321,13 +364,12 @@ function render() {
         // the poster front desk is redrawn whenever approvals or today's check-ins change.
         const cameraPage = usesMemberQr();
         if (!cameraPage || !page.querySelector("#scanner-root")) page.innerHTML = renderCheckInPage();
+        else refreshVisitsSection();
         startCheckInScreen(rerenderCheckIn);
     } else {
         page.innerHTML = renderOperationsPage(currentView);
-        if (currentView === "analytics") drawAnalyticsCharts();
+        if (currentView === "reports") drawAnalyticsCharts();
     }
-    // Member photos load after the page is drawn, from short-lived signed URLs.
-    hydratePhotos(page);
 }
 
 // After a photo is added, changed, removed, approved or rejected.
@@ -362,8 +404,8 @@ async function refreshMembersFromApi({ silent = false } = {}) {
 }
 
 function updateMemberCount() {
-    const badge = document.querySelector("#member-count");
-    if (badge) badge.textContent = state.members.length;
+    // The sidebar only counts what needs action (Renewals), not how many members there are.
+    updateRenewalsBadge();
 }
 
 // Typing in the search box redraws only the results, so the box keeps its focus.
@@ -376,7 +418,7 @@ function renderMembersResults() {
 
 // Pages that read check-ins redraw when the database feed arrives.
 function rerenderAttendanceViews() {
-    if (["attendance", "overview", "retention", "analytics", "notifications", "profile"].includes(currentView)) render();
+    if (["overview", "renewals", "reports", "profile"].includes(currentView)) render();
     else if (currentView === "scan") rerenderCheckIn();
 }
 
@@ -395,18 +437,35 @@ function rerenderForCheckinMethod() {
     if (currentView === "profile" && profileId) loadMemberDevices(profileId, () => { if (currentView === "profile") render(); });
 }
 
-function navigate(view) {
-    if (!viewTitles[view]) return;
+/** Opens a page. An old page id (expiring, retention, attendance, analytics, …) opens its new home. */
+function navigate(id, tab) {
+    const target = resolveView(id);
+    if (!target || !viewTitles[target.view]) return;
+    const view = target.view;
+    if (view === "renewals") {
+        renewalsTab = resolveTab(target.tab || tab || renewalsTab);
+        setLapsedList(renewalsTab);
+        saveUiPreferences({ renewalsTab });
+    }
+    if (view === "settings") {
+        // A link to a section opens it (a phone then shows just that section); the sidebar link shows the list.
+        const section = target.section || tab;
+        if (section) showSettingsSection(section, true);
+        else showSettingsList();
+    }
     if (currentView === "scan" && view !== "scan") stopCheckInScreen();
     currentView = view;
     if (view !== "profile") profileId = "";
     saveUiPreferences({ view });
+    syncHash(view);
     if (view === "overview") loadSetupPlans(() => { if (currentView === "overview") render(); });
     render();
-    if (view === "expiring") loadExpiringMemberships();
-    if (view === "renewals") loadLapsed(lapsedTab(), rerenderLapsed);
+    if (view === "renewals") {
+        loadExpiringMemberships();
+        if (renewalsTab === "lapsed" || renewalsTab === "old") loadLapsed(renewalsTab, rerenderLapsed);
+    }
     if (view === "plans") loadPlans(renderPlansIfCurrent);
-    if (["overview", "analytics", "payments"].includes(view)) loadSummary(rerenderSummaryViews);
+    if (["overview", "reports", "payments"].includes(view)) loadSummary(rerenderSummaryViews);
     if (view === "settings") {
         const renderSettings = () => { if (currentView === "settings") render(); };
         loadWelcomeTemplates({ force: true }).then(renderSettings);
@@ -415,8 +474,8 @@ function navigate(view) {
         loadCheckinSettings().then(renderSettings);
         loadRenewalSettings().then(renderSettings);
     }
-    if (view === "attendance") loadAttendanceFeed(rerenderAttendanceViews);
-    if (["payments", "notifications"].includes(view)) loadPaymentsPage(() => { if (currentView === view) render(); });
+    if (view === "scan") loadAttendanceFeed(rerenderAttendanceViews);
+    if (view === "payments") loadPaymentsPage(() => { if (currentView === view) render(); });
     if (view === "profile" && profileId && !getMember(profileId)) {
         // A member who is not loaded yet (for example just added on another phone).
         const wanted = profileId;
@@ -447,8 +506,11 @@ function navigate(view) {
 
 async function loadExpiringMemberships() {
     const requestVersion = ++expiringRequestVersion;
-    expiringStatus = "loading";
-    if (currentView === "expiring") render();
+    // The skeleton is only for the first load; a reload keeps the list on screen.
+    if (expiringStatus !== "ready") {
+        expiringStatus = "loading";
+        if (currentView === "renewals") render();
+    }
     try {
         const response = await apiClient.get("/api/memberships/expiring");
         if (requestVersion !== expiringRequestVersion) return;
@@ -456,15 +518,17 @@ async function loadExpiringMemberships() {
         expiringStatus = "ready";
     } catch (error) {
         if (requestVersion !== expiringRequestVersion) return;
+        if (expiringStatus === "ready") return;
         expiringMemberships = [];
         // renderExpiring shows an object status as an error message with "Try again".
         expiringStatus = { message: error.message || "Unable to load expiring memberships." };
     }
-    if (currentView === "expiring") render();
+    if (currentView === "renewals") render();
+    else updateRenewalsBadge();
 }
 
 /**
- * "Remind on WhatsApp": WhatsApp opens through the link itself; this marks the card and logs the
+ * "Send reminder": WhatsApp opens through the link itself; this marks the card and logs the
  * reminder for the membership's current end date, so every device shows it as reminded.
  */
 async function recordReminderClick(link) {
@@ -472,9 +536,11 @@ async function recordReminderClick(link) {
     if (!key) return;
     const membership = expiringMemberships.find((row) => reminderKey(row) === key);
     if (membership) membership.reminded_at = new Date().toISOString();
+    updateRenewalsBadge();
     try {
         const message = new URL(link.href).searchParams.get("text") || "";
         await recordExpiryReminder({ memberId: link.dataset.memberId, membershipId: link.dataset.membershipId, body: message });
+        toast(`Reminder sent: ${getMember(link.dataset.memberId)?.name || "member"}.`);
     } catch (error) {
         toast(`WhatsApp was opened, but the reminder was not saved: ${error.message || "please try again"}`, "error");
     }
@@ -515,13 +581,77 @@ function renderPlansIfCurrent() {
     if (currentView === "plans") render();
 }
 
-function setNavMoreOpen(open) {
-    const toggle = document.querySelector(".nav-more-toggle");
-    const group = document.querySelector("#nav-more");
-    if (!toggle || !group) return;
-    toggle.setAttribute("aria-expanded", String(open));
-    group.hidden = !open;
+// The "⋯" menu in a member's row.
+function closeRowMenus() {
+    for (const menu of document.querySelectorAll(".row-menu:not([hidden])")) {
+        menu.hidden = true;
+        menu.style.cssText = "";
+        menu.closest(".row-menu-wrap")?.querySelector(".row-menu-button")?.setAttribute("aria-expanded", "false");
+    }
 }
+
+function toggleRowMenu(button) {
+    const menu = button.closest(".row-menu-wrap")?.querySelector(".row-menu");
+    if (!menu) return;
+    const wasOpen = !menu.hidden;
+    closeRowMenus();
+    if (wasOpen) return;
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    // Fixed beside the button, flipped upward near the bottom of the screen, never off the left edge.
+    const anchor = button.getBoundingClientRect();
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    const below = window.innerHeight - anchor.bottom;
+    const top = below >= height + 12 || anchor.top < height + 12 ? anchor.bottom + 4 : anchor.top - height - 4;
+    menu.style.position = "fixed";
+    menu.style.top = `${Math.max(8, top)}px`;
+    menu.style.left = `${Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8))}px`;
+    // No scrolling here: a scroll closes the menu, and focusing an item must not cause one.
+    menu.querySelector("button")?.focus({ preventScroll: true });
+}
+
+window.addEventListener("scroll", () => closeRowMenus(), { passive: true, capture: true });
+window.addEventListener("resize", () => closeRowMenus());
+
+// The account menu at the bottom of the sidebar (Log out).
+function toggleAccountMenu() {
+    const menu = document.querySelector("#account-menu");
+    const button = document.querySelector("#account-button");
+    if (!menu || !button) return;
+    const open = menu.hidden;
+    menu.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+    if (open) menu.querySelector("button")?.focus();
+}
+
+function closeAccountMenu() {
+    const menu = document.querySelector("#account-menu");
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    document.querySelector("#account-button")?.setAttribute("aria-expanded", "false");
+}
+
+// Keeps the address bar on the current page (#renewals), so a bookmark or a reload comes back here.
+// Only inside the app: the sign-in screens use the address for password-reset links.
+function syncHash(view) {
+    if (view === "profile" || document.querySelector("#app-shell")?.hidden) return;
+    try {
+        history.replaceState(null, "", `#${view}`);
+    } catch {
+        // A convenience; the app works the same without it.
+    }
+}
+
+window.addEventListener("hashchange", () => {
+    const target = resolveView(window.location.hash);
+    if (!target || target.view === "profile" || document.querySelector("#app-shell")?.hidden) return;
+    const alreadyThere = target.view === currentView
+        && (!target.tab || target.tab === renewalsTab)
+        && (!target.section || target.section === settingsPage.section);
+    if (alreadyThere) syncHash(target.view); // an old link to the page already open: the address still moves to the new name
+    else navigate(window.location.hash);
+});
 
 function closeMobileMenu() {
     document.querySelector("#sidebar").classList.remove("open");
@@ -560,13 +690,12 @@ function renderMemberFormBody(member, planStatus = "loading", plans = []) {
     const isEdit = Boolean(member);
     const body = `<form id="member-form" data-mode="${isEdit ? "update" : "create"}" data-id="${escapeHTML(member?.id || "")}" data-plans-state="${isEdit ? "not-needed" : planStatus}" class="form-grid" novalidate>
             ${isEdit ? editPhotoField(member) : ""}
-            ${nameField("form", member?.name || "")}
+            ${nameField("form", member?.nameMissing ? "" : member?.name || "")}
             <div class="field"><label for="form-phone">Phone number *</label><input id="form-phone" name="phone" type="tel" value="${escapeHTML(member?.phone || "")}" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="form-phone-error"><span id="form-phone-error" class="helper-text phone-error" role="alert" hidden>Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.</span></div>
             ${setField("email", "Email address", member?.email || "", "email")}
             ${setField("dob", "Date of birth", member?.dob || "", "date")}
             <div class="field"><label for="form-gender">Gender</label><select id="form-gender" name="gender"><option value="">Not specified</option>${["Female", "Male", "Prefer not to say"].map((item) => `<option ${member?.gender === item ? "selected" : ""}>${item}</option>`).join("")}</select></div>
             <div id="member-plan-field">${isEdit ? `<div class="field full"><label>Membership plan</label><p class="helper-text">Manage membership plans and dates using Assign plan.</p></div>` : renderMemberPlanField(planStatus, plans)}</div>
-            <div class="field"><label for="form-status">Membership status</label><select id="form-status" name="status"><option value="active" ${member?.status !== "suspended" ? "selected" : ""}>Active</option><option value="suspended" ${member?.status === "suspended" ? "selected" : ""}>Suspended</option></select><span class="helper-text">Expired status is calculated from the expiry date.</span></div>
             ${isEdit
                 ? `${setField("startDate", "Membership start date", member.startDate || "", "date", false, 'readonly aria-readonly="true"')}${setField("expiryDate", "Membership expiry date", member.expiryDate || "", "date", false, 'readonly aria-readonly="true"')}`
                 : `${setField("assignmentStartDate", "Membership start date", localISODate(), "date", true)}<div class="field"><span class="field-label" id="form-expiry-label">Membership expiry</span><p class="readonly-value" id="form-expiry-text" aria-labelledby="form-expiry-label" aria-live="polite">${EXPIRY_PLACEHOLDER}</p><input type="hidden" name="assignmentEndDate" value=""><span class="helper-text">Calculated from the plan and start date.</span></div>`}
@@ -871,9 +1000,9 @@ function askDeleteMember(memberId) {
     const member = getMember(memberId);
     if (!member) return toast("Member was not found.", "error");
     openModal({
-        title: "Archive member?",
-        body: `<p class="confirm-copy">Archive <strong>${escapeHTML(member.name)}</strong>? They will be hidden from the member list, while their linked payment and attendance records remain preserved.</p>`,
-        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-delete-member" data-id="${escapeHTML(member.id)}">Archive member</button>`
+        title: "Delete member?",
+        body: `<p class="confirm-copy">Delete <strong>${escapeHTML(member.name)}</strong>? They will be removed from the member list. Their payments and visits are kept, so your totals and receipts stay correct.</p>`,
+        footer: `<button class="button button-secondary" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-delete-member" data-id="${escapeHTML(member.id)}">Delete member</button>`
     });
 }
 
@@ -897,7 +1026,7 @@ function handleAction(action, target) {
                     refreshTotals();
                     state.attendance = state.attendance.filter((record) => record.memberId !== id);
                     closeModal();
-                    safePersist("Member archived; linked records were preserved.");
+                    safePersist("Member deleted: their payments and visits are kept.");
                 } catch (error) {
                     toast(error.message || "Member could not be deleted.", "error");
                 }
@@ -914,6 +1043,7 @@ function handleAction(action, target) {
         // One sheet: plan, price, new dates, payment and receipt. Saved in one transaction.
         case "renew-member": openRenewSheet(id, { onChanged: afterRenewal }); break;
         case "retry-summary": loadSummary(rerenderSummaryViews); render(); break;
+        case "retry-render": render(); break;
         case "export-members": exportMembers(); break;
         case "export-payments": exportPayments(); break;
         case "export-renewals": exportRenewals(); break;
@@ -1093,7 +1223,7 @@ async function saveMember(form) {
         return;
     }
     closeModal();
-    safePersist("Member details updated.");
+    safePersist("Member updated.");
 }
 
 async function savePayment(form) {
@@ -1147,8 +1277,8 @@ function afterMemberImport() {
 
 // A member's current membership status for exports, from the database.
 function exportStatus(member) {
-    if (member.status === "suspended") return "suspended";
-    return getCurrentMembership(member.id)?.effective_status || "unassigned";
+    const label = STATUS_LABELS[member.memberStatus] || getCurrentMembership(member.id)?.effective_status || "No plan";
+    return member.status === "suspended" ? `${label} (blocked)` : label;
 }
 
 function memberExportRow(member) {
@@ -1191,7 +1321,7 @@ function paymentExportRow(payment) {
     return {
         receiptNumber: payment.receipt_number,
         date: payment.paid_on,
-        memberName: payment.member?.full_name || "Removed member",
+        memberName: payment.member ? displayName(payment.member.full_name) : "Removed member",
         memberCode: payment.member?.member_code || "",
         amount: Number(payment.amount),
         method: methodLabel(payment.method),
@@ -1248,7 +1378,8 @@ function exportAnalytics() {
         { metric: "Total members", value: summary.total_members },
         { metric: "Active members", value: summary.active_members },
         { metric: "New members this month", value: summary.new_members_this_month },
-        { metric: "Renewals this month", value: summary.renewals_this_month },
+        { metric: "Renewed (plans ended in the last 30 days)", value: summary.renewed_last_30_days },
+        { metric: "Plans ended in the last 30 days", value: summary.due_last_30_days },
         { metric: "Collected this month", value: summary.collected_this_month },
         { metric: "Collected all time", value: summary.collected_all_time },
         { metric: "Outstanding balance", value: summary.outstanding_total },
@@ -1276,7 +1407,7 @@ async function attendanceForDay(day) {
     const feedStart = addDays(indiaISODate(), -59);
     if (day >= feedStart) return state.attendance.filter((record) => visitDay(record) === day);
     const response = await apiClient.get("/api/attendance", { params: { date: day } });
-    return (response?.data || []).map((row) => ({ memberId: row.member_id, memberName: row.member?.full_name, memberCode: row.member?.member_code, checkedInAt: row.checked_in_at, checkInDate: row.check_in_date, source: row.method, status: row.membership_status_at_check_in }));
+    return (response?.data || []).map((row) => ({ memberId: row.member_id, memberName: row.member ? displayName(row.member.full_name) : "", memberCode: row.member?.member_code, checkedInAt: row.checked_in_at, checkInDate: row.check_in_date, source: row.method, status: row.membership_status_at_check_in }));
 }
 
 async function downloadReport() {
@@ -1293,7 +1424,7 @@ async function downloadReport() {
         } else if (type === "outstanding") rows = state.members.filter((member) => memberBalance(member) > 0).map((member) => ({ memberCode: member.memberCode || member.id, name: member.name, phone: member.phone, totalFees: member.totalFees, outstanding: memberBalance(member) }));
         else if (type === "memberships") rows = state.members.map((member) => ({ ...memberExportRow(member), status: exportStatus(member) }));
         else if (type === "renewals") rows = renewalRows();
-        else if (type === "inactive") rows = retentionRows().filter((row) => row.days === null || row.days >= 14).map(({ member, lastVisit }) => ({ ...memberExportRow(member), lastVisit: lastVisit || "No visit in 60 days" }));
+        else if (type === "inactive") rows = retentionRows().filter((row) => row.days !== null && row.days >= 14).map(({ member, lastVisit }) => ({ ...memberExportRow(member), lastVisit: lastVisit || "No visit in 60 days" }));
         runExport(filename, rows);
     } catch (error) {
         toast(error.message || "The report could not be made.", "error");
@@ -1321,40 +1452,33 @@ async function copyMessage(message) {
 // Everything on the Settings form is saved for the gym in the database, for every device.
 async function saveSettings(form) {
     const values = new FormData(form);
-    const phone = String(values.get("phone") || "").trim();
-    if (phone && (phoneDigits(phone).length < 10 || phoneDigits(phone).length > 15)) throw new Error("Enter a valid gym phone number.");
-    const name = String(values.get("name") || "").trim();
-    if (!name) throw new Error("Gym name is required.");
-    const upiId = String(values.get("upiId") || "").trim();
-    const upiProblem = upiIdProblem(upiId);
-    if (upiProblem) throw new Error(upiProblem);
-    const upiPayeeName = String(values.get("upiPayeeName") || "").trim();
-    if (upiPayeeName.length > 100) throw new Error("The name shown to payers must be 100 characters or fewer.");
-    const address = String(values.get("address") || "").trim();
-    const language = String(values.get("language") || "en");
-    if (!isSupportedLanguage(language)) throw new Error("Choose English, Hindi or Marathi.");
-    const dateFormat = values.get("dateFormat") === "DD/MM/YYYY" ? "DD/MM/YYYY" : "DD MMM YYYY";
-    const reminderDays = Number(values.get("expiryReminderDays") || 0);
-    if (!Number.isInteger(reminderDays) || reminderDays < 0 || reminderDays > 90) throw new Error("The expiry reminder window must be a whole number from 0 to 90 days.");
+    let changes;
+    if (form.dataset.section === "payments") {
+        const upiId = String(values.get("upiId") || "").trim();
+        const upiProblem = upiIdProblem(upiId);
+        if (upiProblem) throw new Error(upiProblem);
+        const upiPayeeName = String(values.get("upiPayeeName") || "").trim();
+        if (upiPayeeName.length > 100) throw new Error("The name shown to payers must be 100 characters or fewer.");
+        changes = { upi_id: upiId || null, upi_payee_name: upiPayeeName || null };
+    } else {
+        const phone = String(values.get("phone") || "").trim();
+        if (phone && (phoneDigits(phone).length < 10 || phoneDigits(phone).length > 15)) throw new Error("Enter a valid gym phone number.");
+        const name = String(values.get("name") || "").trim();
+        if (!name) throw new Error("Gym name is required.");
+        const address = String(values.get("address") || "").trim();
+        const language = String(values.get("language") || "en");
+        if (!isSupportedLanguage(language)) throw new Error("Choose English, Hindi or Marathi.");
+        const dateFormat = values.get("dateFormat") === "DD/MM/YYYY" ? "DD/MM/YYYY" : "DD MMM YYYY";
+        changes = { name, phone: phone || null, address: address || null, language, date_format: dateFormat };
+    }
     const submit = form.querySelector('[type="submit"]');
     if (submit) submit.disabled = true;
     try {
-        await saveGymSettingsOnApi({
-            name,
-            phone: phone || null,
-            address: address || null,
-            upi_id: upiId || null,
-            upi_payee_name: upiPayeeName || null,
-            language,
-            date_format: dateFormat,
-            expiry_reminder_days: reminderDays,
-            payment_reminders: values.has("paymentReminders"),
-            inactivity_reminders: values.has("inactivityReminders")
-        });
+        await saveGymSettingsOnApi(changes);
     } finally {
         if (submit?.isConnected) submit.disabled = false;
     }
-    safePersist("Settings saved for your gym.");
+    safePersist("Settings saved.");
 }
 
 async function handleSubmit(event) {
@@ -1424,7 +1548,7 @@ async function handleSubmit(event) {
         await handleWelcomeTemplateSubmit(form);
         return;
     }
-    if (form.id === "renewal-settings-form") {
+    if (form.id === "renewal-settings-form" || form.id === "hold-settings-form") {
         event.preventDefault();
         await saveRenewalSettings(form, () => { if (currentView === "settings") render(); });
         return;
@@ -1514,14 +1638,43 @@ document.addEventListener("click", (event) => {
         recordReminderClick(reminderLink);
         return;
     }
-    // Lapsed members: the tabs, and logging a renewal message as its WhatsApp link opens.
+    // Lapsed members: logging a renewal message as its WhatsApp link opens.
     if (currentView === "renewals" && handleLapsedClick(event.target, rerenderLapsed)) return;
+    if (!event.target.closest(".account-wrap")) closeAccountMenu();
+    if (!event.target.closest(".row-menu-wrap")) closeRowMenus();
+    const followLink = event.target.closest("[data-followup-message]");
+    if (followLink) { recordFollowUpMessage(followLink); return; }
+    const sectionButton = event.target.closest("[data-settings-section]");
+    if (sectionButton) {
+        showSettingsSection(sectionButton.dataset.settingsSection, true);
+        render();
+        page.focus({ preventScroll: true });
+        window.scrollTo({ top: 0 });
+        return;
+    }
+    if (event.target.closest("[data-settings-back]")) {
+        showSettingsList();
+        render();
+        window.scrollTo({ top: 0 });
+        return;
+    }
+    const tabButton = event.target.closest("[data-renewals-tab]");
+    if (tabButton) { navigate("renewals", tabButton.dataset.renewalsTab); return; }
     const viewLink = event.target.closest("[data-view]");
-    if (viewLink) { navigate(viewLink.dataset.view); return; }
+    if (viewLink) { navigate(viewLink.dataset.view, viewLink.dataset.tab || viewLink.dataset.section); return; }
     const action = event.target.closest("[data-action]");
     if (action) {
-        if (action.dataset.action === "toggle-nav-more") {
-            setNavMoreOpen(action.getAttribute("aria-expanded") !== "true");
+        if (action.dataset.action === "account-menu") {
+            toggleAccountMenu();
+            return;
+        }
+        if (action.dataset.action === "row-menu") {
+            toggleRowMenu(action);
+            return;
+        }
+        if (action.closest(".row-menu")) closeRowMenus();
+        if (action.dataset.action === "retry-lapsed") {
+            loadLapsed(renewalsTab, rerenderLapsed);
             return;
         }
         if (action.dataset.action === "retry-consent-history") {
@@ -1552,7 +1705,7 @@ document.addEventListener("click", (event) => {
         if (handleCheckinSettingsAction(action.dataset.action, action, rerenderForCheckinMethod)) return;
         if (action.dataset.action === "open-upi-settings") {
             closeModal();
-            navigate("settings");
+            navigate("settings", "payments");
             return;
         }
         if (action.dataset.action === "retry-payments") {
@@ -1597,7 +1750,6 @@ async function signOut() {
         window.location.reload();
     }
 }
-document.querySelector("#logout-button").addEventListener("click", signOut);
 // Sign out from the screens before the app: new gym, Terms, and a gym scheduled for deletion.
 for (const button of document.querySelectorAll("[data-sign-out]")) button.addEventListener("click", signOut);
 document.addEventListener("change", (event) => {
@@ -1606,7 +1758,7 @@ document.addEventListener("change", (event) => {
     if (handleWelcomeTemplateEvent(target)) return;
     if (handleReminderTemplateEvent(target)) return;
     if (onPaymentFormEdit(target)) return;
-    if (target.id === "visits-date" && target.value) { selectVisitsDay(target.value, () => { if (currentView === "attendance") render(); }); return; }
+    if (target.id === "visits-date" && target.value) { selectVisitsDay(target.value, () => { if (currentView === "scan") render(); }); return; }
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
     if (target.matches("#membership-assignment-form [name='plan_id'], #membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
     if (target.id === "plan-status-filter") { setPlanStatus(target.value, renderPlansIfCurrent); return; }
@@ -1684,6 +1836,28 @@ function updateUpiTestQr(form) {
     panel.innerHTML = problem ? "" : renderUpiTestQr(upiId, String(form.elements.upiPayeeName.value || "").trim());
 }
 
+// "WhatsApp" on a follow-up: the link opens WhatsApp by itself. Here the member is marked Contacted
+// (only if still Pending: a status someone set is never overwritten) and the message goes into their
+// WhatsApp history.
+async function recordFollowUpMessage(link) {
+    const member = getMember(link.dataset.followupMessage);
+    if (!member) return;
+    const body = new URL(link.href).searchParams.get("text") || "";
+    if ((member.followUpStatus || "pending") === "pending") {
+        try {
+            await updateMemberFieldsOnApi(member.id, { follow_up_status: "contacted" });
+        } catch (error) {
+            toast(`WhatsApp opened, but ${member.name} was not marked Contacted: ${error.message || "please try again"}`, "error");
+        }
+    }
+    try {
+        await apiClient.post(`/api/members/${member.id}/whatsapp-messages`, { reminder_type: "inactive", language: getLanguage(), body });
+    } catch (error) {
+        toast(`WhatsApp opened, but the message was not added to the history: ${error.message || "please try again"}`, "error");
+    }
+    if (currentView === "renewals") render();
+}
+
 async function saveFollowUpStatus(member, select) {
     const previous = member.followUpStatus || "pending";
     select.disabled = true;
@@ -1751,7 +1925,14 @@ function openMobileMenu() {
 document.querySelector("#mobile-menu").addEventListener("click", openMobileMenu);
 document.querySelector("#mobile-scrim").addEventListener("click", closeMobileMenu);
 document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && document.querySelector("#sidebar").classList.contains("open")) {
+    if (event.key === "Escape" && document.querySelector(".row-menu:not([hidden])")) {
+        const opener = document.querySelector(".row-menu:not([hidden])")?.closest(".row-menu-wrap")?.querySelector(".row-menu-button");
+        closeRowMenus();
+        opener?.focus();
+    } else if (event.key === "Escape" && document.querySelector("#account-menu")?.hidden === false) {
+        closeAccountMenu();
+        document.querySelector("#account-button")?.focus();
+    } else if (event.key === "Escape" && document.querySelector("#sidebar").classList.contains("open")) {
         closeMobileMenu();
         document.querySelector("#mobile-menu").focus();
     }

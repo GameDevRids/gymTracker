@@ -56,7 +56,7 @@ function renderPosterOptions(data) {
             <div class="poster-preview">${qr}</div>
             <div class="poster-copy"><h3>Entrance poster</h3><p class="helper-text">Print it and put it up at the entrance. Members scan it with their phone camera; the first time, staff approve their phone.</p>
                 <p class="poster-link"><span class="sr-only">Poster link: </span><code>${escapeHTML(url)}</code></p>
-                <div class="button-row"><button class="button button-primary" type="button" data-action="print-poster">Print poster</button><button class="button button-secondary" type="button" data-action="replace-poster">Replace poster QR</button></div>
+                <div class="button-row"><button class="button button-secondary" type="button" data-action="print-poster">Print poster</button><button class="button button-secondary" type="button" data-action="replace-poster">Replace poster QR</button></div>
             </div>
         </div>
         <div class="field full"><label class="checkbox-line"><input type="checkbox" name="entrance_require_location" ${data.entrance_require_location ? "checked" : ""}> Only allow check-in near the gym</label><span class="helper-text">The member's phone shares its location when they tap Check in. Phones report their own location, so this stops casual check-ins from home rather than proving someone is there.</span></div>

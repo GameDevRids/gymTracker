@@ -1,6 +1,7 @@
-import { escapeHTML, formatDate, formatPhone } from "../utils.js";
+import { displayName, escapeHTML, formatDate, formatPhone, messageName } from "../utils.js";
 import { t } from "../i18n.js";
 import { renderSkeletonList } from "../components/skeleton.js";
+import { emptyState } from "../components/tables.js";
 import { buildReminderMessage } from "../reminderMessage.js";
 
 /** Identifies one reminder: renewing a membership changes its end date, so it starts unreminded. */
@@ -20,12 +21,13 @@ export function reminderBlocker(member) {
 }
 
 // Only members the board offers a reminder for (3 days or fewer left, or in grace) and who can get one.
+// "To remind" is those not reminded yet; "reminded" is those already reminded. Together: the total.
 function renderSummary(memberships, remindedKeys) {
     const remindable = memberships.filter((membership) => membership.remindable && !reminderBlocker(membership.member));
     if (!remindable.length) return "";
     const reminded = remindable.filter((membership) => remindedKeys.has(reminderKey(membership))).length;
     return `<div class="board-summary" data-reminder-summary data-total="${remindable.length}">
-        <span><strong>${remindable.length}</strong> ${escapeHTML(t("toRemind"))}</span>
+        <span><strong data-to-remind-count>${remindable.length - reminded}</strong> ${escapeHTML(t("toRemind"))}</span>
         <span><strong data-reminded-count>${reminded}</strong> ${escapeHTML(t("remindedSoFar"))}</span>
         <div class="board-progress" role="progressbar" aria-label="${escapeHTML(t("remindersProgress"))}" aria-valuemin="0" aria-valuemax="${remindable.length}" aria-valuenow="${reminded}"><span style="--progress:${reminded / remindable.length}"></span></div>
     </div>`;
@@ -52,7 +54,7 @@ export function renderExpiring(memberships = [], status = "loading", reminderTem
                         : membership.days_left === 0 ? t("expiresToday") : `${membership.days_left} ${t("daysLeft").toLowerCase()}`;
                     const phoneDigits = remindablePhone(member);
                     const message = buildReminderMessage(reminderTemplate, {
-                        name: member.full_name,
+                        name: messageName(member.full_name),
                         plan: membership.plan_name,
                         expiry_date: formatDate(membership.end_date),
                         grace_date: formatDate(membership.grace_until || membership.end_date)
@@ -63,7 +65,7 @@ export function renderExpiring(memberships = [], status = "loading", reminderTem
                         ? `<a class="button button-secondary button-small" href="https://wa.me/91${phoneDigits}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer" data-remind-key="${escapeHTML(key)}" data-member-id="${escapeHTML(member.id)}" data-membership-id="${escapeHTML(membership.id)}">${escapeHTML(isReminded ? t("reminded") : t("remindWhatsApp"))}</a>`
                         : `<span class="helper-text reminder-blocked">${blocker === "no-consent" ? escapeHTML(t("noWhatsAppConsent")) : "Invalid phone"}</span>`;
                     return `<article class="card expiring-card${isReminded ? " is-reminded" : ""}">
-                        <div class="expiring-member"><span class="member-avatar">${escapeHTML(member.full_name.slice(0, 1))}</span><div><strong>${escapeHTML(member.full_name)}</strong><small>${escapeHTML(formatPhone(member.phone))}</small></div></div>
+                        <div class="expiring-member"><span class="member-avatar">${escapeHTML(messageName(member.full_name).slice(0, 1) || "?")}</span><div><strong>${escapeHTML(displayName(member.full_name))}</strong><small>${escapeHTML(formatPhone(member.phone))}</small></div></div>
                         <div class="expiring-detail"><small>${t("plan")}</small><strong>${escapeHTML(membership.plan_name)}</strong></div>
                         <div class="expiring-detail"><small>${inGrace ? t("ended") : t("expiry")}</small><strong>${formatDate(membership.end_date)}</strong>${membership.grace_until && membership.grace_days > 0 ? `<small>${escapeHTML(t("graceTill"))} ${formatDate(membership.grace_until)}</small>` : ""}</div>
                         <span class="badge-soft ${inGrace ? "expiry-overdue" : ""}">${escapeHTML(dayLabel)}</span>
@@ -74,10 +76,9 @@ export function renderExpiring(memberships = [], status = "loading", reminderTem
                         </div>
                     </article>`;
                 }).join("")}</div>`
-                : `<div class="empty-state">${t("noExpiring")}</div>`;
-    return `<div class="page-heading"><div><h1>${t("expiring")}</h1><p>${t("expiryDescription")}</p></div></div>
-        <p class="board-links"><button class="text-button" data-view="renewals">${escapeHTML(t("seeLapsed"))}</button></p>
-        ${content}`;
+                : emptyState(t("noExpiring"), `<button class="button button-secondary" type="button" data-view="members">See all members</button>`);
+    // The page frame (heading and tabs) is the Renewals page's (modules/renewalsPage.js).
+    return content;
 }
 
 /**
@@ -93,11 +94,13 @@ export function markReminderSent(link) {
 
     const summary = document.querySelector("[data-reminder-summary]");
     const count = summary?.querySelector("[data-reminded-count]");
+    const left = summary?.querySelector("[data-to-remind-count]");
     const bar = summary?.querySelector(".board-progress");
     const total = Number(summary?.dataset.total || 0);
     if (count && bar && total) {
         const reminded = Math.min(total, Number(count.textContent) + 1);
         count.textContent = String(reminded);
+        if (left) left.textContent = String(total - reminded);
         bar.setAttribute("aria-valuenow", String(reminded));
         bar.firstElementChild?.style.setProperty("--progress", String(reminded / total));
     }

@@ -241,7 +241,7 @@ export function renderWelcomeTemplateSettings() {
                 <div class="welcome-placeholders" aria-label="Insert a placeholder">${WELCOME_PLACEHOLDERS.map((key) => `<button class="badge-soft welcome-chip" type="button" data-action="welcome-insert" data-key="${key}">{${key}}</button>`).join("")}</div>
                 <span class="helper-text">A line is left out when its placeholder has no value, for example when the gym phone is not set.</span></div>
             <div class="field full"><span class="field-label" id="welcome-preview-label">Preview</span><div class="welcome-preview ${preview.problem ? "welcome-preview-problem" : ""}" id="welcome-preview" aria-labelledby="welcome-preview-label" aria-live="polite">${escapeHTML(preview.text)}</div><span class="helper-text" id="welcome-default-note">${isDefaultWelcomeTemplate(sendLanguage) ? "Using the default message." : "Using your saved message."}</span></div>
-            <div class="field full welcome-template-actions"><button class="button button-primary" type="submit">Save welcome message</button><button class="button button-secondary" type="button" data-action="welcome-reset-template">Use default</button></div>
+            <div class="field full welcome-template-actions"><button class="button button-secondary" type="submit">Save welcome message</button><button class="button button-secondary" type="button" data-action="welcome-reset-template">Use default</button></div>
         </form></section>`;
 }
 

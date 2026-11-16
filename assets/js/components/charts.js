@@ -17,3 +17,13 @@ export function drawChartOrEmpty(canvas, { hasData, emptyMessage, config }) {
 }
 
 export const hasNonZero = (values) => values.some((value) => Number(value) > 0);
+
+// The plan donut's colours, and its legend as plain HTML under the chart: Chart.js cuts a long plan
+// name short ("Monthly Membe…"), a list shows every name in full and wraps on a phone.
+export const PLAN_COLORS = ["#326a48", "#8db876", "#c4dc86", "#d9a966", "#b8c5ba", "#5b7fa6", "#c97b63", "#8a7bb0"];
+
+/** The list under the donut: a colour swatch, the full plan name and its member count. */
+export function planLegendHtml(rows) {
+    const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    return rows.map((row, index) => `<li><span class="legend-swatch" style="background:${PLAN_COLORS[index % PLAN_COLORS.length]}" aria-hidden="true"></span><span class="legend-name">${escape(row.plan_name)}</span><strong>${Number(row.members) || 0}</strong></li>`).join("");
+}

@@ -99,6 +99,26 @@ export function cleanMemberName(value) {
     return String(value ?? "").trim().replace(/\s+/g, " ");
 }
 
+// Some members were saved before names were checked (2026-11-11): an empty name, or an email
+// address in the name. They are shown as NO_NAME and flagged, never as the email.
+export const NO_NAME = "No name – tap to add";
+
+/** True when the saved name is empty or is an email address. */
+export function nameIsMissing(value) {
+    const name = cleanMemberName(value);
+    return !name || name.includes("@");
+}
+
+/** The name to show on screen: the saved name, or NO_NAME. */
+export function displayName(value) {
+    return nameIsMissing(value) ? NO_NAME : cleanMemberName(value);
+}
+
+/** The name to use inside a message or on a receipt: the saved name, or "" (messages then say "there"). */
+export function messageName(value) {
+    return nameIsMissing(value) ? "" : cleanMemberName(value);
+}
+
 /** Returns "" for a valid name, otherwise "missing", "email", "too-long" or "invalid". */
 export function memberNameIssue(value) {
     const name = cleanMemberName(value);
@@ -114,12 +134,6 @@ export const MEMBER_NAME_MESSAGES = {
     "too-long": `Name must be ${MEMBER_NAME_MAX_LENGTH} characters or fewer.`,
     invalid: "Use letters for the name. Spaces, dots, apostrophes and hyphens are allowed."
 };
-
-export function memberStatus(member) {
-    const expiry = daysBetween(member.expiryDate);
-    if (member.status === "suspended") return "suspended";
-    return expiry !== null && expiry > 0 ? "expired" : "active";
-}
 
 export function statusPill(status) {
     const label = status ? status[0].toUpperCase() + status.slice(1) : "Unknown";
@@ -162,3 +176,14 @@ export function downloadCSV(filename, rows) {
 }
 
 export const monthKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+/**
+ * Days without a visit, counted from the later of the member's join date and their last visit, so a
+ * member who joined recently is never "inactive" for longer than they have been a member. null when
+ * neither date is known.
+ */
+export function inactiveDaysFor(member, lastVisit, today = indiaISODate()) {
+    const joined = String(member.joinedAt || "").slice(0, 10);
+    const since = [joined, lastVisit || ""].filter(Boolean).sort().at(-1);
+    return since ? Math.max(0, daysBetween(since, today)) : null;
+}

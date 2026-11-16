@@ -16,7 +16,7 @@
 // it the next time the member is read (gympulse_settle_holds).
 
 export const EXPIRING_DAYS = 7;
-// "Remind on WhatsApp" is offered from this many days before the end, and all through grace.
+// "Send reminder" is offered from this many days before the end, and all through grace.
 export const REMIND_DAYS = 3;
 export const DEFAULT_LAPSED_LIST_DAYS = 60;
 
@@ -189,7 +189,7 @@ export function checkInDecision(status) {
     }
 }
 
-/** True when the Expiring board offers "Remind on WhatsApp": 3 days or fewer left, or in grace. */
+/** True when the Expiring board offers "Send reminder": 3 days or fewer left, or in grace. */
 export function remindable(state) {
     return state.status === "in_grace" || (state.status === "expiring" && state.daysLeft <= REMIND_DAYS);
 }

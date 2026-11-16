@@ -9,6 +9,8 @@ const memberColumns = [
     "id",
     "gym_id",
     "member_code",
+    // The long code a member had before migration 023 shortened it: still searchable (migration 022).
+    "previous_member_code",
     "full_name",
     "phone",
     "email",
@@ -63,7 +65,7 @@ function throwDatabaseError(error, operation) {
         throw new MembersServiceError(409, "Member has related records and cannot be deleted.");
     }
     if (error?.code === "PGRST204" || error?.code === "42703") {
-        throw new MembersServiceError(503, "The members table is missing required columns. Run the latest migrations (up to 014_add_member_photos.sql) in Supabase SQL Editor.");
+        throw new MembersServiceError(503, "The members table is missing required columns. Run the latest migrations (up to 022_add_short_member_codes.sql) in Supabase SQL Editor.");
     }
     if (error?.code === "PGRST205" || error?.code === "42P01") {
         throw new MembersServiceError(503, "Membership history is unavailable. Run migration 004_create_member_memberships.sql in Supabase SQL Editor.");
@@ -197,7 +199,7 @@ export async function listMembers({ page, limit, status, search, includeArchived
     if (search) {
         const escaped = search.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
         const pattern = `"%${escaped}%"`;
-        query = query.or(`full_name.ilike.${pattern},phone.ilike.${pattern},member_code.ilike.${pattern}`);
+        query = query.or(`full_name.ilike.${pattern},phone.ilike.${pattern},member_code.ilike.${pattern},previous_member_code.ilike.${pattern}`);
     }
 
     const { data, count, error } = await query;

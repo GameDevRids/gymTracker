@@ -55,7 +55,8 @@ test("members, their plans with the file's dates, and amounts paid are saved tog
     assert.equal(riya.notes, "Paid half in cash");
     assert.equal(riya.whatsapp_opt_in, false, "imported members never get WhatsApp consent");
     assert.equal(riya.photo_consent, false, "imported members never get photo consent");
-    assert.match(riya.member_code, /^GP-[0-9A-F]{12}$/);
+    // Migration 022: a new member gets the gym's next short code (GP-101, GP-102, …).
+    assert.match(riya.member_code, /^GP-\d{3,}$/);
     const riyaPlan = (await db.query("SELECT * FROM public.member_memberships WHERE member_id = $1", [riya.id])).rows[0];
     assert.equal(isoDate(riyaPlan.end_date), shift(start, 44), "the end date from the file is kept");
     assert.equal(riyaPlan.duration_days, 45);

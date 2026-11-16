@@ -1,5 +1,5 @@
 import { clearSavedWorkspace, readSavedWorkspace } from "./storage.js";
-import { cleanMemberName } from "./utils.js";
+import { NO_NAME, cleanMemberName, displayName, nameIsMissing } from "./utils.js";
 import { createEmptyState, removeLegacyDemoData } from "./workspace.js";
 import { apiClient } from "./api/apiClient.js";
 import { fetchMembers } from "./api/membersApi.js";
@@ -56,7 +56,11 @@ export function memberFromApiRow(member) {
     return {
         id: member.id,
         memberCode: member.member_code || "",
-        name: member.full_name || "",
+        previousCode: member.previous_member_code || "",
+        // The name on screen; nameMissing flags an empty or email name (see utils.displayName).
+        name: displayName(member.full_name),
+        nameMissing: nameIsMissing(member.full_name),
+        savedName: member.full_name || "",
         phone: member.phone || "",
         email: member.email || "",
         dob: member.date_of_birth || "",
@@ -96,7 +100,7 @@ export function memberFromApiRow(member) {
 
 export function memberToApiPayload(member) {
     const payload = {
-        full_name: cleanMemberName(member.name),
+        full_name: member.nameMissing && cleanMemberName(member.name) === NO_NAME ? cleanMemberName(member.savedName) : cleanMemberName(member.name),
         phone: member.phone || "",
         email: member.email || null,
         gender: member.gender || null,

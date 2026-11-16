@@ -4,7 +4,7 @@
 // Renew. The lists come from the server's shared status rule (GET /api/memberships/lapsed).
 import { apiClient } from "../api/apiClient.js";
 import { toast } from "../components/toast.js";
-import { escapeHTML, formatDate, formatPhone } from "../utils.js";
+import { displayName, escapeHTML, formatDate, formatPhone, messageName } from "../utils.js";
 import { state } from "../state.js";
 import { getLanguage } from "../i18n.js";
 import { welcomePhone } from "../welcomeMessage.js";
@@ -12,26 +12,45 @@ import { buildLapsedMessage } from "../lapsedMessage.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 
 // One cache per list: { status: "idle" | "loading" | "ready" | "error", rows, message }.
-const lists = { lapsed: { status: "idle", rows: [], message: "" }, old: { status: "idle", rows: [], message: "" } };
+const lists = { lapsed: { status: "idle", rows: [], message: "", loaded: false, request: 0 }, old: { status: "idle", rows: [], message: "", loaded: false, request: 0 } };
 let current = "lapsed";
 
 export function lapsedTab() {
     return current;
 }
 
+/** Which list the Renewals page shows: "lapsed" or "old". */
+export function setLapsedList(list) {
+    current = list === "old" ? "old" : "lapsed";
+}
+
+/** How many rows a list has once it has loaded, otherwise null (for the tab's count). */
+export function lapsedCount(list) {
+    return lists[list]?.loaded ? lists[list].rows.length : null;
+}
+
 /** Loads one list (lapsed or old) from the server, then calls onChange. */
 export async function loadLapsed(list = current, onChange = () => {}) {
     const entry = lists[list];
-    entry.status = entry.rows.length ? "ready" : "loading";
-    onChange();
+    const request = ++entry.request;
+    // The skeleton is only for the first load: a reload keeps the list (even an empty one) on screen.
+    if (!entry.loaded) {
+        entry.status = "loading";
+        onChange();
+    }
     try {
         const response = await apiClient.get("/api/memberships/lapsed", { params: { list } });
+        if (request !== entry.request) return;
         entry.rows = Array.isArray(response?.data) ? response.data : [];
         entry.status = "ready";
+        entry.loaded = true;
         entry.message = "";
     } catch (error) {
-        entry.status = "error";
-        entry.message = error.message || "This list could not be loaded.";
+        if (request !== entry.request) return;
+        if (!entry.loaded) {
+            entry.status = "error";
+            entry.message = error.message || "This list could not be loaded.";
+        }
     }
     onChange();
 }
@@ -56,7 +75,7 @@ function messageLink(row) {
     const phone = welcomePhone(row.member.phone);
     const text = buildLapsedMessage({
         language: getLanguage(),
-        name: row.member.full_name,
+        name: messageName(row.member.full_name),
         plan: row.plan_name,
         endedOn: formatDate(row.ended_on),
         gymName: state.gym.name,
@@ -76,27 +95,21 @@ function messageAction(row) {
 function rowHtml(row) {
     const id = escapeHTML(row.member.id);
     return `<article class="card lapsed-card">
-        <div class="lapsed-member"><button class="text-button member-cell" data-action="profile" data-id="${id}"><strong>${escapeHTML(row.member.full_name)}</strong></button><small>${escapeHTML(formatPhone(row.member.phone))}</small></div>
+        <div class="lapsed-member"><button class="text-button member-cell" data-action="profile" data-id="${id}"><strong>${escapeHTML(displayName(row.member.full_name))}</strong></button><small>${escapeHTML(formatPhone(row.member.phone))}</small></div>
         <div class="lapsed-detail"><small>${escapeHTML(row.plan_name || "Plan")}</small><strong>Ended ${escapeHTML(formatDate(row.ended_on))}</strong><small>${escapeHTML(ago(row.days_since_end))}</small></div>
         <div class="lapsed-actions"><button class="button button-primary button-small" data-action="renew-member" data-id="${id}">Renew</button>${messageAction(row)}</div>
     </article>`;
 }
 
-/** The Lapsed members page: two tabs, Lapsed and Old members. */
-export function renderLapsedPage() {
-    const entry = lists[current];
-    const tab = (list, label) => `<button class="tab-button${current === list ? " is-active" : ""}" type="button" role="tab" aria-selected="${current === list}" data-lapsed-tab="${list}">${label}${lists[list].status === "ready" ? ` <span class="count-pill">${lists[list].rows.length}</span>` : ""}</button>`;
+/** The Lapsed or Old members list (the Renewals page draws the heading and tabs around it). */
+export function renderLapsedBody(list = current) {
+    const entry = lists[list];
     let body;
     if (entry.status === "loading" || entry.status === "idle") body = renderSkeletonList({ count: 3, label: "Loading members…", variant: "card" });
-    else if (entry.status === "error") body = `<div class="empty-state" role="alert"><p>${escapeHTML(entry.message)}</p><button class="button button-secondary" type="button" data-lapsed-tab="${current}">Try again</button></div>`;
-    else if (!entry.rows.length) body = `<div class="empty-state">${current === "lapsed" ? "No lapsed members. Everyone whose grace ran out has renewed." : "No old members."}</div>`;
+    else if (entry.status === "error") body = `<div class="empty-state" role="alert"><p>${escapeHTML(entry.message)}</p><button class="button button-secondary" type="button" data-action="retry-lapsed">Try again</button></div>`;
+    else if (!entry.rows.length) body = `<div class="empty-state">${list === "lapsed" ? "No lapsed members – nice! Everyone whose grace ran out has renewed." : "No old members. Members move here when they stay lapsed past your lapsed-list period."}</div>`;
     else body = `<div class="lapsed-list">${entry.rows.map(rowHtml).join("")}</div>`;
-    const description = current === "lapsed"
-        ? "Grace has run out and they have not renewed yet. Send a friendly message, or renew at the desk."
-        : "Lapsed for longer than your lapsed-list period (Settings › Renewals and grace).";
-    return `<div class="page-heading"><div><h1>Lapsed members</h1><p>${escapeHTML(description)}</p></div><div class="heading-actions"><button class="button button-secondary" data-action="export-renewals">↓ Export renewals</button></div></div>
-        <div class="tab-row" role="tablist" aria-label="Lapsed lists">${tab("lapsed", "Lapsed")}${tab("old", "Old members")}</div>
-        ${body}`;
+    return body;
 }
 
 /** Logs a renewal message the moment its link opens WhatsApp. Never blocks the link. */
@@ -112,14 +125,8 @@ async function logMessage(memberId) {
     }
 }
 
-/** Handles taps on the page. Returns true when handled. */
+/** Handles taps on the lists' message links. Returns true when handled. */
 export function handleLapsedClick(target, onChange) {
-    const tab = target.closest("[data-lapsed-tab]");
-    if (tab) {
-        current = tab.dataset.lapsedTab === "old" ? "old" : "lapsed";
-        loadLapsed(current, onChange);
-        return true;
-    }
     const link = target.closest("[data-lapsed-message]");
     if (link) {
         logMessage(link.dataset.lapsedMessage).then(onChange);

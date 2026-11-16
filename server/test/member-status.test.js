@@ -170,7 +170,7 @@ afterEach(() => dom.restore());
 test("only members who agreed get a renewal message button; the message has the end date and the gym's number", async () => {
     Object.assign(appState.gym, { name: "Power Gym", phone: "9822001122" });
     await lapsedPage.loadLapsed("lapsed");
-    const html = lapsedPage.renderLapsedPage();
+    const html = lapsedPage.renderLapsedBody("lapsed");
     const links = [...html.matchAll(/href="https:\/\/wa\.me\/91(\d+)\?text=([^"]+)"/g)];
     assert.deepEqual(links.map((match) => match[1]), ["9876543212"]);
     const text = decodeURIComponent(links[0][2]);

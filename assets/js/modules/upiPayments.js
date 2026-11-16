@@ -6,7 +6,7 @@ import { state } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
-import { escapeHTML, formatDate, formatINR } from "../utils.js";
+import { displayName, escapeHTML, formatDate, formatINR, messageName } from "../utils.js";
 import { buildUpiLink, upiNote } from "../upi.js";
 import { graceUntil } from "../memberStatus.js";
 import { welcomePhone } from "../welcomeMessage.js";
@@ -233,20 +233,34 @@ export function renderUpiTestQr(upiId, payeeName) {
 
 // ---------- Payments list (database) ----------
 
-export const paymentsPage = { status: "idle", payments: [], total: 0, monthTotal: 0, message: "" };
+export const paymentsPage = { status: "idle", payments: [], total: 0, monthTotal: 0, message: "", loaded: false };
+let paymentsRequest = 0;
 
+/**
+ * Loads the latest payments. A reload keeps showing the rows already loaded (the skeleton is only
+ * for the first load), and an older reply that arrives after a newer one is ignored.
+ */
 export async function loadPaymentsPage(onChange = () => {}) {
-    paymentsPage.status = "loading";
-    onChange();
+    const request = ++paymentsRequest;
+    if (!paymentsPage.loaded) {
+        paymentsPage.status = "loading";
+        onChange();
+    }
     try {
         const response = await apiClient.get("/api/payments", { params: { page: 1, limit: 100 } });
+        if (request !== paymentsRequest) return;
         paymentsPage.payments = response?.data?.payments || [];
         paymentsPage.total = response?.data?.pagination?.total ?? paymentsPage.payments.length;
         paymentsPage.monthTotal = Number(response?.data?.month_total || 0);
         paymentsPage.status = "ready";
+        paymentsPage.loaded = true;
     } catch (error) {
-        paymentsPage.status = "error";
-        paymentsPage.message = error.message || "Payments could not be loaded.";
+        if (request !== paymentsRequest) return;
+        // Rows already on screen stay; a toast-free error only replaces an empty first load.
+        if (!paymentsPage.loaded) {
+            paymentsPage.status = "error";
+            paymentsPage.message = error.message || "Payments could not be loaded.";
+        }
     }
     onChange();
 }
@@ -279,7 +293,7 @@ export function receiptText(receipt) {
         `Payment receipt ${payment.receipt_number}`,
         payment.kind === "hold_fee" ? "For: plan hold fee" : "",
         `Date: ${formatDate(payment.paid_on)}`,
-        member ? `Member: ${member.full_name}${member.member_code ? ` (${member.member_code})` : ""}` : "",
+        member ? `Member: ${messageName(member.full_name) || "Member"}${member.member_code ? ` (${member.member_code})` : ""}` : "",
         `Amount: ${formatINR(payment.amount)}`,
         `Method: ${method}`,
         membership ? `Plan: ${membership.plan_name}${periodText(membership) ? `, ${periodText(membership)}` : ""}` : "",
@@ -354,7 +368,7 @@ export async function createReceiptCard(receipt) {
     context.fillStyle = CARD_COLORS.soft;
     setFont(context, 400, 30, fonts.body);
     context.fillText("Received from", pad, y);
-    const name = fitTextBlock(context, member?.full_name || "Member", { weight: 700, family: fonts.heading, max: 56, min: 34, width, maxLines: 2 });
+    const name = fitTextBlock(context, messageName(member?.full_name) || "Member", { weight: 700, family: fonts.heading, max: 56, min: 34, width, maxLines: 2 });
     context.fillStyle = CARD_COLORS.white;
     setFont(context, 700, name.size, fonts.heading);
     y += 8;
@@ -484,7 +498,7 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
         body: `<div class="receipt-summary">
             <div class="receipt-amount"><span>Amount paid</span><strong>${escapeHTML(formatINR(payment.amount))}</strong>${status}</div>
             <div class="profile-fields">
-                <div><label>Member</label><strong>${escapeHTML(member?.full_name || "—")}</strong></div>
+                <div><label>Member</label><strong>${escapeHTML(member ? displayName(member.full_name) : "—")}</strong></div>
                 <div><label>Member ID</label><strong>${escapeHTML(member?.member_code || "—")}</strong></div>
                 <div><label>Method</label><strong>${escapeHTML(methodLabel(payment.method))}</strong></div>
                 ${payment.upi_reference ? `<div><label>UPI reference</label><strong>${escapeHTML(payment.upi_reference)}</strong></div>` : ""}
@@ -495,7 +509,7 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
         footer: `<div class="welcome-footer">
             <button class="button button-secondary" type="button" data-action="close-modal">Done</button>
             <button class="button button-secondary" type="button" data-action="receipt-text" ${blocker ? "disabled" : ""}>Send receipt as text</button>
-            <button class="button button-whatsapp" type="button" data-action="receipt-share">Share receipt on WhatsApp</button>
+            <button class="button button-whatsapp" type="button" data-action="receipt-share">Send receipt on WhatsApp</button>
         </div>`
     });
 }

@@ -7,14 +7,15 @@
 import { state, getMember, memberFromApiRow, legacyAttendance } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal } from "../components/modal.js";
+import { emptyState } from "../components/tables.js";
 import { toast } from "../components/toast.js";
-import { addDays, escapeHTML, formatDate, formatINR } from "../utils.js";
+import { addDays, displayName, escapeHTML, formatDate, formatINR, messageName } from "../utils.js";
 import { firstName, indiaDate, parseCheckinQr } from "../checkin.js";
 import { createWelcomeCard } from "./welcome.js";
 import { shareImageFile } from "./cardCanvas.js";
 import { checkinMethod, checkinSettings, usesMemberQr, usesPoster } from "./checkinMethod.js";
 import { paymentLink, qrSvg } from "./upiPayments.js";
-import { avatarHtml, photosAvailable } from "./memberPhotos.js";
+import { photosAvailable } from "./memberPhotos.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FEED_DAYS = 60;
@@ -61,7 +62,7 @@ function feedRecord(row, member = row.member) {
     return {
         id: row.id,
         memberId: row.member_id,
-        memberName: member?.full_name || "",
+        memberName: member ? displayName(member.full_name) : "",
         memberCode: member?.member_code || "",
         checkedInAt: row.checked_in_at,
         checkInDate: row.check_in_date,
@@ -128,7 +129,11 @@ export async function selectVisitsDay(day, onChange) {
     onChange();
 }
 
-export function renderVisitsPage() {
+/**
+ * The visits list at the bottom of the Check-in page: summary chips, a day filter and search, and
+ * the day's check-ins (today by default).
+ */
+export function renderVisitsSection() {
     const today = indiaDate();
     const day = selectedDay || today;
     const records = state.attendance;
@@ -141,7 +146,7 @@ export function renderVisitsPage() {
     let table;
     if (view.status === "loading" || view.status === "idle") table = `<div class="empty-state" role="status">Loading visits…</div>`;
     else if (view.status === "error") table = `<div class="empty-state" role="alert"><p>${escapeHTML(view.message || attendanceFeed.message)}</p><button class="button button-secondary" data-action="retry-visits">Try again</button></div>`;
-    else if (!view.rows.length) table = `<div class="empty-state">${day === today ? "No check-ins yet today." : `No check-ins on ${escapeHTML(formatDate(day))}.`}</div>`;
+    else if (!view.rows.length) table = `${day === today ? emptyState("No check-ins yet today. They appear here as members check in.", `<button class="button button-secondary" type="button" data-action="checkin-by-name">Check in manually</button>`) : emptyState(`No check-ins on ${formatDate(day)}.`)}`;
     else {
         table = `<div class="table-wrap"><table class="visits-table"><thead><tr><th>Time</th><th>Member</th><th>Method</th><th>Membership</th></tr></thead><tbody>${view.rows.map((record) => {
             const name = record.memberName || getMember(record.memberId)?.name || "Removed member";
@@ -151,12 +156,31 @@ export function renderVisitsPage() {
     // Who may check in follows the member's status: grace is let in with a warning, lapsed is not,
     // and a plan on hold is resumed by the poster (or by staff) first.
     const policy = "Members in grace are checked in with a warning; lapsed members are asked to renew at the desk; a plan on hold is resumed when the member checks in on the poster, or by staff.";
-    return `<div class="page-heading"><div><h1>Visits</h1><p>Check-ins at the entrance, stored for your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="checkin-by-name">Check in manually</button><button class="button button-primary" data-view="scan">Check-in screen</button></div></div>
+    return `<div class="section-heading"><h2>Visits</h2><p>Check-ins at the entrance, stored for your gym.</p></div>
         ${pending ? `<div class="note-box import-note" role="status"><span><strong>${plural(pending, "check-in")}</strong> saved only in this browser by an older version.</span><button class="button button-secondary button-small" data-action="open-local-data">Move my saved data to the cloud</button></div>` : ""}
         <div class="summary-row"><span class="summary-chip"><strong>${todayCount}</strong> today</span><span class="summary-chip"><strong>${weekCount}</strong> this week</span><span class="summary-chip"><strong>${monthVisitors}</strong> unique visitors this month</span></div>
         <div class="toolbar"><label class="sr-only" for="visits-date">Day</label><input class="field-control" id="visits-date" type="date" value="${escapeHTML(day)}" max="${escapeHTML(today)}"><input class="search-field" id="attendance-search" type="search" placeholder="Search member…" aria-label="Search visits"></div>
         <section class="card table-card">${table}</section>
         <p class="helper-text" style="margin-top:11px">One check-in per member per day (India time). ${escapeHTML(policy)}</p>`;
+}
+
+/**
+ * Redraws only the visits list on the Check-in page, so the camera keeps running. The search box
+ * keeps what was typed (and the focus).
+ */
+export function refreshVisitsSection() {
+    const box = document.querySelector("#visits-section");
+    if (!box) return;
+    const search = box.querySelector("#attendance-search");
+    const query = search?.value || "";
+    const focused = Boolean(search) && document.activeElement === search;
+    box.innerHTML = renderVisitsSection();
+    const next = box.querySelector("#attendance-search");
+    if (next && query) {
+        next.value = query;
+        next.dispatchEvent(new Event("input", { bubbles: true }));
+        if (focused) next.focus();
+    }
 }
 
 // ---------- A member's visits and linked phones (profile) ----------
@@ -182,7 +206,7 @@ export function renderMemberVisits(member) {
     let last = "";
     if (!history || history.status === "loading") body = `<div class="empty-state" role="status">Loading visits…</div>`;
     else if (history.status === "error") body = `<div class="empty-state" role="alert"><p>${escapeHTML(history.message)}</p></div>`;
-    else if (!history.rows.length) body = `<div class="empty-state">No check-ins recorded for this member yet.</div>`;
+    else if (!history.rows.length) body = `${emptyState("No check-ins yet. They appear here as this member checks in.")}`;
     else {
         const latest = history.rows[0];
         const ago = Math.round((Date.parse(`${indiaDate()}T00:00:00Z`) - Date.parse(`${latest.check_in_date}T00:00:00Z`)) / 86400000);
@@ -276,7 +300,7 @@ function renderApprovals() {
     else if (pendingDevices.status !== "ready") body = `<div class="empty-state" role="status">Loading…</div>`;
     else if (!pendingDevices.rows.length) body = `<p class="helper-text">No phones waiting. A member who scans the poster for the first time enters their mobile number and appears here.</p>`;
     else {
-        body = `<ul class="device-list">${pendingDevices.rows.map((device) => `<li class="device-row approval-row"><div><strong>${escapeHTML(device.member?.full_name || "Member")}</strong><small>${escapeHTML(device.member?.member_code || "")}${device.member?.phone_last4 ? ` · ••••${escapeHTML(device.member.phone_last4)}` : ""} · ${escapeHTML(device.device_label || "Phone")} · ${escapeHTML(timeText(device.created_at))}</small></div>
+        body = `<ul class="device-list">${pendingDevices.rows.map((device) => `<li class="device-row approval-row"><div><strong>${escapeHTML(device.member ? displayName(device.member.full_name) : "Member")}</strong><small>${escapeHTML(device.member?.member_code || "")}${device.member?.phone_last4 ? ` · ••••${escapeHTML(device.member.phone_last4)}` : ""} · ${escapeHTML(device.device_label || "Phone")} · ${escapeHTML(timeText(device.created_at))}</small></div>
             <div class="approval-code" aria-label="Code on the phone: ${escapeHTML(device.code.split("").join(" "))}"><small>Code on phone</small><strong>${escapeHTML(device.code)}</strong></div>
             <span class="button-row"><button class="button button-primary button-small" type="button" data-action="device-approve" data-id="${escapeHTML(device.id)}">Approve</button><button class="button button-secondary button-small" type="button" data-action="device-reject" data-id="${escapeHTML(device.id)}">Reject</button></span></li>`).join("")}</ul>`;
     }
@@ -324,15 +348,15 @@ async function ensureMemberLoaded(apiMember) {
 
 /** A one-line summary of a check-in result, for toasts outside the Check-in screen. */
 function resultSentence(data) {
-    const name = data.member?.full_name || "Member";
+    const name = messageName(data.member?.full_name) || "Member";
     const time = timeText(data.attendance?.checked_in_at);
-    if (data.result === "checked_in" && data.resumed) return [`${name} is back: checked in at ${time}. The plan now ends on ${formatDate(data.resumed.new_end_date)}.`, "success"];
-    if (data.result === "checked_in") return [`${name} checked in at ${time}.`, "success"];
+    if (data.result === "checked_in" && data.resumed) return [`Checked in: ${name} is back, at ${time}. The plan now ends on ${formatDate(data.resumed.new_end_date)}.`, "success"];
+    if (data.result === "checked_in") return [`Checked in: ${name} at ${time}.`, "success"];
     if (data.result === "on_hold") return [`${name} was not checked in: the plan has been on hold since ${formatDate(data.hold?.starts_on)}. Resume it first.`, "error"];
-    if (data.result === "already_checked_in") return [`${name} already checked in today at ${time}.`, "success"];
+    if (data.result === "already_checked_in") return [`Already checked in: ${name}, today at ${time}.`, "success"];
     if (data.blocked) return [`${name} was not checked in: ${data.result === "expired" ? `the plan ended on ${formatDate(data.ended_on || data.membership?.end_date)} and grace is over` : "no active membership"}. Please renew at the desk.`, "error"];
-    if (data.result === "grace") return [`${name} checked in. ${graceLine(data)}.`, "success"];
-    if (data.result === "upcoming") return [`${name} checked in; the plan starts on ${formatDate(data.membership?.start_date)}.`, "success"];
+    if (data.result === "grace") return [`Checked in: ${name}. ${graceLine(data)}.`, "success"];
+    if (data.result === "upcoming") return [`Checked in: ${name}. The plan starts on ${formatDate(data.membership?.start_date)}.`, "success"];
     return ["Member not found.", "error"];
 }
 
@@ -361,7 +385,7 @@ function askResumeAndCheckIn(data) {
     const member = data.member || {};
     openModal({
         title: "Plan on hold",
-        subtitle: member.full_name || "",
+        subtitle: displayName(member.full_name),
         body: `<p class="confirm-copy">The plan has been on hold since <strong>${escapeHTML(formatDate(data.hold?.starts_on))}</strong>. Resuming ends the hold today and moves the plan's end date later by the days held. ${escapeHTML(member.full_name || "The member")} was not checked in yet.</p>`,
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">Not now</button><button class="button button-primary" type="button" data-action="checkin-resume" data-id="${escapeHTML(member.id || "")}">Resume and check in</button>`
     });
@@ -376,7 +400,7 @@ function renderSearchResults(members, { empty = "No members match." } = {}) {
     const list = document.querySelector("#checkin-results");
     if (!list) return;
     list.innerHTML = members.length
-        ? members.map((member) => `<button class="checkin-result" type="button" role="listitem" data-action="checkin-member" data-id="${escapeHTML(member.id)}"><strong>${escapeHTML(member.full_name)}</strong><small>${escapeHTML(member.member_code || "")}${member.phone_last4 ? ` · ••••${escapeHTML(member.phone_last4)}` : ""}${member.usually_now ? ` · <span class="tag tag-usual">Usually here now</span>` : ""}${member.checked_in_today ? ` · <span class="tag">Checked in today</span>` : ""}</small></button>`).join("")
+        ? members.map((member) => `<button class="checkin-result" type="button" role="listitem" data-action="checkin-member" data-id="${escapeHTML(member.id)}"><strong>${escapeHTML(displayName(member.full_name))}</strong><small>${escapeHTML(member.member_code || "")}${member.phone_last4 ? ` · ••••${escapeHTML(member.phone_last4)}` : ""}${member.usually_now ? ` · <span class="tag tag-usual">Usually here now</span>` : ""}${member.checked_in_today ? ` · <span class="tag">Checked in today</span>` : ""}</small></button>`).join("")
         : `<p class="helper-text">${escapeHTML(empty)}</p>`;
 }
 
@@ -422,15 +446,6 @@ function resultBox() {
 
 const manualButton = `<button class="button button-secondary manual-checkin-button" type="button" data-action="checkin-by-name">Can't scan? Check in manually</button>`;
 
-function renderTodayList() {
-    const today = indiaDate();
-    const rows = state.attendance.filter((record) => record.checkInDate === today).slice(0, 12);
-    const body = rows.length
-        ? `<ul class="today-list">${rows.map((record) => `<li class="${record.status === "active" ? "" : "today-flagged"}"><span class="today-time">${escapeHTML(timeText(record.checkedInAt))}</span>${avatarHtml({ id: record.memberId, name: record.memberName })}<button class="text-button" data-action="profile" data-id="${escapeHTML(record.memberId)}">${escapeHTML(record.memberName || "Member")}</button><span class="today-meta">${escapeHTML(methodLabel(record.source))} ${record.status === "active" ? "" : statusPill(record.status)}</span></li>`).join("")}</ul>`
-        : `<p class="helper-text">No check-ins yet today.</p>`;
-    return `<section class="card checkin-card" id="today-checkins"><div class="card-header"><div><h2>Today</h2><p>${plural(state.attendance.filter((record) => record.checkInDate === today).length, "check-in")} · updates every few seconds</p></div><button class="text-button" data-view="attendance">All visits</button></div>${body}</section>`;
-}
-
 function deskResultHtml() {
     if (!lastResult || lastResult.until < Date.now()) return `<div class="scan-result desk-result" id="scan-result" hidden aria-live="assertive"></div>`;
     // Redrawn by the desk refresh: the member is loaded by now, so Renew and Record payment work.
@@ -448,7 +463,7 @@ export function renderCheckInPage() {
         return `<div id="checkin-root">${heading("")}<section class="card">${body}</section></div>`;
     }
     if (method === "member_qr") {
-        return `<div id="checkin-root" data-method="member_qr">${heading("Hold the member's QR card in front of the camera. Each result shows for a few seconds, then scanning continues.", `<button class="button button-secondary" data-view="attendance">Today's visits</button>`)}
+        return `<div id="checkin-root" data-method="member_qr">${heading("Hold the member's QR card in front of the camera. Each result shows for a few seconds, then scanning continues.")}
             <section class="card scanner" id="scanner-root">
                 <div class="scanner-stage">
                     <video id="scanner-video" playsinline muted autoplay aria-label="Camera view"></video>
@@ -457,13 +472,14 @@ export function renderCheckInPage() {
                     <div class="scan-result" id="scan-result" hidden aria-live="assertive"></div>
                 </div>
             </section>
-            <div class="manual-row">${manualButton}</div></div>`;
+            <div class="manual-row">${manualButton}</div>
+            <div id="visits-section" class="visits-section">${renderVisitsSection()}</div></div>`;
     }
-    return `<div id="checkin-root" data-method="entrance_poster">${heading("Members scan the poster at the entrance with their own phone. Approve new phones here.", `<button class="button button-secondary" data-view="settings">Poster</button>`)}
+    return `<div id="checkin-root" data-method="entrance_poster">${heading("Members scan the poster at the entrance with their own phone. Approve new phones here.", `<button class="button button-secondary" data-view="settings" data-section="attendance">Poster settings</button>`)}
         ${deskResultHtml()}
         <div class="manual-row">${manualButton}</div>
         ${renderApprovals()}
-        ${renderTodayList()}</div>`;
+        <div id="visits-section" class="visits-section">${renderVisitsSection()}</div></div>`;
 }
 
 /** Starts what the Check-in screen needs: the camera (member QR) or the front-desk refresh (poster). */
@@ -740,8 +756,8 @@ export function showResult(data) {
     const box = resultBox();
     if (!box) return;
     const session = scanner;
-    const name = data.member?.full_name || "";
-    const first = firstName(name) || "Member";
+    const name = displayName(data.member?.full_name);
+    const first = firstName(messageName(data.member?.full_name)) || "Member";
     const membership = data.membership;
     const plan = planLine(membership);
     const time = timeText(data.attendance?.checked_in_at);
@@ -844,7 +860,7 @@ function showRenewalQr(element) {
         : `<p class="helper-text">${payment.reason === "no-upi" ? "Set the gym's UPI ID in Settings first." : escapeHTML(payment.message || "Enter an amount to show the QR.")}</p>`;
     openModal({
         title: "Renew with UPI",
-        subtitle: data?.member ? `${escapeHTML(data.member.full_name)} · ${escapeHTML(data.membership?.plan_name || "")}` : "",
+        subtitle: data?.member ? `${escapeHTML(displayName(data.member.full_name))} · ${escapeHTML(data.membership?.plan_name || "")}` : "",
         body,
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">Close</button>${data?.member ? `<button class="button button-primary" type="button" data-action="record-payment" data-id="${escapeHTML(data.member.id)}" data-amount="${escapeHTML(String(amount))}">Record payment</button>` : ""}`
     });

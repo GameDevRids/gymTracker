@@ -5,7 +5,7 @@
 import { apiClient } from "../api/apiClient.js";
 import { openModal, closeModal, onModalClose } from "../components/modal.js";
 import { toast } from "../components/toast.js";
-import { escapeHTML } from "../utils.js";
+import { NO_NAME, escapeHTML } from "../utils.js";
 import { getMember, consentHistory } from "../state.js";
 import { mountPhotoFlow } from "../photoCapture.js";
 
@@ -20,6 +20,8 @@ export function photosAvailable() {
 }
 
 export function initials(name) {
+    // A member without a usable name (NO_NAME) gets "?", not the label's initials.
+    if (name === NO_NAME) return "?";
     const words = String(name || "").trim().split(/\s+/).filter(Boolean);
     const letters = words.length > 1 ? `${words[0][0]}${words[words.length - 1][0]}` : (words[0] || "?").slice(0, 1);
     return letters.toUpperCase();

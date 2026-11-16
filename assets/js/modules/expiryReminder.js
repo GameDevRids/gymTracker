@@ -81,7 +81,7 @@ export function renderReminderTemplateSettings() {
             <div class="field full"><label for="reminder-body">Message</label><textarea id="reminder-body" name="body" rows="4" maxlength="${REMINDER_TEMPLATE_MAX_LENGTH}" required>${escapeHTML(body)}</textarea>
                 <span class="helper-text">Placeholders: ${REMINDER_PLACEHOLDERS.map((key) => `{${key}}`).join(", ")}</span>
                 <span class="helper-text" id="reminder-default-note">${reminderTemplates.saved[language] ? "Using your saved message." : "Using the default message."}</span></div>
-            <div class="field full welcome-template-actions"><button class="button button-primary" type="submit">Save reminder message</button><button class="button button-secondary" type="button" data-action="reminder-reset-template">Use default</button></div>
+            <div class="field full welcome-template-actions"><button class="button button-secondary" type="submit">Save reminder message</button><button class="button button-secondary" type="button" data-action="reminder-reset-template">Use default</button></div>
         </form></section>`;
 }
 

@@ -95,7 +95,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .sidebar-profile > span:nth-child(2) { flex: 1; }
 .profile-menu { color: #a7b9af; letter-spacing: 2px; }
 .main-area { min-width: 0; min-height: 100vh; margin-left: 252px; display: flex; flex-direction: column; }
-.topbar { position: sticky; z-index: 10; top: 0; display: flex; align-items: center; justify-content: space-between; min-height: 64px; padding: 0 34px; border-bottom: 1px solid #e9ede8; background: rgba(255,255,255,.97); }
+.topbar { position: sticky; z-index: 10; top: 0; display: flex; align-items: center; justify-content: space-between; min-height: 64px; padding: 0 34px; border-bottom: 1px solid #e9ede8; background: #fff; }
 .breadcrumbs { display: flex; gap: 10px; align-items: center; color: #68766d; font-size: 12px; }
 .breadcrumbs b { color: #c6ccc8; font-weight: 400; }
 .breadcrumbs strong { color: #26372d; font-weight: 600; }

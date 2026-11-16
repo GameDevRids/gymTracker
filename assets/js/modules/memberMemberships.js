@@ -120,7 +120,7 @@ export async function loadMemberMembershipHistory(memberId) {
             target.innerHTML = renderMembershipHistory(memberId, memberships);
         }
         if (currentTarget?.isConnected && currentTarget.dataset.memberId === memberId) {
-            currentTarget.innerHTML = renderCurrentMembership(memberships);
+            currentTarget.innerHTML = renderCurrentMembership(memberships, memberId);
         }
     } catch (error) {
         const message = escapeHTML(error.message || "Unable to load membership history.");
@@ -131,9 +131,9 @@ export async function loadMemberMembershipHistory(memberId) {
     }
 }
 
-function renderCurrentMembership(memberships) {
+function renderCurrentMembership(memberships, memberId = "") {
     const current = selectCurrentMembership(memberships);
-    if (!current) return `<div class="empty-state">No plan has been assigned to this member yet.</div>`;
+    if (!current) return `<div class="empty-state"><p>No plan yet. Assign one to start their membership.</p><div class="empty-actions"><button class="button button-secondary" type="button" data-action="assign-member-plan" data-id="${escapeHTML(memberId)}">Assign plan</button></div></div>`;
     return `<div class="profile-fields membership-fields">
         <div><label>Plan</label><strong>${escapeHTML(current.plan_name)}</strong></div>
         <div><label>Assigned price</label><strong>${formatINR(current.price)}</strong></div>
@@ -315,7 +315,7 @@ export async function submitMembershipAssignment(form, onUpdated) {
         if (!assignment) throw new Error("The assignment API did not return the saved membership.");
         setMemberCurrentMembership(memberId, assignment);
         closeModal();
-        toast(`${selected.dataset.name} assigned through ${formatDate(endDate)}.`);
+        toast(`Plan assigned: ${selected.dataset.name}, valid till ${formatDate(endDate)}.`);
         onUpdated();
         // The new plan's fee changes the member's balance, which the server calculates.
         await Promise.all([

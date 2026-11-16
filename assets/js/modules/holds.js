@@ -378,7 +378,7 @@ async function submitHold(form) {
         if (!result?.hold) throw new Error("The hold could not be confirmed.");
         if (view.fee > 0) saveUiPreferences({ renewMethod: form.elements.method.value });
         if (isOpen(token)) showHoldSuccess(result);
-        toast(`${getMember(memberId)?.name || "Member"}'s plan is on hold from ${formatDate(result.hold.starts_on)}.`);
+        toast(`Plan on hold: ${getMember(memberId)?.name || "Member"}, from ${formatDate(result.hold.starts_on)}.`);
         afterChange(memberId, result, onChanged);
     } catch (error) {
         if (!isOpen(token)) return;
@@ -523,7 +523,7 @@ async function submitHoldAction(kind, holdId) {
                 footer.innerHTML = `<button class="button button-primary" data-action="close-modal" type="button">Done</button>`;
             }
         }
-        toast(kind === "resume" ? `Plan resumed; it now ends ${formatDate(result.membership.end_date)}.` : "Hold cancelled.");
+        toast(kind === "resume" ? `Plan resumed: ${getMember(memberId)?.name || "Member"}, valid till ${formatDate(result.membership.end_date)}.` : `Hold cancelled: ${getMember(memberId)?.name || "Member"}.`);
         afterChange(memberId, result, onChanged);
     } catch (error) {
         if (isOpen(token)) {

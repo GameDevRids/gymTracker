@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v26";
+const CACHE_NAME = "gympulse-shell-v29";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -23,6 +23,10 @@ const APP_SHELL = [
     "/assets/js/memberStatus.js",
     "/assets/js/lapsedMessage.js",
     "/assets/js/modules/lapsed.js",
+    "/assets/js/navigation.js",
+    "/assets/js/followupMessage.js",
+    "/assets/js/modules/settingsPage.js",
+    "/assets/js/modules/renewalsPage.js",
     "/assets/js/holds.js",
     "/assets/js/holdMessage.js",
     "/assets/js/modules/holds.js",

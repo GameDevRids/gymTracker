@@ -4,6 +4,7 @@ import { openModal, closeModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { escapeHTML, formatINR, formatPlanDuration } from "../utils.js";
 import { renderSkeletonList } from "../components/skeleton.js";
+import { emptyState } from "../components/tables.js";
 import { suggestedGraceDays } from "../renewal.js";
 import { defaultHoldLimits, holdLimitsText } from "../holds.js";
 
@@ -20,7 +21,7 @@ let requestVersion = 0;
 let searchTimer;
 let saving = false;
 
-const heading = `<div class="page-heading"><div><h1>Membership plans</h1><p>Manage the membership packages offered by your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="refresh-plans">↻ Refresh</button><button class="button button-primary" data-action="add-plan">＋ Create plan</button></div></div>`;
+const heading = `<div class="page-heading"><div><h1>Membership plans</h1><p>Manage the membership packages offered by your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="refresh-plans">↻ Refresh</button><button class="button button-primary" data-action="add-plan">Create plan</button></div></div>`;
 
 export function renderPlansPage() {
     const toolbar = `<div class="toolbar"><input class="search-field" id="plan-search" type="search" placeholder="Search plan names…" aria-label="Search plans" value="${escapeHTML(search)}"><select id="plan-status-filter" class="field-control" aria-label="Filter plans by status"><option value="all" ${status === "all" ? "selected" : ""}>All plans</option><option value="active" ${status === "active" ? "selected" : ""}>Active</option><option value="inactive" ${status === "inactive" ? "selected" : ""}>Inactive</option></select><span class="toolbar-spacer"></span>${loading ? "" : `<span class="helper-text">${pagination.total} plan${pagination.total === 1 ? "" : "s"}</span>`}</div>`;
@@ -39,7 +40,7 @@ export function renderPlansPage() {
             <span class="inline-actions"><button class="text-button" data-action="edit-plan" data-id="${escapeHTML(plan.id)}">Edit</button><button class="text-button" data-action="toggle-plan" data-id="${escapeHTML(plan.id)}">${plan.is_active ? "Deactivate" : "Activate"}</button><button class="text-button" data-action="delete-plan" data-id="${escapeHTML(plan.id)}">Delete</button></span>
         </div>
     </article>`).join("");
-    const empty = `<section class="card"><div class="empty-state">${search || status !== "all" ? "No plans match your search or filter." : "No membership plans yet. Create a plan to get started."}</div></section>`;
+    const empty = `<section class="card">${search || status !== "all" ? emptyState("No plans match this search or filter.") : emptyState("No plans yet. Create your first plan so you can add members to it.", `<button class="button button-primary" type="button" data-action="add-plan">Create plan</button>`)}</section>`;
     const paginationControls = pagination.totalPages > 1
         ? `<div class="toolbar" aria-label="Plan pagination"><span class="toolbar-spacer"></span><button class="button button-secondary" data-action="previous-plans-page" ${pagination.page <= 1 ? "disabled" : ""}>Previous</button><span class="helper-text">Page ${pagination.page} of ${pagination.totalPages}</span><button class="button button-secondary" data-action="next-plans-page" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>Next</button></div>`
         : "";

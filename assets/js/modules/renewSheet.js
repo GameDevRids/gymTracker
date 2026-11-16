@@ -423,7 +423,7 @@ async function submitRenew(form) {
         if (!result?.membership) throw new Error("The renewal could not be confirmed.");
         saveUiPreferences({ renewMethod: form.elements.method.value });
         if (isOpen(token)) showSuccess(result);
-        toast(`${getMember(memberId)?.name || "Member"} renewed through ${formatDate(result.membership.end_date)}.`);
+        toast(`Renewed: ${getMember(memberId)?.name || "Member"}, valid till ${formatDate(result.membership.end_date)}.`);
         refreshAfterRenewal(result, { memberId, onChanged });
     } catch (error) {
         if (!isOpen(token)) return;

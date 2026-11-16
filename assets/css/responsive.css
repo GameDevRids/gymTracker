@@ -13,6 +13,9 @@
 @media (max-width: 800px) {
     .sidebar { width: min(320px, 86vw); padding: 18px 14px max(14px, env(safe-area-inset-bottom)); transform: translateX(-100%); transition: transform .22s ease; }
     .sidebar.open { transform: translateX(0); }
+    /* The menu and its scrim sit above the bottom tab bar (z-index 30), so the last rows (Settings,
+       the account menu with Log out) are not hidden behind it. */
+    .sidebar { z-index: 36; }
     .main-area { margin-left: 0; }
     .mobile-menu { display: grid; }
     .topbar { justify-content: flex-start; gap: 12px; min-height: 60px; padding: 0 18px; }
@@ -20,7 +23,7 @@
     .today-label { display: none; }
     .page-content { padding: 24px 20px 30px; }
     .app-footer { padding: 10px 20px 16px; }
-    .mobile-scrim { position: fixed; z-index: 19; inset: 0; display: none; background: rgba(9,20,13,.4); }
+    .mobile-scrim { position: fixed; z-index: 35; inset: 0; display: none; background: rgba(9,20,13,.4); }
     .mobile-scrim.visible { display: block; }
     .content-grid, .bottom-grid, .profile-layout, .settings-layout { grid-template-columns: 1fr; }
     .sidebar .nav-link { min-height: 46px; font-size: 14px; }

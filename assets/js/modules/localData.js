@@ -43,7 +43,7 @@ function itemList(data) {
 export function renderLocalDataSettings() {
     const data = localDataToMove();
     if (!data?.any) return "";
-    return `<section class="card settings-section note-card" id="local-data-settings"><h2>Saved only in this browser</h2><p class="helper-text">An older version of GymPulse kept some of your data only on this device. Move it to your gym's database so every phone sees the same.</p><button class="button button-primary" type="button" data-action="open-local-data">Move my saved data to the cloud</button></section>`;
+    return `<section class="card settings-section note-card" id="local-data-settings"><h2>Saved only in this browser</h2><p class="helper-text">An older version of GymPulse kept some of your data only on this device. Move it to your gym's database so every phone sees the same.</p><button class="button button-secondary" type="button" data-action="open-local-data">Move my saved data to the cloud</button></section>`;
 }
 
 export function openLocalDataDialog() {
