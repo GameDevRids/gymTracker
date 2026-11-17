@@ -719,7 +719,7 @@ function renewalActions(data) {
     return `<div class="scan-actions">
         <button class="button button-primary" type="button" data-action="${renew === "Renew" ? "renew-member" : "assign-member-plan"}" data-id="${id}" disabled>${renew}</button>
         ${data.renewal_price ? `<button class="button button-secondary" type="button" data-action="checkin-upi-qr" ${amount}>Show UPI QR</button>` : ""}
-        <button class="button button-secondary" type="button" data-action="record-payment" data-id="${id}" ${amount} disabled>Record payment</button>
+        <button class="button button-secondary" type="button" data-action="record-payment" data-id="${id}" disabled>Record payment</button>
         ${scanner ? `<button class="button button-secondary" type="button" data-action="scanner-continue">Continue scanning</button>` : `<button class="button button-secondary" type="button" data-action="checkin-result-close">Done</button>`}
     </div>`;
 }

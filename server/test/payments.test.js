@@ -9,6 +9,7 @@ const gymId = "00000000-0000-4000-8000-000000000099";
 const payment = {
     member_id: memberId,
     membership_id: membershipId,
+    idempotency_key: "00000000-0000-4000-8000-0000000000d1",
     amount: 1250,
     method: "upi",
     paid_on: "2026-11-06",
@@ -60,25 +61,25 @@ test("payment validator accepts supported payload and rejects invalid data", () 
         { ...payment, method: "bank transfer" },
         { ...payment, amount: 0 },
         { ...payment, paid_on: "2026-02-30" },
-        { ...payment, unexpected: true }
+        { ...payment, unexpected: true },
+        { ...payment, membership_id: undefined },
+        { ...payment, idempotency_key: undefined },
+        { ...payment, gym_id: gymId }
     ]) {
         assert.equal(invoke(validatePaymentPayload, invalid).response.statusCode, 400);
     }
 });
 
-test("payment creation verifies the member and associated membership before inserting", async () => {
-    const saved = { id: membershipId, ...payment, gym_id: gymId };
-    const mock = mockSupabase([
-        { data: { id: memberId }, error: null },
-        { data: { id: membershipId }, error: null },
-        { data: saved, error: null }
-    ]);
-    assert.deepEqual(await createPayment(payment, gymId, mock.client), saved);
-    assert.equal(mock.calls[2].table, "payments");
-    assert.deepEqual(mock.calls[2].operations.find(([name]) => name === "insert")[1], { ...payment, gym_id: gymId });
-    for (const call of mock.calls.slice(0, 2)) {
-        assert.ok(call.operations.some(([name, field, value]) => name === "eq" && field === "gym_id" && value === gymId));
-    }
+test("payment creation goes through one database function with the gym from the sign-in and the request key", async () => {
+    const saved = { id: "p1", ...payment, gym_id: gymId };
+    const sent = [];
+    const client = { rpc: (name, args) => { sent.push([name, args]); return Promise.resolve({ data: { replayed: false, balance_due: 250, payment: saved }, error: null }); } };
+    assert.deepEqual(await createPayment(payment, { gymId, userId: "u1" }, client), { payment: saved, balance_due: 250, replayed: false });
+    assert.equal(sent[0][0], "gympulse_record_payment");
+    assert.deepEqual(sent[0][1], {
+        p_gym_id: gymId, p_member_id: memberId, p_membership_id: membershipId, p_amount: 1250, p_method: "upi", p_paid_on: "2026-11-06",
+        p_note: "Monthly plan", p_upi_reference: null, p_idempotency_key: payment.idempotency_key, p_recorded_by: "u1"
+    });
 });
 
 test("member payment history is newest first and rejects unknown member", async () => {

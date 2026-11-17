@@ -77,7 +77,7 @@ function invoke(middleware, body) {
     return { response, nextCalled, request };
 }
 
-const validPayment = { member_id: memberId, amount: 1100, method: "upi", paid_on: "2026-11-12" };
+const validPayment = { member_id: memberId, membership_id: "00000000-0000-4000-8000-0000000000c1", idempotency_key: "00000000-0000-4000-8000-0000000000d1", amount: 1100, method: "upi", paid_on: "2026-11-12" };
 
 test("payment amounts must be positive", () => {
     for (const amount of [0, -1, -0.01, "abc", null]) {
@@ -114,6 +114,12 @@ function mockClient(tables = {}, { insertError = null } = {}) {
     const calls = [];
     return {
         calls,
+        // gympulse_record_payment (migration 025): answers with the saved payment, or the database error.
+        rpc(name, args) {
+            calls.push({ table: "rpc:" + name, operations: [["rpc", args]] });
+            if (insertError) return Promise.resolve({ data: null, error: insertError });
+            return Promise.resolve({ data: { replayed: false, balance_due: 0, payment: { id: "new", receipt_number: "R-000009", gym_id: args.p_gym_id, amount: args.p_amount } }, error: null });
+        },
         from(table) {
             const call = { table, operations: [] };
             calls.push(call);
@@ -188,9 +194,9 @@ test("the receipt number is never taken from the request, and a reused UTR is re
     const tables = { members: [{ id: memberId, gym_id: gymA }] };
     const client = mockClient(tables);
     await createPayment({ ...validPayment, receipt_number: "R-999999" }, gymA, client);
-    const insert = client.calls.find((call) => call.table === "payments").operations.find(([method]) => method === "insert")[1];
-    assert.equal("receipt_number" in insert, false);
-    assert.equal(insert.gym_id, gymA);
+    const sent = client.calls.find((call) => call.table === "rpc:gympulse_record_payment").operations[0][1];
+    assert.equal(Object.keys(sent).some((name) => /receipt/.test(name)), false, "no receipt number is passed to the database");
+    assert.equal(sent.p_gym_id, gymA);
 
     const duplicate = mockClient(tables, { insertError: { code: "23505", message: 'duplicate key value violates unique constraint "payments_gym_upi_reference_key"' } });
     await assert.rejects(createPayment({ ...validPayment, upi_reference: "123456789012" }, gymA, duplicate), (error) => error.status === 409 && /UTR\) is already recorded/.test(error.message));

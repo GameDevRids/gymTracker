@@ -53,7 +53,7 @@ export async function buildGymWorkbook(gymId, client = supabaseClient, today = i
     const [members, memberships, payments, attendance] = await Promise.all([
         readAll(client, "members", "id,member_code,full_name,phone,email,gender,date_of_birth,status,notes,emergency_contact,follow_up_status,whatsapp_opt_in,created_at,archived_at", gymId, ["created_at", "id"]),
         readAll(client, "member_memberships", "id,member_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at", gymId, ["start_date", "id"]),
-        readAll(client, "payments", "id,member_id,receipt_number,amount,method,paid_on,upi_reference,note,created_at", gymId, ["paid_on", "id"]),
+        readAll(client, "payments", "id,member_id,receipt_number,amount,method,paid_on,upi_reference,note,kind,refunded_at,status,voided_at,void_reason,created_at", gymId, ["paid_on", "id"]),
         readAll(client, "attendance", "id,member_id,checked_in_at,check_in_date,method,membership_status_at_check_in", gymId, ["checked_in_at", "id"])
     ]);
     const byId = new Map(members.map((member) => [member.id, member]));
@@ -92,9 +92,14 @@ export async function buildGymWorkbook(gymId, client = supabaseClient, today = i
         Number(membership.duration_days), money(membership.price), money(membership.total_fees ?? membership.price), effective(membership),
         date(indiaDate(membership.created_at))
     ]);
+    // Voided payments are listed (receipt numbers stay complete) but marked, and are not in any balance.
     const paymentRows = payments.map((payment) => [
         payment.receipt_number || "", date(payment.paid_on), code(payment.member_id), name(payment.member_id),
-        money(payment.amount), METHODS[payment.method] || payment.method, payment.upi_reference || "", payment.note || ""
+        money(payment.amount), METHODS[payment.method] || payment.method,
+        payment.status === "voided" ? "Voided" : payment.refunded_at ? "Refunded" : "Paid",
+        payment.kind === "hold_fee" ? "Plan hold fee" : "Plan",
+        payment.status === "voided" ? `${date(indiaDate(payment.voided_at))}: ${payment.void_reason || ""}` : "",
+        payment.upi_reference || "", payment.note || ""
     ]);
     const attendanceRows = attendance.map((visit) => [
         date(visit.check_in_date || indiaDate(visit.checked_in_at)), indiaTime(visit.checked_in_at), code(visit.member_id), name(visit.member_id),
@@ -104,7 +109,7 @@ export async function buildGymWorkbook(gymId, client = supabaseClient, today = i
     return writeXlsx([
         { name: "Members", rows: [["Member code", "Name", "Phone", "Email", "Account", "Current plan", "Plan start", "Plan end", "Plan status", "Total fees (₹)", "Paid (₹)", "Balance (₹)", "WhatsApp consent", "Joined", "Archived on", "Gender", "Date of birth", "Emergency contact", "Follow-up", "Notes"], ...memberRows], widths: [17, 24, 13, 24, 10, 18, 12, 12, 11, 13, 11, 12, 10, 12, 12, 10, 13, 16, 12, 30] },
         { name: "Memberships", rows: [["Member code", "Name", "Plan", "Start", "End", "Days", "Plan price (₹)", "Fee (₹)", "Status", "Added on"], ...membershipRows], widths: [17, 24, 18, 12, 12, 7, 13, 11, 11, 12] },
-        { name: "Payments", rows: [["Receipt", "Paid on", "Member code", "Name", "Amount (₹)", "Method", "UPI reference (UTR)", "Note"], ...paymentRows], widths: [11, 12, 17, 24, 12, 9, 16, 30] },
+        { name: "Payments", rows: [["Receipt", "Paid on", "Member code", "Name", "Amount (₹)", "Method", "Status", "For", "Voided", "UPI reference (UTR)", "Note"], ...paymentRows], widths: [11, 12, 17, 24, 12, 9, 10, 13, 28, 16, 30] },
         { name: "Attendance", rows: [["Date", "Time (India)", "Member code", "Name", "Method", "Membership at check-in"], ...attendanceRows], widths: [12, 11, 17, 24, 10, 18] },
         { name: "Enquiries", rows: [["Enquired on", "Name", "Phone", "Interested in", "Source", "Stage", "Follow-up", "Last contacted", "WhatsApp consent", "Joined as member", "Note"], ...enquiries.map((enquiry) => [
             date(indiaDate(enquiry.created_at)), enquiry.full_name, enquiry.phone,

@@ -39,6 +39,13 @@ const pay = (gymId, memberId, membershipId, amount, paidOn = today) => db.query(
     [gymId, memberId, membershipId, amount, paidOn]
 );
 
+// A payment saved before migration 025, which now refuses paying more than is due: such data can
+// still exist (an overpaid member), and balances must stay right for it.
+const payBefore025 = async (...args) => {
+    await db.exec("ALTER TABLE public.payments DISABLE TRIGGER payments_within_balance");
+    try { return await pay(...args); } finally { await db.exec("ALTER TABLE public.payments ENABLE TRIGGER payments_within_balance"); }
+};
+
 const isoDate = (value) => (value instanceof Date ? value.toISOString() : String(value)).slice(0, 10);
 const shift = (date, days) => {
     const value = new Date(`${date}T00:00:00Z`);
@@ -113,7 +120,7 @@ test("member balances add every non-cancelled membership fee and subtract every 
     const omarMembership = await assign(gymB, omar, plan, today);
     await pay(gymB, asha, first.id, 1000);
     await pay(gymB, asha, second.id, 300);
-    await pay(gymB, omar, omarMembership.id, 1200);
+    await payBefore025(gymB, omar, omarMembership.id, 1200);
     await db.query("UPDATE public.member_memberships SET status = 'cancelled' WHERE id = $1", [omarMembership.id]);
     const { rows } = await db.query("SELECT member_id, billed::float, paid::float, outstanding::float FROM public.member_balances WHERE gym_id = $1", [gymB]);
     const byMember = Object.fromEntries(rows.map((row) => [row.member_id, [row.billed, row.paid, row.outstanding]]));

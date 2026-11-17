@@ -114,13 +114,13 @@ function toMoney(value) {
     return Math.round(Number(value || 0) * 100) / 100;
 }
 
-// Billed = fees of every non-cancelled membership; paid = every plan payment (a hold fee is not one). Both come from the database.
+// Billed = fees of every non-cancelled membership; paid = every plan payment that is not voided (a hold fee is not one). Both come from the database.
 export function memberBilling(memberships, payments) {
     const billed = toMoney(memberships
         .filter((membership) => membership.status !== "cancelled")
         .reduce((sum, membership) => sum + Number(membership.total_fees ?? membership.price ?? 0), 0));
     const paid = toMoney(payments
-        .filter((payment) => (payment.kind || "plan") === "plan")
+        .filter((payment) => (payment.kind || "plan") === "plan" && (payment.status || "paid") === "paid")
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
     return { billed, paid, outstanding: Math.max(0, toMoney(billed - paid)) };
 }
@@ -143,7 +143,7 @@ async function addCurrentMemberships(members, gymId, client) {
             .order("id", { ascending: false }), "membership-history"),
         readAllRows(() => client
             .from("payments")
-            .select("id,member_id,amount,kind")
+            .select("id,member_id,amount,kind,status")
             .in("member_id", memberIds)
             .eq("gym_id", gymId)
             .order("id", { ascending: true }), "payments"),

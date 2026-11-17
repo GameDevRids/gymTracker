@@ -9,7 +9,10 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
 // The receipt number is assigned by the database, so it is not accepted here.
 const paymentSchema = z.object({
     member_id: uuid,
-    membership_id: uuid.nullable().optional(),
+    // Every payment is for one plan: its balance due is what the database checks against.
+    membership_id: uuid,
+    // A new key per opened form; a retry or double tap sends the same one and gets the first payment back.
+    idempotency_key: uuid,
     amount: z.coerce.number().finite().positive().max(9999999999.99),
     method: z.enum(["cash", "upi", "card", "other"]),
     paid_on: date,
@@ -30,6 +33,8 @@ export function validatePaymentPayload(request, response, next) {
         const field = parsed.error.issues[0]?.path[0];
         if (field === "amount") return invalid(response, "The amount must be greater than zero.");
         if (field === "upi_reference") return invalid(response, "The UPI reference (UTR) must be 12 digits.");
+        if (field === "membership_id") return invalid(response, "Choose the plan this payment is for.");
+        if (field === "idempotency_key") return invalid(response, "Refresh the app and try again (the request had no key).");
         return invalid(response, "Provide a valid member, positive amount, payment method, date, and optional note.");
     }
     if (parsed.data.upi_reference && parsed.data.method !== "upi") {
@@ -50,5 +55,15 @@ export function validatePaymentListQuery(request, response, next) {
     if (!Number.isSafeInteger(page) || page < 1) return invalid(response, "Page must be a positive integer.");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) return invalid(response, "Limit must be an integer between 1 and 100.");
     request.paymentListQuery = { page, limit };
+    next();
+}
+
+const voidSchema = z.object({ reason: z.string().trim().min(3).max(300) }).strict();
+
+/** Voiding needs a reason, 3 to 300 characters. */
+export function validateVoidPayload(request, response, next) {
+    const parsed = voidSchema.safeParse(request.body);
+    if (!parsed.success) return invalid(response, "Give a reason for voiding (3 to 300 characters).");
+    request.voidReason = parsed.data.reason;
     next();
 }

@@ -2,9 +2,16 @@ import * as paymentsService from "../services/paymentsService.js";
 import { captureException } from "../config/monitoring.js";
 import { logger } from "../config/logger.js";
 
+// data is the payment; balance_due is what is still due on its plan; replayed: this key was already saved.
 export function postPayment(request, response, next) {
-    paymentsService.createPayment(request.validatedPayment, request.gymId)
-        .then((payment) => response.status(201).json({ status: "success", data: payment }))
+    paymentsService.createPayment(request.validatedPayment, { gymId: request.gymId, userId: request.authUser?.id || null })
+        .then(({ payment, balance_due: balanceDue, replayed }) => response.status(replayed ? 200 : 201).json({ status: "success", data: payment, balance_due: balanceDue, replayed }))
+        .catch(next);
+}
+
+export function postVoidPayment(request, response, next) {
+    paymentsService.voidPayment(request.params.id, request.voidReason, { gymId: request.gymId, userId: request.authUser?.id || null })
+        .then(({ payment, balance_due: balanceDue }) => response.json({ status: "success", data: payment, balance_due: balanceDue }))
         .catch(next);
 }
 
@@ -37,6 +44,8 @@ export function paymentsErrorHandler(error, _request, response, _next) {
     }
     response.status(status).json({
         status: "error",
-        message: status === 500 ? "The server could not process this request." : error.message
+        message: status === 500 ? "The server could not process this request." : error.message,
+        ...(status !== 500 && error.reason ? { code: error.reason } : {}),
+        ...(status !== 500 && error.extra ? error.extra : {})
     });
 }

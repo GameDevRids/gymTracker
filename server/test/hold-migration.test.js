@@ -277,7 +277,7 @@ test("a hold fee is recorded as a payment, kept out of the plan balance, and ref
 
 test("only a hold fee can be marked refunded", async () => {
     const id = await member(gymA, monthly, -5, 24);
-    const payment = (await db.query("INSERT INTO public.payments (gym_id, member_id, amount, method) VALUES ($1, $2, 500, 'cash') RETURNING id", [gymA, id])).rows[0].id;
+    const payment = (await db.query("INSERT INTO public.payments (gym_id, member_id, membership_id, amount, method) VALUES ($1, $2, (SELECT id FROM public.member_memberships WHERE member_id = $2 LIMIT 1), 500, 'cash') RETURNING id", [gymA, id])).rows[0].id;
     await rejects(db.query("UPDATE public.payments SET refunded_at = now() WHERE id = $1", [payment]), /payments_refund_valid/);
 });
 

@@ -2,6 +2,8 @@
 // UPI payment QR codes, the gym's UPI settings and payment receipts. There is no payment
 // gateway: the member pays in any UPI app and staff confirm the payment arrived before saving.
 // qrcode comes from assets/vendor/qrcode-generator-1.4.4.js, loaded as a plain script.
+import { isVoided } from "../paymentRules.js";
+import { voidSummary } from "./paymentVoid.js";
 import { state } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
 import { openModal } from "../components/modal.js";
@@ -299,6 +301,7 @@ export function receiptText(receipt) {
         membership ? `Plan: ${membership.plan_name}${periodText(membership) ? `, ${periodText(membership)}` : ""}` : "",
         membership?.end_date && payment.kind !== "hold_fee" ? `Valid till: ${validTillText(membership)}` : "",
         payment.refunded_at ? "Refunded: this hold fee was given back." : "",
+        isVoided(payment) ? "VOID: this payment was cancelled and does not count." : "",
         receipt.balance === null ? "" : receipt.balance > 0 ? `Balance due: ${formatINR(receipt.balance)}` : "Paid in full",
         gym.phone ? `Questions? Call ${gym.phone}` : "",
         "This is a payment receipt, not a tax invoice."
@@ -320,7 +323,7 @@ export async function createReceiptCard(receipt) {
         ["Period", periodText(membership)],
         ["Valid till", payment.kind === "hold_fee" ? "" : validTillText(membership)]
     ].filter(([, value]) => value);
-    const status = receipt.balance === null ? null : receipt.balance > 0
+    const status = isVoided(payment) ? { text: "VOID", color: CARD_COLORS.brick } : receipt.balance === null ? null : receipt.balance > 0
         ? { text: `Balance due ${formatINR(receipt.balance)}`, color: CARD_COLORS.brick }
         : { text: "Paid in full", color: CARD_COLORS.leaf };
     await cardFontsReady([gym.name, gym.phone, member?.full_name, member?.member_code, payment.receipt_number, formatINR(payment.amount), status?.text, ...rows.flat(), "Payment receipt Received from Amount paid This is a payment receipt, not a tax invoice. ₹0123456789"].filter(Boolean).join(" "));
@@ -459,6 +462,7 @@ export async function prepareReceiptShare(paymentId) {
 }
 
 function receiptBlocker(receipt) {
+    if (isVoided(receipt.payment)) return "This payment was voided, so its receipt can't be sent.";
     if (!receipt.member) return "The member was not found.";
     if (receipt.member.whatsapp_opt_in !== true) return "This member has not agreed to receive WhatsApp updates.";
     if (!welcomePhone(receipt.member.phone)) return "This member does not have a valid Indian mobile number.";
@@ -489,14 +493,16 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
     armReceipt(receipt);
     const { payment, member, membership } = receipt;
     const blocker = receiptBlocker(receipt);
-    const status = receipt.balance === null ? "" : receipt.balance > 0
+    const voided = isVoided(payment);
+    const status = voided ? `<span class="receipt-void-stamp" aria-label="Void">VOID</span>` : receipt.balance === null ? "" : receipt.balance > 0
         ? `<span class="status status-overdue">Balance due ${escapeHTML(formatINR(receipt.balance))}</span>`
         : `<span class="status status-active">Paid in full</span>`;
     openModal({
         title: recorded ? "Payment recorded" : "Payment receipt",
         subtitle: `${escapeHTML(payment.receipt_number)} · ${escapeHTML(formatDate(payment.paid_on))}`,
-        body: `<div class="receipt-summary">
-            <div class="receipt-amount"><span>Amount paid</span><strong>${escapeHTML(formatINR(payment.amount))}</strong>${status}</div>
+        body: `<div class="receipt-summary${voided ? " is-voided" : ""}">
+            <div class="receipt-amount"><span>${voided ? "Voided payment" : "Amount paid"}</span><strong>${voided ? `<s>${escapeHTML(formatINR(payment.amount))}</s>` : escapeHTML(formatINR(payment.amount))}</strong>${status}</div>
+            ${voided ? `<p class="note-box void-receipt-note" role="note">${escapeHTML(voidSummary(payment))}. It no longer counts as money collected.</p>` : ""}
             <div class="profile-fields">
                 <div><label>Member</label><strong>${escapeHTML(member ? displayName(member.full_name) : "—")}</strong></div>
                 <div><label>Member ID</label><strong>${escapeHTML(member?.member_code || "—")}</strong></div>
@@ -504,12 +510,12 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
                 ${payment.upi_reference ? `<div><label>UPI reference</label><strong>${escapeHTML(payment.upi_reference)}</strong></div>` : ""}
                 ${membership ? `<div><label>Plan</label><strong>${escapeHTML(membership.plan_name)}</strong></div>${payment.kind === "hold_fee" ? `<div><label>For</label><strong>${payment.refunded_at ? "Plan hold fee (refunded)" : "Plan hold fee"}</strong></div>` : `<div><label>Valid till</label><strong>${escapeHTML(validTillText(membership))}</strong></div>`}` : ""}
             </div>
-            ${blocker ? `<p class="helper-text">${escapeHTML(blocker)} You can still share the receipt card.</p>` : ""}
+            ${blocker && !voided ? `<p class="helper-text">${escapeHTML(blocker)} You can still share the receipt card.</p>` : ""}
         </div>`,
         footer: `<div class="welcome-footer">
             <button class="button button-secondary" type="button" data-action="close-modal">Done</button>
-            <button class="button button-secondary" type="button" data-action="receipt-text" ${blocker ? "disabled" : ""}>Send receipt as text</button>
-            <button class="button button-whatsapp" type="button" data-action="receipt-share">Send receipt on WhatsApp</button>
+            ${voided ? "" : `<button class="button button-secondary" type="button" data-action="receipt-text" ${blocker ? "disabled" : ""}>Send receipt as text</button>`}
+            ${voided ? "" : `<button class="button button-whatsapp" type="button" data-action="receipt-share">Send receipt on WhatsApp</button>`}
         </div>`
     });
 }
@@ -517,6 +523,7 @@ export async function openReceiptDialog(paymentId, { recorded = false } = {}) {
 function shareReceipt(button) {
     const entry = openReceipt;
     if (!entry) return;
+    if (isVoided(entry.receipt.payment)) return toast("This payment was voided, so its receipt can't be sent.", "error");
     const text = `Payment receipt ${entry.receipt.payment.receipt_number} from ${entry.receipt.gym.name}`;
     button.disabled = true;
     const sharing = entry.file ? shareImageFile(entry.file, { text }) : entry.promise.then((file) => shareImageFile(file, { text }));

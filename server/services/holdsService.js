@@ -117,7 +117,7 @@ export async function holdSettings(gymId, client = supabaseClient) {
 const historyColumns = "id,member_id,membership_id,starts_on,planned_return_on,latest_return_on,ended_on,end_reason,remaining_days,days_held,end_before,end_after,fee_amount,fee_payment_id,approved_by,ended_by,cancelled,cancelled_at,created_at";
 
 // Who approved a hold: their role in this gym, and their sign-in email where it can be read.
-async function approvers(userIds, gymId, client) {
+export async function approvers(userIds, gymId, client) {
     const names = new Map();
     if (!userIds.length) return names;
     const { data } = await client.from("gym_users").select("user_id,role").eq("gym_id", gymId).in("user_id", userIds);

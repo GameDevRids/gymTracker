@@ -44,9 +44,10 @@ import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
 import { applyNavigationTranslations, getLanguage, isSupportedLanguage, setLanguage, t } from "./i18n.js";
 import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
-import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel, whenGymSettingsApplied } from "./modules/upiPayments.js";
+import { handleUpiPaymentAction, loadGymSettings, loadPaymentsPage, methodLabel, openReceiptDialog, paymentsPage, renderUpiTestQr, saveGymSettingsOnApi, updatePaymentQrPanel, whenGymSettingsApplied } from "./modules/upiPayments.js";
 import { upiIdProblem, UTR_PATTERN } from "./upi.js";
-import { welcomePayment } from "./welcomeMessage.js";
+import { openVoidDialog, voidSummary } from "./modules/paymentVoid.js";
+import { amountProblem, balancesDue, chooseMembership, duplicateQuestion, newRequestKey, recentDuplicate, rejectionMessage, rupees } from "./paymentRules.js";
 import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadMemberDevices, manualCheckIn, openCheckInByName, pauseCheckinForPhoto, refreshVisitsSection, renderCheckInPage, searchCheckInMembers, selectVisitsDay, startCheckInScreen, stopCheckInScreen, watchApprovals } from "./modules/attendance.js";
 import { handleCheckinSettingsAction, loadCheckinSettings, saveAttendanceSettings } from "./modules/checkinSettingsUi.js";
 import { editPhotoField, handlePhotoAction, hydratePhotos, loadProfilePhoto, mountEditPhoto, mountFormPhoto, photoFormField, saveFormPhoto } from "./modules/memberPhotos.js";
@@ -281,9 +282,12 @@ function mapPayment(payment) {
         amount: Number(payment.amount),
         date: payment.paid_on,
         method: payment.method.charAt(0).toUpperCase() + payment.method.slice(1),
-        // A hold fee that was given back when its hold was cancelled shows as refunded.
+        // A hold fee given back when its hold was cancelled shows as refunded; a voided one as voided.
         kind: payment.kind || "plan",
-        status: payment.refunded_at ? "refunded" : "paid",
+        status: payment.status === "voided" ? "voided" : payment.refunded_at ? "refunded" : "paid",
+        voidedAt: payment.voided_at || null,
+        voidedByName: payment.voided_by_name || null,
+        voidReason: payment.void_reason || "",
         notes: payment.note || "",
         receiptNumber: payment.receipt_number || "",
         upiReference: payment.upi_reference || ""
@@ -961,7 +965,12 @@ async function saveQuickMember(form) {
     await finishMemberSave(member.id, "Member added and plan assigned.");
 }
 
-async function openPaymentForm(memberId = "", membershipId = "", suggestedAmount = "") {
+// ---------- Record payment ----------
+// What the open form knows: each plan's balance due (from the database), which plan it is for,
+// and whether it was opened from a member's row (then a fully paid member gets their paid status).
+const paymentForms = new WeakMap();
+
+async function openPaymentForm(memberId = "", membershipId = "") {
     let member = memberId ? getMember(memberId) : null;
     if (!member && memberId) {
         // Not loaded yet (for example Record payment on Expiring soon right after sign-in):
@@ -973,29 +982,30 @@ async function openPaymentForm(memberId = "", membershipId = "", suggestedAmount
         }
     }
     if (memberId && !member) return toast("Member was not found.", "error");
-    const membership = member ? getCurrentMembership(member.id) || member.currentMembership : null;
     const choices = [...state.members].sort((a, b) => a.name.localeCompare(b.name)).map((item) => `<option value="${escapeHTML(item.id)}" ${member?.id === item.id ? "selected" : ""}>${escapeHTML(item.name)}${item.memberCode ? ` · ${escapeHTML(item.memberCode)}` : ""}</option>`).join("");
-    // Expiring soon passes the plan price: that payment is for the renewal. Otherwise the
-    // amount is filled with the balance due, read from the database.
-    const renewal = suggestedAmount !== "" && suggestedAmount !== undefined && suggestedAmount !== null;
+    // One request key per opened form: a double tap or a retry saves the payment only once.
     openModal({
         title: t("recordPayment"),
         subtitle: t("paymentSubtitle"),
-        body: `<form id="payment-form" class="form-grid" data-membership-id="${escapeHTML(membershipId || membership?.id || "")}" data-amount-source="${renewal ? "renewal" : "balance"}" novalidate>
+        body: `<form id="payment-form" class="form-grid" data-membership-id="${escapeHTML(membershipId)}" data-request-key="${escapeHTML(newRequestKey())}" novalidate>
             <div class="field full"><label for="form-memberId">${t("member")} *</label><select id="form-memberId" name="memberId" required><option value="">${t("selectMember")}</option>${choices}</select></div>
-            <div class="field"><label for="form-amount">${t("amountCollected")} *</label><input id="form-amount" name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required value="${escapeHTML(renewal ? String(Number(suggestedAmount)) : "")}" aria-describedby="payment-amount-hint"><span class="helper-text" id="payment-amount-hint" aria-live="polite">${renewal ? "Plan price for the renewal." : ""}</span></div>
+            <div class="field full" id="payment-plan-field" hidden><label for="form-membershipId">Plan</label><select id="form-membershipId" name="membershipId"></select><span class="helper-text">More than one plan has money due. Choose which one this payment is for.</span></div>
+            <div class="payment-balance field full" id="payment-balance" role="status" aria-live="polite">${member ? "Checking the balance due…" : "Choose a member to see what is due."}</div>
+            <div class="field"><label for="form-amount">${t("amountCollected")} *</label><input id="form-amount" name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required disabled aria-describedby="payment-amount-error"><span class="helper-text phone-error" id="payment-amount-error" role="alert" hidden></span></div>
             <div class="field"><label for="form-method">${t("paymentMethod")}</label><select id="form-method" name="method">${[["upi", "UPI"], ["cash", "Cash"], ["card", "Card"], ["other", "Other"]].map(([value, label]) => `<option value="${value}" ${value === "upi" ? "selected" : ""}>${label}</option>`).join("")}</select></div>
             <div class="field full" id="payment-qr-panel" aria-live="polite"></div>
             <div class="field" id="payment-utr-field"><label for="form-upiReference">UPI reference (UTR)</label><input id="form-upiReference" name="upiReference" type="text" inputmode="numeric" autocomplete="off" maxlength="12" pattern="[0-9]{12}" placeholder="12 digits, optional"><span class="helper-text">From the payer's UPI app. Stops the same payment being recorded twice.</span></div>
             ${setField("date", t("paidOn"), localISODate(), "date", true)}
             <div class="field full"><label for="form-notes">${t("note")}</label><textarea id="form-notes" name="notes" placeholder="Optional payment note"></textarea></div>
             <p class="note-box field full payment-verify-note" role="note"><strong>Check before you mark it paid.</strong> GymPulse can't see your bank or UPI app. Make sure the money has arrived before you tap Mark as paid.</p>
+            <div class="note-box payment-duplicate field full" id="payment-duplicate" role="alert" hidden><p id="payment-duplicate-text"></p><div class="payment-duplicate-actions"><button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="button" data-action="payment-record-again">Record again</button></div></div>
         </form>`,
-        footer: `<button class="button button-secondary" data-action="close-modal" type="button">${t("cancel")}</button><button class="button button-primary" type="submit" form="payment-form">Mark as paid</button>`
+        footer: `<button class="button button-secondary" data-action="close-modal" type="button">${t("cancel")}</button><button class="button button-primary" type="submit" form="payment-form" id="payment-submit" disabled>Mark as paid</button>`
     });
     const form = document.querySelector("#payment-form");
+    paymentForms.set(form, { balances: [], owing: [], selected: null, payments: [], ready: false, fromRow: Boolean(memberId) });
     refreshPaymentQr(form);
-    if (member && !renewal) prefillPaymentBalance(form, member.id);
+    if (member) loadPaymentBalance(form, member.id);
 }
 
 function paymentFormMember(form) {
@@ -1004,50 +1014,141 @@ function paymentFormMember(form) {
 
 function refreshPaymentQr(form) {
     const member = paymentFormMember(form);
-    const membership = member ? getCurrentMembership(member.id) || member.currentMembership : null;
-    updatePaymentQrPanel(form, { memberCode: member?.memberCode || "", planName: membership?.plan_name || "" });
+    const planName = paymentForms.get(form)?.selected?.membership?.plan_name || (member ? (getCurrentMembership(member.id) || member.currentMembership)?.plan_name : "") || "";
+    updatePaymentQrPanel(form, { memberCode: member?.memberCode || "", planName });
 }
 
-// Fills the amount with the balance due on the membership, from the database.
-async function prefillPaymentBalance(form, memberId) {
-    const hint = form.querySelector("#payment-amount-hint");
+function paymentBalanceNote(form, html, tone = "") {
+    const note = form.querySelector("#payment-balance");
+    if (!note) return;
+    note.className = `payment-balance field full${tone ? ` is-${tone}` : ""}`;
+    note.innerHTML = html;
+}
+
+// Save is possible only once the balance is known, something is due, and the amount fits.
+function checkPaymentAmount(form) {
+    const info = paymentForms.get(form);
+    const amountInput = form.elements.amount;
+    const error = form.querySelector("#payment-amount-error");
+    const problem = info?.selected ? amountProblem(amountInput.value, info.selected.balance) : "";
+    const show = Boolean(problem && amountInput.value !== "");
+    if (error) { error.hidden = !show; error.textContent = show ? problem : ""; }
+    amountInput.setAttribute("aria-invalid", String(show));
+    const submit = document.querySelector("#payment-submit");
+    // While "Record it again?" is showing, its own buttons answer it.
+    const asking = form.querySelector("#payment-duplicate")?.hidden === false;
+    if (submit) submit.disabled = !info?.ready || !info.selected || Boolean(problem) || form.dataset.saving === "true" || asking;
+    return problem;
+}
+
+// The plan the form is for: its balance, and the amount filled in (never more than is due).
+function applyPaymentPlan(form) {
+    const info = paymentForms.get(form);
+    const row = info.selected;
+    form.dataset.membershipId = row.membership.id;
+    const amountInput = form.elements.amount;
+    amountInput.disabled = false;
+    amountInput.max = String(row.balance);
+    if (form.dataset.amountTouched !== "true" || Number(amountInput.value) > row.balance) amountInput.value = String(row.balance);
+    paymentBalanceNote(form, `<strong>Balance due: ${escapeHTML(rupees(row.balance))}</strong><small>${escapeHTML(row.membership.plan_name || "Plan")} · fee ${escapeHTML(rupees(row.fee))}${row.paid > 0 ? ` · paid ${escapeHTML(rupees(row.paid))}` : ""}</small>`);
+    checkPaymentAmount(form);
+    refreshPaymentQr(form);
+}
+
+function showPaymentFullyPaid(form, balances) {
+    const info = paymentForms.get(form);
+    const latest = balances.at(-1);
+    info.selected = null;
+    form.dataset.membershipId = latest?.membership?.id || "";
+    form.querySelector("#payment-plan-field").hidden = true;
+    const amountInput = form.elements.amount;
+    amountInput.value = "";
+    amountInput.disabled = true;
+    paymentBalanceNote(form, `<strong>Fully paid</strong><small>${escapeHTML(latest?.membership?.plan_name || "Plan")}: ${escapeHTML(rupees(latest?.fee || 0))} paid in full. Nothing more is due. Use Renew to collect for the next plan.</small>`, "paid");
+    checkPaymentAmount(form);
+}
+
+// Opened from a member's row and nothing is due: their paid status instead of a form.
+function showPaidStatus(member, balances) {
+    const latest = balances.at(-1);
+    openModal({
+        title: "Fully paid",
+        subtitle: escapeHTML(member?.name || ""),
+        body: `<div class="paid-status" role="status"><span class="renew-tick" aria-hidden="true">✓</span><div><p><strong>Nothing is due.</strong></p><p>${escapeHTML(latest?.membership?.plan_name || "Their plan")}: ${escapeHTML(rupees(latest?.fee || 0))} paid in full.</p><p class="helper-text">To take money for the next plan, use Renew.</p></div></div>`,
+        footer: `<button class="button button-secondary" type="button" data-action="close-modal">Close</button>${member ? `<button class="button button-primary" type="button" data-action="renew-member" data-id="${escapeHTML(member.id)}">Renew</button>` : ""}`
+    });
+}
+
+// Reads the member's plans and payments from the database and works out what is due on each.
+async function loadPaymentBalance(form, memberId) {
+    const info = paymentForms.get(form);
     const request = String(Math.random());
     form.dataset.prefillRequest = request;
-    if (hint) hint.textContent = "Checking the balance due…";
+    Object.assign(info, { ready: false, selected: null });
+    form.elements.amount.disabled = true;
+    paymentBalanceNote(form, "Checking the balance due…");
+    checkPaymentAmount(form);
     const facts = await loadWelcomeFacts(memberId);
     if (!form.isConnected || form.dataset.prefillRequest !== request) return;
+    const member = getMember(memberId);
     if (facts.status !== "ready") {
-        if (hint) hint.textContent = "The balance due could not be loaded. Enter the amount.";
+        paymentBalanceNote(form, `<strong>The balance due could not be loaded.</strong><small>${escapeHTML(facts.message || "Close the form and try again.")}</small>`, "error");
         return;
     }
-    const membership = facts.memberships.find((row) => row.id === form.dataset.membershipId)
-        || facts.memberships.find((row) => row.id === getCurrentMembership(memberId)?.id);
-    const payment = welcomePayment(membership, facts.payments);
-    if (!membership || !payment) {
-        if (hint) hint.textContent = "No membership plan is assigned, so there is no balance to fill in.";
+    const balances = balancesDue(facts.memberships, facts.payments);
+    const preferred = form.dataset.membershipId || getCurrentMembership(memberId)?.id || member?.currentMembership?.id || "";
+    const { selected, owing } = chooseMembership(balances, preferred);
+    Object.assign(info, { balances, owing, selected, payments: facts.payments, ready: true });
+    if (!balances.length) {
+        paymentBalanceNote(form, "<strong>No plan assigned</strong><small>Nothing is due. Assign a plan first, then record its payment.</small>", "error");
+        checkPaymentAmount(form);
         return;
     }
-    form.dataset.membershipId = membership.id;
-    if (payment.balance > 0) {
-        if (form.dataset.amountTouched !== "true") form.elements.amount.value = String(payment.balance);
-        if (hint) hint.textContent = `Balance due on ${membership.plan_name}: ${formatINR(payment.balance)}.`;
-    } else if (hint) {
-        hint.textContent = `${membership.plan_name} is paid in full.`;
+    if (!selected) {
+        if (info.fromRow) { showPaidStatus(member, balances); return; }
+        showPaymentFullyPaid(form, balances);
+        return;
     }
-    refreshPaymentQr(form);
+    form.querySelector("#payment-plan-field").hidden = owing.length < 2;
+    form.elements.membershipId.innerHTML = owing.map((row) => `<option value="${escapeHTML(row.membership.id)}" ${row === selected ? "selected" : ""}>${escapeHTML(row.membership.plan_name || "Plan")} · ${escapeHTML(formatDate(row.membership.start_date))} to ${escapeHTML(formatDate(row.membership.end_date))} · ${escapeHTML(rupees(row.balance))} due</option>`).join("");
+    applyPaymentPlan(form);
+}
+
+function hidePaymentDuplicate(form) {
+    const box = form.querySelector("#payment-duplicate");
+    if (box) box.hidden = true;
+    form.dataset.duplicateConfirmed = "false";
 }
 
 function onPaymentFormEdit(target) {
     const form = target.form;
     if (!form || form.id !== "payment-form") return false;
-    if (target.name === "amount") form.dataset.amountTouched = "true";
+    const info = paymentForms.get(form);
+    if (target.name === "amount") {
+        form.dataset.amountTouched = "true";
+        hidePaymentDuplicate(form);
+        checkPaymentAmount(form);
+    }
+    if (target.name === "membershipId" && info) {
+        info.selected = info.owing.find((row) => row.membership.id === target.value) || info.selected;
+        form.dataset.amountTouched = "false";
+        hidePaymentDuplicate(form);
+        applyPaymentPlan(form);
+    }
     if (target.name === "memberId" && target.matches("select")) {
         const member = paymentFormMember(form);
-        form.dataset.membershipId = member ? getCurrentMembership(member.id)?.id || member.currentMembership?.id || "" : "";
+        form.dataset.membershipId = "";
         form.dataset.amountTouched = "false";
-        form.dataset.amountSource = "balance";
         form.elements.amount.value = "";
-        if (member) prefillPaymentBalance(form, member.id);
+        form.querySelector("#payment-plan-field").hidden = true;
+        hidePaymentDuplicate(form);
+        if (info) info.fromRow = false;
+        if (member) loadPaymentBalance(form, member.id);
+        else {
+            Object.assign(info, { ready: false, selected: null });
+            paymentBalanceNote(form, "Choose a member to see what is due.");
+            checkPaymentAmount(form);
+        }
     }
     if (target.name === "upiReference") target.value = target.value.replace(/\D/g, "").slice(0, 12);
     refreshPaymentQr(form);
@@ -1091,7 +1192,17 @@ function handleAction(action, target) {
             })();
             break;
         }
-        case "record-payment": openPaymentForm(id, target.dataset.membershipId || "", target.dataset.amount || ""); break;
+        case "record-payment": openPaymentForm(id, target.dataset.membershipId || ""); break;
+        case "payment-record-again": {
+            // The owner saw "You recorded ₹X … a few minutes ago" and chose to record it again.
+            const form = document.querySelector("#payment-form");
+            if (form) {
+                form.querySelector("#payment-duplicate").hidden = true;
+                form.dataset.duplicateConfirmed = "true";
+                form.requestSubmit();
+            }
+            break;
+        }
         case "check-in":
             if (id) manualCheckIn(id, () => { rerenderAttendanceViews(); loadMemberAttendance(id, rerenderAttendanceViews); });
             else openCheckInByName();
@@ -1119,6 +1230,7 @@ function handleAction(action, target) {
         case "copy-message": copyMessage(target.dataset.message || ""); break;
         // Receipts are numbered and kept by the server.
         case "receipt": openReceiptDialog(id); break;
+        case "payment-void": askVoidPayment(id); break;
         default:
             if (!handleEnquiryAction(action, target, { openMemberForm, onChange: rerenderEnquiries })) handleHoldAction(action, target, afterHoldChange);
             break;
@@ -1262,13 +1374,15 @@ async function saveMember(form) {
     if (isNewMember && form.dataset.enquiryId) await linkEnquiryToMember(form.dataset.enquiryId, saved.id, rerenderEnquiries);
 
     if (initialPayment > 0) {
-        const payment = await createPayment({
+        form.dataset.paymentKey ||= newRequestKey();
+        const { payment } = await createPayment({
             member_id: saved.id,
             membership_id: createdAssignment?.id || null,
             amount: initialPayment,
             paid_on: localISODate(),
             method: "upi",
-            note: "Initial payment"
+            note: "Initial payment",
+            idempotency_key: form.dataset.paymentKey
         });
         if (!payment) throw new Error("The payments API did not return the initial payment.");
         const mappedPayment = mapPayment(payment);
@@ -1289,41 +1403,100 @@ async function saveMember(form) {
 }
 
 async function savePayment(form) {
+    const info = paymentForms.get(form);
     const values = new FormData(form);
     const member = getMember(String(values.get("memberId") || ""));
     if (!member) throw new Error("Select a valid member.");
+    if (!info?.ready) throw new Error("Wait for the balance due to load.");
+    if (!info.selected) throw new Error("Already fully paid. Nothing more is due.");
     const amount = Number(values.get("amount"));
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Payment amount must be greater than zero.");
+    const problem = amountProblem(amount, info.selected.balance);
+    if (problem) { checkPaymentAmount(form); throw new Error(problem); }
     const method = String(values.get("method"));
     const upiReference = method === "upi" ? String(values.get("upiReference") || "").replace(/\s/g, "") : "";
     if (upiReference && !UTR_PATTERN.test(upiReference)) throw new Error("The UPI reference (UTR) must be 12 digits.");
     if (form.dataset.saving === "true") return;
-    const submit = document.querySelector('[type="submit"][form="payment-form"]');
+    const submit = document.querySelector("#payment-submit");
     form.dataset.saving = "true";
-    if (submit) submit.disabled = true;
-    let saved;
+    if (submit) { submit.disabled = true; submit.textContent = "Saving…"; }
     try {
-        saved = await createPayment({
-            member_id: member.id,
-            membership_id: form.dataset.membershipId || null,
-            amount,
-            method,
-            paid_on: String(values.get("date")),
-            note: String(values.get("notes") || "").trim() || null,
-            upi_reference: upiReference || null
-        });
+        // The same amount for this member in the last 10 minutes: ask before recording it again.
+        if (form.dataset.duplicateConfirmed !== "true") {
+            const latest = await fetchMemberPayments(member.id).catch(() => info.payments || []);
+            const duplicate = recentDuplicate(latest, { amount });
+            if (duplicate) {
+                const box = form.querySelector("#payment-duplicate");
+                form.querySelector("#payment-duplicate-text").textContent = duplicateQuestion(duplicate, member.name);
+                box.hidden = false;
+                box.scrollIntoView?.({ block: "nearest" });
+                return;
+            }
+        }
+        let result;
+        try {
+            result = await createPayment({
+                member_id: member.id,
+                membership_id: info.selected.membership.id,
+                amount,
+                method,
+                paid_on: String(values.get("date")),
+                note: String(values.get("notes") || "").trim() || null,
+                upi_reference: upiReference || null,
+                idempotency_key: form.dataset.requestKey
+            });
+        } catch (error) {
+            showPaymentRejection(form, member.id, error);
+            return;
+        }
+        const saved = result?.payment;
+        if (!saved) throw new Error("The payments API did not return the saved record.");
+        const mapped = mapPayment(saved);
+        if (!result.replayed && member.memberCode) addPaidAmount(member.id, mapped.amount);
+        state.apiMemberPayments[member.id] = [mapped, ...(state.apiMemberPayments[member.id] || []).filter((item) => item.id !== mapped.id)];
+        safePersist(null);
+        loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
+        refreshTotals(member.id);
+        if (result.replayed) toast("This payment was already saved. Here is its receipt.");
+        await openReceiptDialog(saved.id, { recorded: true });
     } finally {
         form.dataset.saving = "false";
-        if (submit?.isConnected) submit.disabled = false;
+        if (submit?.isConnected) { submit.textContent = "Mark as paid"; checkPaymentAmount(form); }
     }
-    if (!saved) throw new Error("The payments API did not return the saved record.");
-    const mapped = mapPayment(saved);
-    if (member.memberCode) addPaidAmount(member.id, mapped.amount);
-    state.apiMemberPayments[member.id] = [mapped, ...(state.apiMemberPayments[member.id] || []).filter((item) => item.id !== mapped.id)];
-    safePersist(null);
-    loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
-    refreshTotals(member.id);
-    await openReceiptDialog(saved.id, { recorded: true });
+}
+
+// The server refused the payment: say why next to the amount, and show what is due now.
+function showPaymentRejection(form, memberId, error) {
+    const message = rejectionMessage(error);
+    const info = paymentForms.get(form);
+    if (error?.code === "fully_paid") {
+        loadPaymentBalance(form, memberId);
+    } else if (error?.code === "over_balance" && info?.selected && error.details?.balance_due !== undefined) {
+        info.selected.balance = Number(error.details.balance_due);
+        applyPaymentPlan(form);
+    }
+    const errorText = form.querySelector("#payment-amount-error");
+    if (errorText) { errorText.textContent = message; errorText.hidden = false; }
+    toast(message, "error");
+}
+
+// Void (owner only): find the payment in what is loaded, ask why, then reload balances and lists.
+function askVoidPayment(paymentId) {
+    const fromPage = paymentsPage.payments.find((row) => row.id === paymentId);
+    const fromMember = Object.values(state.apiMemberPayments).flat().find((row) => row.id === paymentId);
+    const memberId = fromPage?.member_id || fromMember?.memberId || "";
+    const payment = fromPage
+        ? { id: fromPage.id, receipt_number: fromPage.receipt_number, amount: fromPage.amount, memberName: fromPage.member ? displayName(fromPage.member.full_name) : "" }
+        : fromMember ? { id: fromMember.id, receiptNumber: fromMember.receiptNumber, amount: fromMember.amount, memberName: getMember(memberId)?.name || "" } : null;
+    if (!payment) return toast("That payment is not loaded. Open the Payments page and try again.", "error");
+    openVoidDialog(payment, ({ payment: voided }) => {
+        if (voided && memberId) {
+            const mapped = mapPayment(voided);
+            state.apiMemberPayments[memberId] = (state.apiMemberPayments[memberId] || []).map((row) => (row.id === mapped.id ? mapped : row));
+        }
+        loadPaymentsPage(() => { if (["payments", "overview"].includes(currentView)) render(); });
+        refreshTotals(memberId);
+        render();
+    });
 }
 
 // After an import: every member, plan, membership and payment it added is reloaded.
@@ -1379,6 +1552,7 @@ async function fetchAllPayments() {
     }
 }
 
+// Voided payments are listed with their status (receipt numbers stay complete) and are not money collected.
 function paymentExportRow(payment) {
     return {
         receiptNumber: payment.receipt_number,
@@ -1387,6 +1561,8 @@ function paymentExportRow(payment) {
         memberCode: payment.member?.member_code || "",
         amount: Number(payment.amount),
         method: methodLabel(payment.method),
+        status: payment.status === "voided" ? "Voided" : payment.refunded_at ? "Refunded" : "Paid",
+        voided: payment.status === "voided" ? voidSummary(payment) : "",
         upiReference: payment.upi_reference || "",
         note: payment.note || ""
     };

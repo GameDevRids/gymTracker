@@ -2,6 +2,8 @@
 // server tests share this file. A Cloud API version would map the same values onto the
 // numbered parameters of an approved Meta template.
 
+import { countsTowardPlan } from "./paymentRules.js";
+
 export const WELCOME_LANGUAGES = ["en", "hi", "mr"];
 
 export const WELCOME_PLACEHOLDERS = ["name", "gym_name", "plan", "start_date", "expiry_date", "member_code", "gym_phone", "gym_address", "fee", "amount_paid", "balance"];
@@ -58,7 +60,8 @@ export function welcomePayment(membership, payments = []) {
     const rawFee = membership?.total_fees ?? membership?.price;
     if (!membership || rawFee === null || rawFee === undefined || rawFee === "" || !Number.isFinite(Number(rawFee))) return null;
     const fee = money(rawFee);
-    const linked = (Array.isArray(payments) ? payments : []).filter((payment) => payment.membership_id && payment.membership_id === membership.id);
+    // Plan payments only: a hold fee is not part of the fee, and a voided payment no longer counts.
+    const linked = (Array.isArray(payments) ? payments : []).filter((payment) => payment.membership_id && payment.membership_id === membership.id && countsTowardPlan(payment));
     const paid = money(linked.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
     const methods = [...new Set(linked.map((payment) => PAYMENT_METHOD_LABELS[payment.method] || String(payment.method || "")).filter(Boolean))];
     return { fee, paid, balance: Math.max(0, money(fee - paid)), methods, hasPayment: paid > 0 };
