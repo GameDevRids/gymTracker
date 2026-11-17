@@ -8,6 +8,7 @@ import { welcomePhone } from "../welcomeMessage.js";
 import { buildFollowupMessage } from "../followupMessage.js";
 import { renderWelcomeTemplateSettings } from "./welcomeUi.js";
 import { renderReminderTemplateSettings } from "./expiryReminder.js";
+import { renderEnquiryTemplateSettings } from "./enquiryTemplateUi.js";
 import { methodLabel, paymentsPage, renderUpiTestQr } from "./upiPayments.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { renderAttendanceSettings } from "./checkinSettingsUi.js";
@@ -282,7 +283,7 @@ function renderPaymentSettings() {
 }
 
 function renderMessageSettings() {
-    return `${renderWelcomeTemplateSettings()}${renderReminderTemplateSettings()}
+    return `${renderWelcomeTemplateSettings()}${renderReminderTemplateSettings()}${renderEnquiryTemplateSettings()}
         <section class="card settings-section"><h2>Other messages</h2><p class="helper-text">The renewal message to lapsed members, the follow-up check-in, the welcome back message after a plan hold and receipts use built-in wording in English, Hindi and Marathi, chosen by your gym's language (Gym details). They open in WhatsApp with the text filled in, only for members who agreed to messages, and every one is added to the member's WhatsApp history.</p></section>`;
 }
 

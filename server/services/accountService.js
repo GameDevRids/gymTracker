@@ -1,4 +1,5 @@
 import { supabaseClient } from "../config/database.js";
+import { purgeOldEnquiries } from "./enquiriesService.js";
 import { logger } from "../config/logger.js";
 import { captureException } from "../config/monitoring.js";
 import { GYM_DELETION_GRACE_DAYS, TERMS_VERSION } from "../../assets/js/legal.js";
@@ -207,9 +208,13 @@ export async function purgeDueGyms(client = supabaseClient, { limit = 5 } = {}) 
     return { erased };
 }
 
-/** Runs the sweep shortly after start and then every hour. Returns a function that stops it. */
+/**
+ * Runs the sweep shortly after start and then every hour. Returns a function that stops it. The same
+ * hourly run deletes enquiries that did not join and have not changed for 90 days (migration 024), so
+ * that happens even in a gym where nobody opens the Enquiries page.
+ */
 export function startGymDeletionSweep({ intervalMs = 60 * 60 * 1000, firstRunMs = 60 * 1000 } = {}) {
-    const run = () => purgeDueGyms().catch(() => {});
+    const run = () => Promise.all([purgeDueGyms().catch(() => {}), purgeOldEnquiries().catch(() => 0)]);
     const first = setTimeout(run, firstRunMs);
     const every = setInterval(run, intervalMs);
     first.unref?.();

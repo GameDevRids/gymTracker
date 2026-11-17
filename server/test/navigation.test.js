@@ -14,12 +14,12 @@ const between = (start, end) => html.slice(html.indexOf(start), html.indexOf(end
 
 // ---------- The pages ----------
 
-test("the sidebar is Today, Members, Check-in, Payments, Renewals, Plans, Reports, Settings, in that order", () => {
-    assert.deepEqual(viewsIn(between('<nav class="navigation"', "</aside>")), ["overview", "members", "scan", "payments", "renewals", "plans", "reports", "settings"]);
-    assert.deepEqual(VIEW_IDS, ["overview", "members", "scan", "payments", "renewals", "plans", "reports", "settings"]);
+test("the sidebar is Today, Members, Enquiries, Check-in, Payments, Renewals, Plans, Reports, Settings, in that order", () => {
+    assert.deepEqual(viewsIn(between('<nav class="navigation"', "</aside>")), ["overview", "members", "enquiries", "scan", "payments", "renewals", "plans", "reports", "settings"]);
+    assert.deepEqual(VIEW_IDS, ["overview", "members", "enquiries", "scan", "payments", "renewals", "plans", "reports", "settings"]);
     assert.equal(DEFAULT_VIEW, "overview");
     const labels = [...between('<nav class="navigation"', "</aside>").matchAll(/class="nav-label">([^<]+)</g)].map((match) => match[1]);
-    assert.deepEqual(labels, ["Today", "Members", "Check-in", "Payments", "Renewals", "Plans", "Reports", "Settings"]);
+    assert.deepEqual(labels, ["Today", "Members", "Enquiries", "Check-in", "Payments", "Renewals", "Plans", "Reports", "Settings"]);
 });
 
 test("the removed pages and groups are gone from the markup", () => {

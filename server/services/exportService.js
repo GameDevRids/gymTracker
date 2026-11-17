@@ -34,6 +34,8 @@ async function readAll(client, table, columns, gymId, order) {
     }
 }
 
+const ENQUIRY_SOURCE_NAMES = { walk_in: "Walk-in", instagram: "Instagram", friend: "Friend", other: "Other" };
+const ENQUIRY_STAGE_NAMES = { new: "New", contacted: "Contacted", joined: "Joined", not_interested: "Not interested" };
 const date = (value) => (/^\d{4}-\d{2}-\d{2}/.test(String(value || "")) ? { date: String(value).slice(0, 10) } : "");
 const money = (value) => Math.round(Number(value || 0) * 100) / 100;
 const yesNo = (value) => (value ? "Yes" : "No");
@@ -45,6 +47,9 @@ const CHECKIN_METHODS = { member_qr: "QR card", qr: "QR card", entrance_poster: 
 export async function buildGymWorkbook(gymId, client = supabaseClient, today = indiaDate(new Date())) {
     if (!client) throw new ExportError(503, "Supabase is not configured.");
     if (!gymId) throw new ExportError(403, "Gym is required.");
+    // Enquiries (migration 024): before that migration there are none to include.
+    const enquiries = await readAll(client, "enquiries", "full_name,phone,interest_plan_id,interest_text,source,note,stage,follow_up_on,last_contacted_at,whatsapp_consent,whatsapp_consent_at,joined_member_id,created_at", gymId, ["created_at"]).catch(() => []);
+    const plansById = new Map(((await client.from("membership_plans").select("id,name").eq("gym_id", gymId)).data || []).map((plan) => [plan.id, plan.name]));
     const [members, memberships, payments, attendance] = await Promise.all([
         readAll(client, "members", "id,member_code,full_name,phone,email,gender,date_of_birth,status,notes,emergency_contact,follow_up_status,whatsapp_opt_in,created_at,archived_at", gymId, ["created_at", "id"]),
         readAll(client, "member_memberships", "id,member_id,plan_name,duration_days,price,total_fees,start_date,end_date,status,created_at", gymId, ["start_date", "id"]),
@@ -100,6 +105,14 @@ export async function buildGymWorkbook(gymId, client = supabaseClient, today = i
         { name: "Members", rows: [["Member code", "Name", "Phone", "Email", "Account", "Current plan", "Plan start", "Plan end", "Plan status", "Total fees (₹)", "Paid (₹)", "Balance (₹)", "WhatsApp consent", "Joined", "Archived on", "Gender", "Date of birth", "Emergency contact", "Follow-up", "Notes"], ...memberRows], widths: [17, 24, 13, 24, 10, 18, 12, 12, 11, 13, 11, 12, 10, 12, 12, 10, 13, 16, 12, 30] },
         { name: "Memberships", rows: [["Member code", "Name", "Plan", "Start", "End", "Days", "Plan price (₹)", "Fee (₹)", "Status", "Added on"], ...membershipRows], widths: [17, 24, 18, 12, 12, 7, 13, 11, 11, 12] },
         { name: "Payments", rows: [["Receipt", "Paid on", "Member code", "Name", "Amount (₹)", "Method", "UPI reference (UTR)", "Note"], ...paymentRows], widths: [11, 12, 17, 24, 12, 9, 16, 30] },
-        { name: "Attendance", rows: [["Date", "Time (India)", "Member code", "Name", "Method", "Membership at check-in"], ...attendanceRows], widths: [12, 11, 17, 24, 10, 18] }
+        { name: "Attendance", rows: [["Date", "Time (India)", "Member code", "Name", "Method", "Membership at check-in"], ...attendanceRows], widths: [12, 11, 17, 24, 10, 18] },
+        { name: "Enquiries", rows: [["Enquired on", "Name", "Phone", "Interested in", "Source", "Stage", "Follow-up", "Last contacted", "WhatsApp consent", "Joined as member", "Note"], ...enquiries.map((enquiry) => [
+            date(indiaDate(enquiry.created_at)), enquiry.full_name, enquiry.phone,
+            enquiry.interest_plan_id ? plansById.get(enquiry.interest_plan_id) || "" : enquiry.interest_text || "Not sure",
+            ENQUIRY_SOURCE_NAMES[enquiry.source] || enquiry.source, ENQUIRY_STAGE_NAMES[enquiry.stage] || enquiry.stage,
+            date(enquiry.follow_up_on), enquiry.last_contacted_at ? date(indiaDate(enquiry.last_contacted_at)) : "",
+            enquiry.whatsapp_consent ? `Yes, ${indiaDate(enquiry.whatsapp_consent_at)}` : "No",
+            enquiry.joined_member_id ? code(enquiry.joined_member_id) || "Yes" : "", enquiry.note || ""
+        ])], widths: [12, 24, 15, 18, 11, 14, 12, 14, 18, 16, 30] }
     ], { deflateRaw: (bytes) => new Uint8Array(deflateRawSync(bytes)) });
 }

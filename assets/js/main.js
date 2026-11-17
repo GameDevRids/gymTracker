@@ -37,6 +37,8 @@ import { markReminderSent, reminderBlocker, reminderKey, renderExpiring } from "
 import { renderOperationsPage, drawAnalyticsCharts, renderFollowups, retentionRows } from "./modules/operations.js";
 import { DEFAULT_VIEW, renewalsBadgeCount, resolveTab, resolveView } from "./navigation.js";
 import { renderRenewalsPage } from "./modules/renewalsPage.js";
+import { dueEnquiries, enquiries, enquiryTab, handleEnquiryAction, linkEnquiryToMember, loadEnquiries, recordEnquiryMessage, renderEnquiriesPage, setEnquiryTab } from "./modules/enquiriesPage.js";
+import { handleEnquiryTemplateAction, handleEnquiryTemplateEvent, handleEnquiryTemplateSubmit, loadEnquiryTemplates } from "./modules/enquiryTemplateUi.js";
 import { settingsPage, showSettingsList, showSettingsSection } from "./modules/settingsPage.js";
 import { openModal, closeModal } from "./components/modal.js";
 import { toast } from "./components/toast.js";
@@ -69,7 +71,7 @@ const page = document.querySelector("#page-content");
 // The pages: Today, Members, Check-in, Payments, Renewals, Plans, Reports, Settings (and a member's
 // profile). Older page ids still work as links and saved pages: see navigation.js.
 const viewTitles = {
-    overview: "Today", members: "Members", scan: "Check-in", payments: "Payments", renewals: "Renewals",
+    overview: "Today", members: "Members", enquiries: "Enquiries", scan: "Check-in", payments: "Payments", renewals: "Renewals",
     plans: "Membership plans", reports: "Reports", settings: "Settings", profile: "Member profile"
 };
 // Conveniences remembered in this browser (storage.js): the last page, member filters and the
@@ -81,6 +83,7 @@ const MEMBER_SORTS = ["name", "expiry", "joined"];
 const startPage = resolveView(window.location.hash) || resolveView(uiPreferences.view);
 let currentView = startPage && startPage.view !== "profile" ? startPage.view : DEFAULT_VIEW;
 let renewalsTab = resolveTab(startPage?.tab || uiPreferences.renewalsTab);
+setEnquiryTab(uiPreferences.enquiryTab);
 let profileId = "";
 let memberFilters = {
     search: "",
@@ -172,6 +175,7 @@ function startAuthenticatedApp(session) {
     loadExpiringMemberships();
     loadSummary(rerenderSummaryViews);
     loadSetupPlans(() => { if (currentView === "overview") render(); });
+    if (currentView === "enquiries") { loadEnquiries(rerenderEnquiries); loadEnquiryTemplates().then(() => { if (currentView === "enquiries") render(); }); }
     if (currentView === "renewals") setLapsedList(renewalsTab);
     if (currentView === "renewals" && (renewalsTab === "lapsed" || renewalsTab === "old")) loadLapsed(renewalsTab, rerenderLapsed);
     // Loaded early so the "Member added" dialog and Expiring soon can open WhatsApp without waiting.
@@ -302,9 +306,10 @@ function render() {
         link.setAttribute("aria-current", active ? "page" : "false");
     });
     document.querySelector('[data-action="mobile-more"]')?.classList.toggle("active", !mobilePrimaryViews.includes(currentView));
-    const titleKeys = { overview: "today", scan: "checkin", members: "members", plans: "plans", payments: "payments", renewals: "renewals", reports: "reports", settings: "settings" };
+    const titleKeys = { overview: "today", scan: "checkin", members: "members", enquiries: "enquiries", plans: "plans", payments: "payments", renewals: "renewals", reports: "reports", settings: "settings" };
     document.querySelector("#current-page").textContent = titleKeys[currentView] ? t(titleKeys[currentView]) : viewTitles[currentView] || "Today";
     updateRenewalsBadge();
+    updateEnquiriesBadge();
     document.querySelector("#gym-name-label").textContent = state.gym.name;
     document.querySelector(".gym-avatar").textContent = state.gym.name.trim().slice(0, 1).toUpperCase() || "G";
     const now = new Date();
@@ -329,6 +334,22 @@ function updateRenewalsBadge() {
     }
 }
 
+// The Enquiries badge: open enquiries whose follow-up is due today or overdue.
+function updateEnquiriesBadge() {
+    const count = dueEnquiries() ?? currentSummary().data?.enquiries_due ?? 0;
+    const badge = document.querySelector("#enquiries-count");
+    if (!badge) return;
+    badge.textContent = count > 99 ? "99+" : String(count);
+    badge.hidden = !count;
+}
+
+// After an enquiry changes: the page, Today's Needs attention and the badge.
+function rerenderEnquiries() {
+    if (enquiries.status === "idle") loadEnquiries(rerenderEnquiries);
+    if (["enquiries", "overview"].includes(currentView)) render();
+    else updateEnquiriesBadge();
+}
+
 // The tab's own list, drawn inside the Renewals page.
 function renewalsBody() {
     if (renewalsTab === "expiring") return renderExpiring(expiringMemberships, expiringStatus, expiryReminderTemplate(), remindedKeys());
@@ -346,7 +367,9 @@ function renewalsCounts() {
 }
 
 function renderPage(page) {
-    if (currentView === "renewals") {
+    if (currentView === "enquiries") {
+        page.innerHTML = renderEnquiriesPage();
+    } else if (currentView === "renewals") {
         page.innerHTML = renderRenewalsPage({ tab: renewalsTab, counts: renewalsCounts(), body: renewalsBody() });
     } else if (currentView === "overview") {
         page.innerHTML = renderDashboard();
@@ -447,6 +470,10 @@ function navigate(id, tab) {
         setLapsedList(renewalsTab);
         saveUiPreferences({ renewalsTab });
     }
+    if (view === "enquiries") {
+        setEnquiryTab(target.tab || tab || enquiryTab());
+        saveUiPreferences({ enquiryTab: enquiryTab() });
+    }
     if (view === "settings") {
         // A link to a section opens it (a phone then shows just that section); the sidebar link shows the list.
         const section = target.section || tab;
@@ -460,6 +487,10 @@ function navigate(id, tab) {
     syncHash(view);
     if (view === "overview") loadSetupPlans(() => { if (currentView === "overview") render(); });
     render();
+    if (view === "enquiries") {
+        loadEnquiries(rerenderEnquiries);
+        loadEnquiryTemplates().then(() => { if (currentView === "enquiries") render(); });
+    }
     if (view === "renewals") {
         loadExpiringMemberships();
         if (renewalsTab === "lapsed" || renewalsTab === "old") loadLapsed(renewalsTab, rerenderLapsed);
@@ -470,6 +501,7 @@ function navigate(id, tab) {
         const renderSettings = () => { if (currentView === "settings") render(); };
         loadWelcomeTemplates({ force: true }).then(renderSettings);
         loadReminderTemplates({ force: true }).then(renderSettings);
+        loadEnquiryTemplates({ force: true }).then(renderSettings);
         loadGymSettings().then(renderSettings);
         loadCheckinSettings().then(renderSettings);
         loadRenewalSettings().then(renderSettings);
@@ -643,6 +675,12 @@ function syncHash(view) {
     }
 }
 
+globalThis.addEventListener("gympulse:open-member", (event) => {
+    if (!event.detail?.id) return;
+    profileId = event.detail.id;
+    navigate("profile");
+});
+
 window.addEventListener("hashchange", () => {
     const target = resolveView(window.location.hash);
     if (!target || target.view === "profile" || document.querySelector("#app-shell")?.hidden) return;
@@ -740,7 +778,11 @@ async function loadMemberFormPlans(form) {
     }
 }
 
-function openMemberForm(memberId = "") {
+/**
+ * The Add / Edit member form. fromEnquiry (Join now, modules/enquiriesPage.js): { enquiryId, name, phone,
+ * whatsappOptIn, consentAt } fills in the new member; the enquiry is marked Joined only after they are saved.
+ */
+function openMemberForm(memberId = "", fromEnquiry = null) {
     const member = memberId ? getMember(memberId) : null;
     if (memberId && !member) return toast("Member was not found.", "error");
     const isEdit = Boolean(member);
@@ -758,6 +800,22 @@ function openMemberForm(memberId = "") {
     } else {
         loadMemberFormPlans(form);
         mountFormPhoto(form);
+        if (fromEnquiry) fillFromEnquiry(form, fromEnquiry);
+    }
+}
+
+function fillFromEnquiry(form, enquiry) {
+    form.dataset.enquiryId = enquiry.enquiryId;
+    form.elements.name.value = enquiry.name || "";
+    form.elements.phone.value = enquiry.phone || "";
+    // The visitor agreed on the staff phone when they enquired: that consent comes with them.
+    if (enquiry.whatsappOptIn) {
+        form.dataset.enquiryConsent = "true";
+        form.elements.whatsappOptIn.checked = true;
+        const note = document.createElement("span");
+        note.className = "helper-text";
+        note.textContent = `Agreed when they enquired${enquiry.consentAt ? `, on ${formatDate(String(enquiry.consentAt).slice(0, 10))}` : ""}.`;
+        form.elements.whatsappOptIn.closest(".field")?.append(note);
     }
 }
 
@@ -824,11 +882,11 @@ function consentField() {
 }
 
 // Records consent through the consent endpoint (migration 009), after the member exists.
-async function recordFormConsent(memberId, optIn) {
+async function recordFormConsent(memberId, optIn, source = "staff_form") {
     const member = getMember(memberId);
     if (!member || optIn === (member.whatsappOptIn === true)) return;
     try {
-        await setWhatsAppConsentOnApi(memberId, optIn, "staff_form");
+        await setWhatsAppConsentOnApi(memberId, optIn, source);
     } catch (error) {
         const failure = new Error(`Member saved, but WhatsApp consent was not recorded: ${String(error.message || "please try again").replace(/\.+$/, "")}. Press the button again to retry.`);
         failure.stage = "consent";
@@ -1061,7 +1119,9 @@ function handleAction(action, target) {
         case "copy-message": copyMessage(target.dataset.message || ""); break;
         // Receipts are numbered and kept by the server.
         case "receipt": openReceiptDialog(id); break;
-        default: handleHoldAction(action, target, afterHoldChange); break;
+        default:
+            if (!handleEnquiryAction(action, target, { openMemberForm, onChange: rerenderEnquiries })) handleHoldAction(action, target, afterHoldChange);
+            break;
     }
 }
 
@@ -1196,8 +1256,10 @@ async function saveMember(form) {
     }
 
     // Consent changes go through their own endpoint so the database records them in the history.
-    await recordFormConsent(saved.id, record.whatsappOptIn);
+    // Consent the visitor gave when they enquired (Join now) is recorded as such.
+    await recordFormConsent(saved.id, record.whatsappOptIn, record.whatsappOptIn && form.dataset.enquiryConsent === "true" ? "enquiry" : "staff_form");
     if (isNewMember) await saveFormPhoto(form, saved.id);
+    if (isNewMember && form.dataset.enquiryId) await linkEnquiryToMember(form.dataset.enquiryId, saved.id, rerenderEnquiries);
 
     if (initialPayment > 0) {
         const payment = await createPayment({
@@ -1563,6 +1625,11 @@ async function handleSubmit(event) {
         await handleReminderTemplateSubmit(form);
         return;
     }
+    if (form.id === "enquiry-template-form") {
+        event.preventDefault();
+        await handleEnquiryTemplateSubmit(form);
+        return;
+    }
     const handlers = {
         "member-form": saveMember,
         "quick-member-form": saveQuickMember,
@@ -1642,6 +1709,10 @@ document.addEventListener("click", (event) => {
     if (currentView === "renewals" && handleLapsedClick(event.target, rerenderLapsed)) return;
     if (!event.target.closest(".account-wrap")) closeAccountMenu();
     if (!event.target.closest(".row-menu-wrap")) closeRowMenus();
+    const enquiryLink = event.target.closest("[data-enquiry-whatsapp]");
+    if (enquiryLink) { recordEnquiryMessage(enquiryLink.dataset.enquiryWhatsapp, rerenderEnquiries); return; }
+    const enquiryTabButton = event.target.closest("[data-enquiry-tab]");
+    if (enquiryTabButton) { navigate("enquiries", enquiryTabButton.dataset.enquiryTab); return; }
     const followLink = event.target.closest("[data-followup-message]");
     if (followLink) { recordFollowUpMessage(followLink); return; }
     const sectionButton = event.target.closest("[data-settings-section]");
@@ -1717,6 +1788,7 @@ document.addEventListener("click", (event) => {
             return;
         }
         if (handleReminderTemplateAction(action.dataset.action, () => { if (currentView === "settings") render(); })) return;
+        if (handleEnquiryTemplateAction(action.dataset.action, () => { if (currentView === "settings") render(); })) return;
         if (handleLocalDataAction(action.dataset.action, afterLocalDataMove)) return;
         if (handleImportAction(action.dataset.action, action, afterMemberImport)) return;
         if (action.dataset.action === "previous-members-page" || action.dataset.action === "next-members-page") {
@@ -1757,6 +1829,7 @@ document.addEventListener("change", (event) => {
     if (target.closest("#modal-root") && handleImportChange(target)) return;
     if (handleWelcomeTemplateEvent(target)) return;
     if (handleReminderTemplateEvent(target)) return;
+    if (handleEnquiryTemplateEvent(target)) return;
     if (onPaymentFormEdit(target)) return;
     if (target.id === "visits-date" && target.value) { selectVisitsDay(target.value, () => { if (currentView === "scan") render(); }); return; }
     if (target.closest("#modal-root")) updateMemberFormDefaults(target);
@@ -1794,6 +1867,7 @@ document.addEventListener("input", (event) => {
     const target = event.target;
     if (target.id === "welcome-body") { handleWelcomeTemplateEvent(target); return; }
     if (target.id === "reminder-body") { handleReminderTemplateEvent(target); return; }
+    if (target.id === "enquiry-template-body") { handleEnquiryTemplateEvent(target); return; }
     if (target.dataset.importNew !== undefined) { handleImportChange(target); return; }
     if (target.id === "checkin-search") { searchCheckInMembers(target.value); return; }
     if (target.form?.id === "payment-form" && ["amount", "upiReference"].includes(target.name)) { onPaymentFormEdit(target); return; }

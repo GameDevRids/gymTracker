@@ -15,6 +15,7 @@ import paymentsRouter from "./routes/payments.js";
 import messageTemplatesRouter from "./routes/messageTemplates.js";
 import gymSettingsRouter from "./routes/gymSettings.js";
 import summaryRouter from "./routes/summary.js";
+import enquiriesRouter from "./routes/enquiries.js";
 import exportRouter from "./routes/export.js";
 import clientErrorsRouter from "./routes/clientErrors.js";
 import accountRouter from "./routes/account.js";
@@ -116,6 +117,7 @@ app.use("/api/payments", requireAuth(), paymentsRouter);
 app.use("/api/message-templates", requireAuth(), messageTemplatesRouter);
 app.use("/api/gym-settings", requireAuth(), gymSettingsRouter);
 app.use("/api/summary", requireAuth(), summaryRouter);
+app.use("/api/enquiries", requireAuth(), enquiriesRouter);
 // The account page and the full data download still work while a gym waits to be erased.
 app.use("/api/account", requireAuth({ allowNoGym: true, allowPendingDeletion: true }), accountRouter);
 app.use("/api/export", requireAuth({ allowPendingDeletion: true }), exportRouter);

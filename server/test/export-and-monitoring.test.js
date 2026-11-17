@@ -59,7 +59,7 @@ test("the Excel export has one sheet per kind of data, only for the signed-in gy
     assert.ok(db.queries.every((query) => query.filters.gym_id === gymId), "every read is limited to the gym");
 
     const { sheets } = await readSpreadsheet("export.xlsx", bytes, { inflateRaw });
-    assert.deepEqual(sheets.map((sheet) => sheet.name), ["Members", "Memberships", "Payments", "Attendance"]);
+    assert.deepEqual(sheets.map((sheet) => sheet.name), ["Members", "Memberships", "Payments", "Attendance", "Enquiries"]);
     const members = sheets[0].rows.map((row) => row.map(text));
     assert.equal(members.length, 2, "header and this gym's one member");
     assert.deepEqual(members[1].slice(0, 3), ["GP-0001", "Asha Patil", "9876543210"]);

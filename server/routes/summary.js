@@ -1,6 +1,7 @@
 import express from "express";
 import { getGymSummary } from "../services/summaryService.js";
 import { countStatuses, inactiveCount, memberStatuses, recentVisitorIds, renewalStats } from "../services/memberStatusService.js";
+import { dueEnquiryCount } from "../services/enquiriesService.js";
 import { membersErrorHandler } from "../controllers/membersController.js";
 
 const router = express.Router();
@@ -15,12 +16,15 @@ router.get("/", (request, response, next) => {
     // never hold up the totals: if they fail, the database's own figures are kept.
     const statuses = Promise.all([memberStatuses(request.gymId), recentVisitorIds(request.gymId)])
         .then(([rows, visitors]) => ({ statusCounts: countStatuses(rows), renewals: renewalStats(rows), inactive: inactiveCount(rows, visitors) }), () => null);
-    Promise.all([getGymSummary(request.gymId, { months }), statuses])
-        .then(([summary, extra]) => {
+    // Before migration 024 there are no enquiries: the count is simply left out.
+    const enquiriesDue = dueEnquiryCount(request.gymId).catch(() => null);
+    Promise.all([getGymSummary(request.gymId, { months }), statuses, enquiriesDue])
+        .then(([summary, extra, enquiries]) => {
             response.set("Cache-Control", "no-store");
             response.json({ status: "success", data: {
                 ...summary,
                 status_counts: extra?.statusCounts ?? null,
+                enquiries_due: enquiries,
                 ...(extra ? {
                     due_last_30_days: extra.renewals.due,
                     renewed_last_30_days: extra.renewals.renewed,

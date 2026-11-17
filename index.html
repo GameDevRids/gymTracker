@@ -25,6 +25,7 @@
 <body>
     <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
         <symbol id="icon-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></symbol>
+        <symbol id="icon-enquiries" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M9.5 8.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5"/><path d="M12 15h.01"/></symbol>
         <symbol id="icon-members" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M20 8v6m3-3h-6"/></symbol>
         <symbol id="icon-plans" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8z"/><path d="M8 3v5h13M8 13h8m-8 4h8"/></symbol>
         <symbol id="icon-payments" viewBox="0 0 24 24"><path d="M16 8.5c-.7-.9-1.8-1.5-3.4-1.5-2 0-3.4 1-3.4 2.5s1.2 2.1 3.4 2.5 3.4 1 3.4 2.5-1.4 2.5-3.4 2.5c-1.6 0-2.8-.6-3.6-1.7M12.5 5v14M5 10h10"/></symbol>
@@ -110,6 +111,7 @@
                 <span class="nav-caption">WORKSPACE</span>
                 <button class="nav-link active" data-view="overview"><span class="nav-icon"><svg><use href="#icon-overview"/></svg></span><span class="nav-label">Today</span></button>
                 <button class="nav-link" data-view="members"><span class="nav-icon"><svg><use href="#icon-members"/></svg></span><span class="nav-label">Members</span></button>
+                <button class="nav-link" data-view="enquiries"><span class="nav-icon"><svg><use href="#icon-enquiries"/></svg></span><span class="nav-label">Enquiries</span><span class="nav-count" id="enquiries-count" hidden aria-label="Enquiries to follow up today or overdue"></span></button>
                 <button class="nav-link" data-view="scan"><span class="nav-icon"><svg><use href="#icon-scan"/></svg></span><span class="nav-label">Check-in</span><span class="nav-count nav-alert" data-pending-phones hidden aria-label="Phones waiting for approval"></span></button>
                 <button class="nav-link" data-view="payments"><span class="nav-icon"><svg><use href="#icon-payments"/></svg></span><span class="nav-label">Payments</span></button>
                 <button class="nav-link" data-view="renewals"><span class="nav-icon"><svg><use href="#icon-renewals"/></svg></span><span class="nav-label">Renewals</span><span class="nav-count" id="renewals-count" hidden aria-label="Members needing a reminder or in grace"></span></button>

@@ -105,17 +105,18 @@ export function validateMemberPayload(mode) {
     };
 }
 
-// Owners record consent from the member form or a CSV import. "member_reply_stop" is reserved
-// for the WhatsApp webhook, so it cannot be sent through this endpoint.
+// Owners record consent from the member form or a CSV import; "enquiry" is the consent the visitor gave
+// at the desk, carried over when they join (migration 024). "member_reply_stop" is reserved for the
+// WhatsApp webhook, so it cannot be sent through this endpoint.
 const consentPayloadSchema = z.object({
     opt_in: z.boolean(),
-    source: z.enum(["staff_form", "csv_import"]).optional().default("staff_form")
+    source: z.enum(["staff_form", "csv_import", "enquiry"]).optional().default("staff_form")
 }).strict();
 
 export function validateConsentPayload(request, response, next) {
     const parsed = consentPayloadSchema.safeParse(request.body);
     if (!parsed.success) {
-        return sendValidationError(response, "Send opt_in as true or false, and source as staff_form or csv_import.");
+        return sendValidationError(response, "Send opt_in as true or false, and source as staff_form, csv_import or enquiry.");
     }
     request.validatedConsent = { optIn: parsed.data.opt_in, source: parsed.data.source };
     next();

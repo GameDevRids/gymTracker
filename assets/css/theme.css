@@ -515,3 +515,36 @@ button.sidebar-profile:focus-visible { outline: 3px solid var(--marigold); outli
 /* ---------- Empty lists: one line, then the button that fixes it ---------- */
 .empty-state > p { margin: 0; }
 .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+
+/* ---------- Enquiries ---------- */
+.enquiry-list { display: grid; gap: 10px; }
+.enquiry-card { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(170px, 1.3fr) auto auto; align-items: center; gap: 12px; padding: 14px; }
+.enquiry-card.is-overdue { border-left: 4px solid var(--brick); }
+.enquiry-person, .enquiry-detail { display: grid; gap: 3px; min-width: 0; }
+.enquiry-person small, .enquiry-detail small { color: var(--ink-3); overflow-wrap: anywhere; }
+.enquiry-note { font-style: italic; }
+.enquiry-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.badge-quiet { color: var(--ink-3); background: var(--slate-soft); }
+.enquiry-stats { display: grid; gap: 8px; margin-bottom: 14px; padding: 14px 16px; }
+.enquiry-stats .summary-row { margin: 0; }
+.enquiry-stats .helper-text { margin: 0; }
+.enquiry-sources { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.enquiry-sources li { display: flex; gap: 6px; align-items: baseline; }
+.enquiry-sources small { color: var(--ink-3); }
+.follow-up-field { margin: 0; padding: 0; border: 0; }
+.follow-up-field legend, .enquiry-form fieldset legend { margin-bottom: 6px; font-weight: 700; }
+.enquiry-form fieldset { margin: 0; padding: 0; border: 0; }
+.follow-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.follow-choice { min-height: 44px; }
+.enquiry-sources-pick { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.consent-step { display: grid; gap: 10px; padding: 8px 0; text-align: center; }
+.consent-question { margin: 0; color: var(--ink); font: 700 24px/1.35 var(--font-display); }
+.consent-answer { flex: 1 1 140px; min-height: 52px; font-size: 17px; }
+@media (max-width: 767px) {
+    .enquiry-card { grid-template-columns: minmax(0, 1fr); }
+    .enquiry-actions { justify-content: stretch; }
+    .enquiry-actions > .button { flex: 1 1 120px; min-height: 44px; }
+    .enquiry-actions .reminder-blocked { flex-basis: 100%; }
+    .enquiry-sources-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .consent-question { font-size: 22px; }
+}

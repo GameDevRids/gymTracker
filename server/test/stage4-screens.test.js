@@ -33,7 +33,7 @@ test("Needs attention shows what has a count, each opening its list; the rest co
     const html = renderNeedsAttention(summary, 5);
     const buttons = [...html.matchAll(/<button class="attention-item" type="button" data-view="([a-z]+)"(?: data-tab="([a-z]+)")?><strong>(\d+)<\/strong><span>([^<]+)/g)].map((m) => m.slice(1));
     assert.deepEqual(buttons, [["renewals", "expiring", "3", "Expiring this week"], ["payments", undefined, "2", "Dues"], ["renewals", "followups", "5", "Follow-ups"]]);
-    assert.match(html, /All caught up: In grace</, "the zero item is one muted line");
+    assert.match(html, /All caught up: In grace · Enquiries to follow up</, "the zero items share one muted line");
     assert.match(html, /₹4,500 outstanding/);
     assert.equal((html.match(/All caught up/g) || []).length, 1);
 });

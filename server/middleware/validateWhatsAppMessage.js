@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { WELCOME_LANGUAGES, welcomeTemplateProblem } from "../../assets/js/welcomeMessage.js";
 import { reminderTemplateProblem } from "../../assets/js/reminderMessage.js";
+import { enquiryTemplateProblem } from "../../assets/js/enquiries.js";
 
 // "lapsed": the "Send renewal message" to a lapsed member (migration 020).
 // "hold_return": the "Send welcome back message" after a plan hold ends (migration 021).
 const REMINDER_TYPES = ["welcome", "expiry", "payment", "inactive", "lapsed", "hold_return"];
 // Message templates saved per gym, and the rule each saved body must follow.
-const TEMPLATE_PROBLEMS = { welcome: welcomeTemplateProblem, expiry_reminder: reminderTemplateProblem };
+const TEMPLATE_PROBLEMS = { welcome: welcomeTemplateProblem, expiry_reminder: reminderTemplateProblem, enquiry_followup: enquiryTemplateProblem };
 
 function sendValidationError(response, message) {
     return response.status(400).json({ status: "error", message });

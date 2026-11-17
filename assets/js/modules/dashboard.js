@@ -8,6 +8,7 @@ import { currentMemberCount, currentSummary, monthLabel } from "./summary.js";
 import { paymentsPage } from "./upiPayments.js";
 import { renderSetupChecklist } from "./setupChecklist.js";
 import { retentionRows } from "./operations.js";
+import { dueEnquiries } from "./enquiriesPage.js";
 
 const greeting = () => {
     const hour = new Date().getHours();
@@ -38,7 +39,7 @@ function recentRenewals() {
 export function renderDashboard() {
     const today = indiaISODate();
     const { status, data: summary, message } = currentSummary();
-    const heading = `<div class="page-heading"><div><h1>${greeting()} <span aria-hidden="true">✦</span></h1><p>Here’s what’s happening at ${escapeHTML(state.gym.name)} today.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="export-members">↓ Export members</button><button class="button button-secondary" data-action="quick-add-member">Quick add</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>`;
+    const heading = `<div class="page-heading"><div><h1>${greeting()} <span aria-hidden="true">✦</span></h1><p>Here’s what’s happening at ${escapeHTML(state.gym.name)} today.</p></div><div class="heading-actions"><button class="button button-secondary" type="button" data-action="enquiry-add">Add enquiry</button><button class="button button-secondary" data-action="export-members">↓ Export members</button><button class="button button-secondary" data-action="quick-add-member">Quick add</button><button class="button button-primary" data-action="add-member">＋ Add member</button></div></div>`;
     if (!summary) {
         const body = status === "error"
             ? `<div class="empty-state" role="alert"><p>${escapeHTML(message)}</p><button class="button button-secondary" data-action="retry-summary">Try again</button></div>`
@@ -92,23 +93,24 @@ export function renderDashboard() {
  * are shown; the rest collapse into one "All caught up" line.
  * Items: expiring this week and in grace (Renewals), dues (Payments), follow-ups (Renewals).
  */
-export function attentionItems(summary, followups) {
+export function attentionItems(summary, followups, enquiriesDue = null) {
     const counts = summary.status_counts;
     return [
         { key: "expiring", label: "Expiring this week", value: counts?.expiring ?? summary.expiring_in_7_days ?? 0, note: "Plans ending within 7 days", view: "renewals", tab: "expiring" },
         { key: "in_grace", label: "In grace", value: counts?.in_grace ?? 0, note: "Plan ended, grace still running", view: "renewals", tab: "expiring" },
         { key: "dues", label: "Dues", value: summary.members_with_balance ?? 0, note: `${formatINR(summary.outstanding_total || 0)} outstanding`, view: "payments", tab: "" },
-        { key: "followups", label: "Follow-ups", value: followups, note: "Members who may need a nudge", view: "renewals", tab: "followups" }
+        { key: "followups", label: "Follow-ups", value: followups, note: "Members who may need a nudge", view: "renewals", tab: "followups" },
+        { key: "enquiries", label: "Enquiries to follow up", value: enquiriesDue ?? summary.enquiries_due ?? 0, note: "Follow-ups due today or overdue", view: "enquiries", tab: "today" }
     ];
 }
 
 function needsAttention(summary) {
-    return renderNeedsAttention(summary, state.members.length ? retentionRows().length : Number(summary.inactive_members) || 0);
+    return renderNeedsAttention(summary, state.members.length ? retentionRows().length : Number(summary.inactive_members) || 0, dueEnquiries());
 }
 
 /** The Needs attention block for these totals and this many follow-ups. */
-export function renderNeedsAttention(summary, followups) {
-    const items = attentionItems(summary, followups);
+export function renderNeedsAttention(summary, followups, enquiriesDue = null) {
+    const items = attentionItems(summary, followups, enquiriesDue);
     const open = items.filter((item) => Number(item.value) > 0);
     const clear = items.filter((item) => !(Number(item.value) > 0));
     const buttons = open.map((item) => `<button class="attention-item" type="button" data-view="${item.view}"${item.tab ? ` data-tab="${item.tab}"` : ""}><strong>${Number(item.value)}</strong><span>${escapeHTML(item.label)}<small>${escapeHTML(item.note)}</small></span></button>`).join("");

@@ -1,11 +1,11 @@
 // The app's pages, where the old ones went, and what the Renewals badge counts. No DOM or app
 // imports, so the app and the tests share it.
 //
-// Sidebar: Today, Members, Check-in, Payments, Renewals, Plans, Reports, Settings. A member's profile
+// Sidebar: Today, Members, Enquiries, Check-in, Payments, Renewals, Plans, Reports, Settings. A member's profile
 // opens from Members ("profile"). Pages that were merged or removed keep working as links, saved
 // pages and #bookmarks: resolveView() sends each to its new home.
 
-export const VIEW_IDS = ["overview", "members", "scan", "payments", "renewals", "plans", "reports", "settings"];
+export const VIEW_IDS = ["overview", "members", "enquiries", "scan", "payments", "renewals", "plans", "reports", "settings"];
 export const RENEWAL_TABS = ["expiring", "lapsed", "old", "followups"];
 export const SETTINGS_SECTIONS = ["details", "payments", "attendance", "renewals", "holds", "messages", "account", "help"];
 export const DEFAULT_VIEW = "overview";

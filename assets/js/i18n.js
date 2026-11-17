@@ -1,7 +1,7 @@
 const dictionaries = {
     en: {
         home: "Home", expiring: "Expiring soon", overview: "Overview", members: "Members", plans: "Plans", attendance: "Visits",
-        payments: "Payments", today: "Today", checkin: "Check-in", renewals: "Renewals", retention: "Retention", analytics: "Analytics",
+        payments: "Payments", enquiries: "Enquiries", today: "Today", checkin: "Check-in", renewals: "Renewals", retention: "Retention", analytics: "Analytics",
         reports: "Reports", notifications: "Notifications", whatsapp: "WhatsApp inbox", integrations: "Integrations", settings: "Settings",
         more: "More", quickAdd: "Quick add member", recordPayment: "Record payment", renew: "Renew", inGrace: "In grace", graceDaysLeft: "grace days left", graceDayLeft: "grace day left", graceLastDay: "last day of grace", ended: "Ended", graceTill: "Grace till", seeLapsed: "See lapsed members →", save: "Save",
         cancel: "Cancel", addAssign: "Add member & assign plan", name: "Name", phone: "Phone", plan: "Plan", expiry: "Expiry date",
@@ -16,7 +16,7 @@ const dictionaries = {
     },
     hi: {
         home: "होम", expiring: "जल्द समाप्त", overview: "डैशबोर्ड", members: "सदस्य", plans: "योजनाएँ", attendance: "उपस्थिति",
-        payments: "भुगतान", today: "आज", checkin: "चेक-इन", renewals: "नवीनीकरण", retention: "सदस्य बनाए रखना", analytics: "विश्लेषण",
+        payments: "भुगतान", enquiries: "पूछताछ", today: "आज", checkin: "चेक-इन", renewals: "नवीनीकरण", retention: "सदस्य बनाए रखना", analytics: "विश्लेषण",
         reports: "रिपोर्ट", notifications: "सूचनाएँ", whatsapp: "WhatsApp संदेश", integrations: "एकीकरण", settings: "सेटिंग्स",
         more: "और", quickAdd: "सदस्य जोड़ें", recordPayment: "भुगतान दर्ज करें", renew: "नवीनीकरण करें", inGrace: "ग्रेस अवधि में", graceDaysLeft: "ग्रेस दिन बाकी", graceDayLeft: "ग्रेस दिन बाकी", graceLastDay: "ग्रेस का आखिरी दिन", ended: "समाप्त", graceTill: "ग्रेस तक", seeLapsed: "लैप्स सदस्य देखें →", save: "सहेजें",
         cancel: "रद्द करें", addAssign: "सदस्य जोड़ें और योजना दें", name: "नाम", phone: "फ़ोन", plan: "योजना", expiry: "समाप्ति तिथि",
@@ -31,7 +31,7 @@ const dictionaries = {
     },
     mr: {
         home: "मुख्यपृष्ठ", expiring: "लवकरच संपणाऱ्या", overview: "आढावा", members: "सदस्य", plans: "योजना", attendance: "उपस्थिती",
-        payments: "पेमेंट", today: "आज", checkin: "चेक-इन", renewals: "नूतनीकरण", retention: "सदस्य टिकवणे", analytics: "विश्लेषण",
+        payments: "पेमेंट", enquiries: "चौकशी", today: "आज", checkin: "चेक-इन", renewals: "नूतनीकरण", retention: "सदस्य टिकवणे", analytics: "विश्लेषण",
         reports: "अहवाल", notifications: "सूचना", whatsapp: "WhatsApp संदेश", integrations: "एकत्रीकरण", settings: "सेटिंग्ज",
         more: "अधिक", quickAdd: "सदस्य जोडा", recordPayment: "पेमेंट नोंदवा", renew: "नूतनीकरण करा", inGrace: "ग्रेस कालावधीत", graceDaysLeft: "ग्रेस दिवस बाकी", graceDayLeft: "ग्रेस दिवस बाकी", graceLastDay: "ग्रेसचा शेवटचा दिवस", ended: "संपले", graceTill: "ग्रेस पर्यंत", seeLapsed: "लॅप्स सदस्य पहा →", save: "जतन करा",
         cancel: "रद्द करा", addAssign: "सदस्य जोडा आणि योजना द्या", name: "नाव", phone: "फोन", plan: "योजना", expiry: "समाप्ती तारीख",
@@ -72,6 +72,7 @@ export function applyNavigationTranslations() {
     const labels = {
         overview: t("today"),
         members: t("members"),
+        enquiries: t("enquiries"),
         scan: t("checkin"),
         payments: t("payments"),
         renewals: t("renewals"),
