@@ -179,10 +179,6 @@ export function renderAccountSettings() {
     const download = canDownloadWorkbook()
         ? `<div class="account-download"><h3>Download all gym data</h3><p class="helper-text">One Excel file with every member, plan, payment and visit. Keep a copy somewhere safe; it has members' phone numbers.</p><button class="button button-secondary" type="button" data-action="download-workbook">↓ Download Excel file</button></div>`
         : "";
-    // TEMPORARY Sentry test (owner only); remove after confirming.
-    const sentryTest = state.gym.role === "owner"
-        ? `<div class="account-download"><h3>Sentry test</h3><p class="helper-text">Temporary. Sends two test errors to Sentry: one from the server, one from the browser.</p><button class="button button-secondary" type="button" data-action="sentry-test-server">Send server test error</button> <button class="button button-secondary" type="button" data-action="sentry-test-browser">Send test error</button></div>`
-        : "";
     return `<section class="card settings-section" id="account-settings"><h2>Account and data</h2>
         <form id="change-password-form" class="form-grid" novalidate>
             <input type="text" name="username" autocomplete="username" value="${escapeHTML(accountEmail)}" hidden>
@@ -191,7 +187,7 @@ export function renderAccountSettings() {
             <div class="field"><label for="confirm-new-password">New password again</label><input id="confirm-new-password" name="confirm_password" type="password" autocomplete="new-password" required></div>
             <p class="helper-text field-error full" id="change-password-error" role="alert" hidden></p>
             <div class="field full"><button class="button button-secondary" type="submit">Change password</button></div>
-        </form>${download}${sentryTest}<div class="account-signout"><h3>Sign out</h3><p class="helper-text">Ends your session on this device and tells the server to stop accepting it. Use it on a shared computer.</p><button class="button button-secondary" type="button" data-action="sign-out">Sign out</button></div></section>`;
+        </form>${download}<div class="account-signout"><h3>Sign out</h3><p class="helper-text">Ends your session on this device and tells the server to stop accepting it. Use it on a shared computer.</p><button class="button button-secondary" type="button" data-action="sign-out">Sign out</button></div></section>`;
 }
 
 /** Changes the password; this device keeps the fresh session the server sends back. */
@@ -220,24 +216,6 @@ export async function submitChangePassword(form, onSession = () => {}) {
             show(error.message || "The password could not be changed. Please try again.");
         }
     });
-}
-
-// TEMPORARY Sentry tests; remove after confirming.
-export function sentryTestBrowser() {
-    if (state.gym.role !== "owner") return;
-    toast("Browser test error sent.");
-    // Thrown outside the click handler so it reaches window "error" like a real crash.
-    setTimeout(() => { throw new Error("GymPulse Sentry browser test"); }, 0);
-}
-
-export async function sentryTestServer() {
-    if (state.gym.role !== "owner") return;
-    try {
-        await apiClient.get("/api/debug/sentry-test");
-    } catch {
-        // The server answers 500 on purpose; the error was reported from there.
-    }
-    toast("Server test error sent.");
 }
 
 let downloading = false;
