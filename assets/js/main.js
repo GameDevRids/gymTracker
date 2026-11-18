@@ -58,7 +58,7 @@ import { currentSummary, loadSummary } from "./modules/summary.js";
 import { forgetEmptyLocalData, handleLocalDataAction, localDataToMove, openLocalDataDialog } from "./modules/localData.js";
 import { MEMBER_NAME_MESSAGES, addDays, cleanMemberName, displayName, downloadCSV, escapeHTML, formatDate, formatINR, formatPlanDuration, indiaISODate, isValidIndianPhone, localISODate, memberNameIssue, normalizeIndianPhone, setDateFormat, visitDay } from "./utils.js";
 import { readUiPreferences, saveUiPreferences } from "./storage.js";
-import { bindAuthPasswordLinks, checkAccountBeforeApp, downloadGymWorkbook, handleAuthPasswordSubmit, handleTermsSubmit, openDeleteGymDialog, reportProblemUrl, setAccountEmail, startPasswordResetIfLinked, submitChangePassword, submitDeleteGym } from "./modules/account.js";
+import { bindAuthPasswordLinks, checkAccountBeforeApp, downloadGymWorkbook, handleAuthPasswordSubmit, handleTermsSubmit, openDeleteGymDialog, reportProblemUrl, sentryTestBrowser, sentryTestServer, setAccountEmail, startPasswordResetIfLinked, submitChangePassword, submitDeleteGym } from "./modules/account.js";
 import { APP_VERSION } from "./version.js";
 import { startErrorReporting } from "./errorReporting.js";
 import { handleRenewSubmit, openRenewSheet } from "./modules/renewSheet.js";
@@ -1220,6 +1220,8 @@ function handleAction(action, target) {
         case "export-analytics": exportAnalytics(); break;
         case "download-report": downloadReport(); break;
         case "download-workbook": downloadGymWorkbook(); break;
+        case "sentry-test-server": sentryTestServer(); break;
+        case "sentry-test-browser": sentryTestBrowser(); break;
         case "delete-gym": openDeleteGymDialog(openModal); break;
         case "report-problem": {
             const url = reportProblemUrl({ view: currentView, version: APP_VERSION });

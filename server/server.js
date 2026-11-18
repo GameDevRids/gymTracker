@@ -18,6 +18,7 @@ import summaryRouter from "./routes/summary.js";
 import enquiriesRouter from "./routes/enquiries.js";
 import exportRouter from "./routes/export.js";
 import clientErrorsRouter from "./routes/clientErrors.js";
+import debugSentryRouter from "./routes/debugSentry.js";
 import accountRouter from "./routes/account.js";
 import { startGymDeletionSweep } from "./services/accountService.js";
 import attendanceRouter from "./routes/attendance.js";
@@ -110,6 +111,8 @@ app.use("/api/auth", authRouter);
 // Browser errors for Sentry; no sign-in, so errors on the sign-in screen are reported too.
 app.use("/api/client-errors", clientErrorsRouter);
 app.use("/api", databaseRouter);
+// TEMPORARY Sentry test (owner only); remove after confirming.
+app.use("/api/debug/sentry-test", requireAuth(), debugSentryRouter);
 app.use("/api/members", requireAuth(), membersRouter);
 app.use("/api/plans", requireAuth(), plansRouter);
 app.use("/api/memberships", requireAuth(), membershipsRouter);
