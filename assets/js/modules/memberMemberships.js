@@ -205,7 +205,7 @@ function renderAssignmentForm(memberId, plans, { startDate = indiaISODate(), pla
         };
     }
     const options = activePlans.map((plan) => `<option value="${escapeHTML(plan.id)}" data-name="${escapeHTML(plan.name)}" data-duration="${plan.duration_days}" data-price="${plan.price}" ${plan.id === planId ? "selected" : ""}>${escapeHTML(plan.name)} · ${escapeHTML(formatPlanDuration(plan.duration_days))} · ${formatINR(plan.price)}</option>`).join("");
-    const body = `<form id="membership-assignment-form" data-member-id="${escapeHTML(memberId)}" class="form-grid">
+    const body = `<form id="membership-assignment-form" autocomplete="off" data-member-id="${escapeHTML(memberId)}" class="form-grid">
         <div class="field full"><label for="assignment-plan">Active plan *</label><select id="assignment-plan" name="plan_id" required><option value="">Select a plan</option>${options}</select></div>
         <div class="field full" id="assignment-summary"><div class="empty-state">Select a plan to review its details.</div></div>
         <div class="field"><label for="assignment-start-date">Membership start date *</label><input id="assignment-start-date" name="start_date" type="date" value="${escapeHTML(startDate)}" required></div>

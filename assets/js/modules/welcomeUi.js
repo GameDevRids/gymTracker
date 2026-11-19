@@ -140,6 +140,14 @@ function markDialogSent(button) {
 }
 
 /** Shows the confirmation after a member is saved. Welcome actions only appear with consent. */
+/** Add member: starts drawing the welcome card while the desk finishes, so Send welcome card is quick. */
+export function prepareWelcomeCard(member) {
+    if (!member || welcomeBlocker(member)) return;
+    Promise.all([welcomeTemplates.status !== "ready" ? loadWelcomeTemplates() : null, loadWelcomeFacts(member.id)])
+        .then(() => prepareCard(member))
+        .catch(() => {});
+}
+
 export async function openMemberAddedDialog(member) {
     if (!member || welcomeBlocker(member)) return false;
     // Fee and payments come fresh from the database, including any payment made at registration.

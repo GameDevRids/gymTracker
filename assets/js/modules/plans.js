@@ -6,7 +6,7 @@ import { escapeHTML, formatINR, formatPlanDuration } from "../utils.js";
 import { renderSkeletonList } from "../components/skeleton.js";
 import { emptyState } from "../components/tables.js";
 import { suggestedGraceDays } from "../renewal.js";
-import { defaultHoldLimits, holdLimitsText } from "../holds.js";
+import { defaultHoldLimits, holdLimits, holdLimitsText } from "../holds.js";
 
 const pageSize = 12;
 // 1, 3, 6 and 12 months; a year is 365 days to match the seeded plans.
@@ -21,7 +21,7 @@ let requestVersion = 0;
 let searchTimer;
 let saving = false;
 
-const heading = `<div class="page-heading"><div><h1>Membership plans</h1><p>Manage the membership packages offered by your gym.</p></div><div class="heading-actions"><button class="button button-secondary" data-action="refresh-plans">↻ Refresh</button><button class="button button-primary" data-action="add-plan">Create plan</button></div></div>`;
+const heading = `<div class="page-heading"><div><h1>Membership plans</h1><p>Manage the membership packages offered by your gym.</p></div><div class="heading-actions"><button class="button button-primary" data-action="add-plan">Create plan</button></div></div>`;
 
 export function renderPlansPage() {
     const toolbar = `<div class="toolbar"><input class="search-field" id="plan-search" type="search" placeholder="Search plan names…" aria-label="Search plans" value="${escapeHTML(search)}"><select id="plan-status-filter" class="field-control" aria-label="Filter plans by status"><option value="all" ${status === "all" ? "selected" : ""}>All plans</option><option value="active" ${status === "active" ? "selected" : ""}>Active</option><option value="inactive" ${status === "inactive" ? "selected" : ""}>Inactive</option></select><span class="toolbar-spacer"></span>${loading ? "" : `<span class="helper-text">${pagination.total} plan${pagination.total === 1 ? "" : "s"}</span>`}</div>`;
@@ -33,18 +33,39 @@ export function renderPlansPage() {
     }
 
     const cards = plans.map((plan) => `<article class="card plan-card">
-        <div class="plan-card-heading"><h3>${escapeHTML(plan.name)}</h3><span class="status status-${plan.is_active ? "active" : "inactive"}">${plan.is_active ? "Active" : "Inactive"}</span></div>
+        <div class="plan-card-heading"><h3>${escapeHTML(plan.name)}</h3><span class="status status-${plan.is_active ? "active" : "inactive"}">${plan.is_active ? "Active" : "Inactive"}</span>${planMenu(plan)}</div>
         <div class="plan-price">${formatINR(plan.price)}<small> / ${escapeHTML(formatPlanDuration(plan.duration_days))}</small></div>
-        <p>${escapeHTML(plan.description || "No description provided.")}</p>
-        <div class="plan-card-footer"><span class="helper-text">Updated ${plan.updated_at ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(plan.updated_at)) : "—"}</span>
-            <span class="inline-actions"><button class="text-button" data-action="edit-plan" data-id="${escapeHTML(plan.id)}">Edit</button><button class="text-button" data-action="toggle-plan" data-id="${escapeHTML(plan.id)}">${plan.is_active ? "Deactivate" : "Activate"}</button><button class="text-button" data-action="delete-plan" data-id="${escapeHTML(plan.id)}">Delete</button></span>
-        </div>
+        ${plan.description ? `<p>${escapeHTML(plan.description)}</p>` : ""}
+        <p class="helper-text plan-rules">${escapeHTML(planRulesLine(plan))}</p>
     </article>`).join("");
-    const empty = `<section class="card">${search || status !== "all" ? emptyState("No plans match this search or filter.") : emptyState("No plans yet. Create your first plan so you can add members to it.", `<button class="button button-primary" type="button" data-action="add-plan">Create plan</button>`)}</section>`;
+    const empty = `<section class="card">${search || status !== "all" ? emptyState("No plans match this search or filter.") : emptyState("No plans yet. Create your first plan so you can add members to it.", `<button class="button button-secondary" type="button" data-action="add-plan">Create plan</button>`)}</section>`;
     const paginationControls = pagination.totalPages > 1
         ? `<div class="toolbar" aria-label="Plan pagination"><span class="toolbar-spacer"></span><button class="button button-secondary" data-action="previous-plans-page" ${pagination.page <= 1 ? "disabled" : ""}>Previous</button><span class="helper-text">Page ${pagination.page} of ${pagination.totalPages}</span><button class="button button-secondary" data-action="next-plans-page" ${pagination.page >= pagination.totalPages ? "disabled" : ""}>Next</button></div>`
         : "";
-    return `${heading}${toolbar}<div class="summary-row"><span class="summary-chip"><strong>${pagination.total}</strong> plans</span><span class="summary-chip"><strong>${plans.filter((plan) => plan.is_active).length}</strong> active on this page</span></div>${cards ? `<div class="grid plan-grid">${cards}</div>` : empty}${paginationControls}`;
+    return `${heading}${toolbar}${cards ? `<div class="grid plan-grid">${cards}</div>` : empty}${paginationControls}`;
+}
+
+/** "Grace 3 days · holds: up to 30 days, 1 hold", from the plan's own settings or the defaults. */
+export function planRulesLine(plan) {
+    const grace = plan.grace_days === null || plan.grace_days === undefined ? "Grace: gym default" : `Grace ${plan.grace_days} day${Number(plan.grace_days) === 1 ? "" : "s"}`;
+    return `${grace} · Holds: ${holdLimitsText(holdLimits(plan))}`;
+}
+
+/** Delete is only for a plan no member has ever used; the rest are deactivated instead. */
+export function planDeleteBlocked(plan) {
+    return plan?.used === true;
+}
+
+/** The plan's "⋯" menu: Edit, Deactivate (or Activate), a divider, Delete. */
+export function planMenu(plan) {
+    const id = escapeHTML(plan.id);
+    const label = `Actions for ${escapeHTML(plan.name)}`;
+    return `<div class="row-menu-wrap plan-menu"><button class="row-menu-button" type="button" data-action="row-menu" aria-haspopup="menu" aria-expanded="false" aria-label="${label}">⋯</button><div class="row-menu" role="menu" aria-label="${label}" hidden>
+        <button class="row-menu-item" type="button" role="menuitem" data-action="edit-plan" data-id="${id}">Edit</button>
+        <button class="row-menu-item" type="button" role="menuitem" data-action="toggle-plan" data-id="${id}">${plan.is_active ? "Deactivate" : "Activate"}</button>
+        <div class="row-menu-divider" role="separator"></div>
+        <button class="row-menu-item is-danger" type="button" role="menuitem" data-action="delete-plan" data-id="${id}">Delete</button>
+    </div></div>`;
 }
 
 export async function loadPlans(onRender = () => {}) {
@@ -119,10 +140,20 @@ export function openPlanForm(planId = "") {
 }
 
 function showDeleteConfirmation(plan) {
+    if (planDeleteBlocked(plan)) return showDeleteBlocked(plan);
     openModal({
         title: "Delete membership plan?",
-        body: `<p class="confirm-copy">Delete <strong>${escapeHTML(plan.name)}</strong>? Plans with related membership or payment records cannot be deleted; deactivate those plans instead.</p>`,
+        body: `<p class="confirm-copy">Delete <strong>${escapeHTML(plan.name)}</strong>? No member has used this plan, so it can be removed. This can't be undone.</p>`,
         footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button><button class="button button-danger" data-action="confirm-delete-plan" data-id="${escapeHTML(plan.id)}">Delete plan</button>`
+    });
+}
+
+/** A plan members have used can't be deleted (their history keeps it): deactivate it instead. */
+function showDeleteBlocked(plan) {
+    openModal({
+        title: "This plan can't be deleted",
+        body: `<p class="confirm-copy">Members have used <strong>${escapeHTML(plan.name)}</strong>, and their history keeps it. <strong>Deactivate it instead</strong>: it stays in their history but can't be chosen for new members or renewals.</p>`,
+        footer: `<button class="button button-secondary" data-action="close-modal" type="button">Cancel</button>${plan.is_active ? `<button class="button button-primary" data-action="toggle-plan" data-id="${escapeHTML(plan.id)}" type="button">Deactivate plan</button>` : ""}`
     });
 }
 
@@ -140,6 +171,7 @@ export function handlePlanAction(action, target, onRender) {
         if (plan) showDeleteConfirmation(plan);
         else toast("Plan was not found. Refresh the list and try again.", "error");
     } else if (action === "refresh-plans") {
+        // "Try again" after the list could not be loaded. The list reloads by itself after every change.
         loadPlans(onRender);
     } else if (action === "previous-plans-page" || action === "next-plans-page") {
         pagination.page += action === "next-plans-page" ? 1 : -1;
@@ -159,7 +191,8 @@ export function handlePlanAction(action, target, onRender) {
         } else {
             apiClient.put(`/api/plans/${id}`, { is_active: !plan.is_active })
                 .then((response) => {
-                    plans = plans.map((item) => item.id === id ? response.data : item);
+                    closeModal();
+                    plans = plans.map((item) => item.id === id ? { ...response.data, used: item.used } : item);
                     toast(`Plan ${response.data.is_active ? "activated" : "deactivated"}.`);
                     onRender();
                 })
@@ -171,7 +204,14 @@ export function handlePlanAction(action, target, onRender) {
                 toast("Membership plan deleted.");
                 renderAfterMutation(onRender);
             })
-            .catch((error) => toast(error.message || "Unable to delete plan.", "error"));
+            .catch((error) => {
+                // Used since the list loaded: the database refused it.
+                if (error?.status === 409) {
+                    const plan = plans.find((item) => item.id === id);
+                    if (plan) { plan.used = true; return showDeleteBlocked(plan); }
+                }
+                toast(error.message || "Unable to delete plan.", "error");
+            });
     } else {
         return false;
     }

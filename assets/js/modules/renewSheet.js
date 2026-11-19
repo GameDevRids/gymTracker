@@ -13,6 +13,7 @@ import { escapeHTML, formatDate, formatINR, formatPlanDuration, indiaISODate } f
 import { getMember, memberBalance } from "../state.js";
 import { addDaysISO, planEndDate, planGraceDays, renewalBalance, renewalPlan, startDateProblem, welcomeBackDiscount } from "../renewal.js";
 import { memberStatusFor } from "../memberStatus.js";
+import { confirmWarnings, memberWarnings } from "../memberChecks.js";
 import { gymUpi, paymentLink, prepareReceiptShare, qrSvg } from "./upiPayments.js";
 import { loadMemberMembershipHistory, setMemberCurrentMembership } from "./memberMemberships.js";
 import { readUiPreferences, saveUiPreferences } from "../storage.js";
@@ -121,7 +122,7 @@ function planOptions(plans, selected) {
 
 function renderForm(defaults) {
     const methods = METHODS.map(([value, label]) => `<label class="renew-method"><input type="radio" name="method" value="${value}" ${value === defaults.method ? "checked" : ""}><span>${label}</span></label>`).join("");
-    return `<form id="renew-form" class="renew-form" novalidate>
+    return `<form id="renew-form" autocomplete="off" class="renew-form" novalidate>
         <div class="field"><label for="renew-plan">Plan</label><select id="renew-plan" name="plan_id">${defaults.planId ? "" : `<option value="">Choose a plan</option>`}${planOptions(sheet.plans, defaults.planId)}</select></div>
         <div class="field"><label for="renew-fee">Price (₹)</label><input id="renew-fee" name="fee" type="number" inputmode="decimal" min="0" step="1" value="${escapeHTML(String(defaults.fee))}"><span class="helper-text" id="renew-fee-note"></span></div>
         <button class="button button-secondary renew-welcome" type="button" data-renew="welcome-back" id="renew-welcome" aria-pressed="false" hidden></button>
@@ -405,12 +406,36 @@ function showFormError(form, message) {
     update(form);
 }
 
+const renewSubmitButton = () => document.querySelector("#renew-submit");
+
+/**
+ * The "Is that right?" questions for a renewal: a start date the owner picked that is far ahead or
+ * long ago (the automatic start is never asked about), and a price far from the plan's price (after
+ * the welcome-back discount, when it is applied).
+ */
+export function renewWarnings(view, welcomeBack = false) {
+    if (!view?.plan) return [];
+    const expected = welcomeBack && view.welcomeBack?.amount > 0 ? Math.round((view.plan.price - view.welcomeBack.amount) * 100) / 100 : view.plan.price;
+    return memberWarnings({
+        startDate: view.ownerDate ? view.startDate : "",
+        fee: view.request?.total_fees,
+        planPrice: expected
+    }).warnings;
+}
+
 async function submitRenew(form) {
     if (!sheet || sheet.saving) return;
     const view = currentView(form);
     if (view.blocked) return;
     sheet.quiet = false;
     if (view.errors.length) return update(form);
+    const checks = renewWarnings(view, sheet.welcomeBack);
+    if (checks.length) {
+        if (renewSubmitButton()) renewSubmitButton().disabled = true;
+        const go = await confirmWarnings(form, checks);
+        if (renewSubmitButton()) renewSubmitButton().disabled = false;
+        if (!go || !sheet || sheet.saving) return;
+    }
     const { memberId, key, token, onChanged } = sheet;
     sheet.saving = true;
     sheet.serverError = "";

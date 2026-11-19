@@ -68,8 +68,17 @@ export function renderHoldSettings() {
         saveLabel: "Save plan hold settings",
         fields: (data) => `<div class="field"><label for="setting-min-hold">Minimum hold (days)</label><input id="setting-min-hold" name="min_hold_days" type="number" min="0" max="365" step="1" inputmode="numeric" value="${Number.isInteger(data.min_hold_days) ? data.min_hold_days : 15}"><span class="helper-text">A planned return date must be at least this many days after the hold starts. Members who come back sooner are never blocked. 0 means no minimum.</span></div>
             <div class="field"><label for="setting-hold-fee">Hold fee</label><select id="setting-hold-fee" name="hold_fee_enabled"><option value="false" ${data.hold_fee_enabled ? "" : "selected"}>No fee</option><option value="true" ${data.hold_fee_enabled ? "selected" : ""}>Charge a fee</option></select></div>
-            <div class="field"><label for="setting-hold-fee-amount">Hold fee amount (₹)</label><input id="setting-hold-fee-amount" name="hold_fee_amount" type="number" min="0" step="1" inputmode="decimal" value="${Number(data.hold_fee_amount) || 0}"><span class="helper-text">Recorded as a payment when a hold starts, with a UPI QR if you like. Cancelling the hold the same day marks it refunded.</span></div>`
+            <div class="field" id="setting-hold-fee-amount-field" ${data.hold_fee_enabled ? "" : "hidden"}><label for="setting-hold-fee-amount">Hold fee amount (₹)</label><input id="setting-hold-fee-amount" name="hold_fee_amount" type="number" min="0" step="1" inputmode="decimal" value="${Number(data.hold_fee_amount) || 0}"><span class="helper-text">Recorded as a payment when a hold starts, with a UPI QR if you like. Cancelling the hold the same day marks it refunded.</span></div>`
     });
+}
+
+/** "Hold fee amount" is shown only while "Charge a fee" is chosen. Returns true when it handled the change. */
+export function syncHoldFeeField(target) {
+    if (target?.id !== "setting-hold-fee") return false;
+    const field = target.form?.querySelector("#setting-hold-fee-amount-field");
+    if (field) field.hidden = target.value !== "true";
+    if (target.value === "true") target.form?.querySelector("#setting-hold-fee-amount")?.focus();
+    return true;
 }
 
 function showError(form, message) {

@@ -292,7 +292,7 @@ export async function assertPhoneAvailable(phone, gymId, { exceptId = null } = {
     if (data?.length) throw new MembersServiceError(409, `This phone number already belongs to ${data[0].full_name}.`);
 }
 
-const CONSENT_SOURCES = new Set(["staff_form", "csv_import", "member_reply_stop", "enquiry"]);
+const CONSENT_SOURCES = new Set(["staff_form", "csv_import", "member_reply_stop", "enquiry", "member_desk"]);
 const consentEventColumns = "id,gym_id,member_id,channel,action,source,recorded_by,created_at";
 
 function consentDatabaseError(error) {

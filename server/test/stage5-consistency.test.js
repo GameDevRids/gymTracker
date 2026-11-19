@@ -32,8 +32,12 @@ const withoutComments = (source) => source.split("\n").filter((line) => !/^\s*(\
 
 test("Renew is called Renew on every button", () => {
     const labels = labelsOf("renew-member");
-    assert.ok(labels.length >= 4, "the buttons were found");
+    assert.ok(labels.length >= 3, "the buttons were found");
     for (const [path, label] of labels) assert.equal(label, "Renew", path);
+    // The Members row and the profile build their button with rowPrimaryAction (Resume when on hold).
+    state.members = [memberFromApiRow({ id: "00000000-0000-4000-8000-000000000031", full_name: "Riya Shah", member_code: "GP-31", phone: "9876543231", member_status: "expiring", status_detail: {} })];
+    assert.match(renderMembers({}), /data-action="renew-member"[^>]*>Renew</);
+    assert.match(renderProfile("00000000-0000-4000-8000-000000000031"), /data-action="renew-member"[^>]*>Renew</);
     assert.equal(t("renew"), "Renew");
 });
 
@@ -111,7 +115,8 @@ test("no payments: the page offers Record payment", () => {
     Object.assign(paymentsPage, { status: "ready", payments: [], total: 0, monthTotal: 0, loaded: true });
     const html = renderOperationsPage("payments");
     assert.match(html, /No payments yet\. They appear here when you renew a member or record one\./);
-    assert.match(html, /class="button button-primary" type="button" data-action="record-payment">Record payment<\/button>/);
+    // Review stage 6: the header keeps the one marigold Record payment; the empty list offers it as secondary.
+    assert.match(html, /class="button button-secondary" type="button" data-action="record-payment">Record payment<\/button>/);
 });
 
 test("no expiring plans: says what appears here and offers the members list", () => {

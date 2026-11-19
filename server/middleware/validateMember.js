@@ -7,6 +7,7 @@ const dateSchema = z.string().trim()
         const parsed = new Date(`${value}T00:00:00.000Z`);
         return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
     });
+const indiaToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const emptyToNull = (schema) => z.preprocess((value) => value === null || value === "" ? null : value, schema);
 const indianPhone = z.preprocess(
     (value) => typeof value === "string" && /^\+91[6-9][0-9]{9}$/.test(value) ? value.slice(3) : value,
@@ -41,7 +42,8 @@ const memberValueSchemas = {
     phone: indianPhone,
     email: emptyToNull(z.string().trim().max(254).email()).nullable(),
     gender: emptyToNull(z.string().trim().max(32)).nullable(),
-    date_of_birth: emptyToNull(dateSchema).nullable(),
+    // A date of birth can't be after today in India (assets/js/memberChecks.js says the same).
+    date_of_birth: emptyToNull(dateSchema.refine((value) => value <= indiaToday(), { message: "future" })).nullable(),
     status: z.string().trim().pipe(z.enum(["active", "suspended"])),
     notes: emptyToNull(z.string().max(5000)).nullable(),
     emergency_contact: emptyToNull(z.string().trim().max(32)).nullable(),
@@ -59,7 +61,7 @@ function memberFieldError(field, result) {
     if (field === "notes") return "Notes must be 5000 characters or fewer.";
     if (field === "emergency_contact") return "Emergency contact must be 32 characters or fewer.";
     if (field === "follow_up_status") return "Follow-up status must be pending, contacted, returned, renewed or not interested.";
-    if (field === "date_of_birth") return `${field} must be a valid YYYY-MM-DD date.`;
+    if (field === "date_of_birth") return result?.error?.issues?.some((issue) => issue.message === "future") ? "Date of birth can't be in the future." : `${field} must be a valid YYYY-MM-DD date.`;
     return "Status must be active or suspended.";
 }
 
@@ -110,13 +112,13 @@ export function validateMemberPayload(mode) {
 // WhatsApp webhook, so it cannot be sent through this endpoint.
 const consentPayloadSchema = z.object({
     opt_in: z.boolean(),
-    source: z.enum(["staff_form", "csv_import", "enquiry"]).optional().default("staff_form")
+    source: z.enum(["staff_form", "csv_import", "enquiry", "member_desk"]).optional().default("staff_form")
 }).strict();
 
 export function validateConsentPayload(request, response, next) {
     const parsed = consentPayloadSchema.safeParse(request.body);
     if (!parsed.success) {
-        return sendValidationError(response, "Send opt_in as true or false, and source as staff_form, csv_import or enquiry.");
+        return sendValidationError(response, "Send opt_in as true or false, and source as staff_form, csv_import, enquiry or member_desk.");
     }
     request.validatedConsent = { optIn: parsed.data.opt_in, source: parsed.data.source };
     next();

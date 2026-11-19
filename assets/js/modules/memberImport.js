@@ -1,7 +1,8 @@
 // Import members from an owner's spreadsheet: column matching, Indian phone and date formats,
 // plans, duplicates and the list of what will be saved. No DOM or browser-state imports, so the
 // same rules are tested in Node. The server checks everything again and saves in one go.
-import { cleanMemberName, memberNameIssue } from "../utils.js";
+import { cleanMemberName, indiaISODate, memberNameIssue } from "../utils.js";
+import { memberWarnings } from "../memberChecks.js";
 import { excelSerialToDate } from "../spreadsheet.js";
 
 export const IMPORT_MAX_ROWS = 2000;
@@ -210,7 +211,7 @@ export function unknownPlans(importRows, activePlans) {
  * duplicateMode: "skip" (leave existing members alone) or "update" (name, notes, and the plan
  * from the file when it does not overlap one they have).
  */
-export function planImport(importRows, { activePlans = [], planChoices = {}, existingMembers = [], memberships = [], duplicateMode = "skip" } = {}) {
+export function planImport(importRows, { activePlans = [], planChoices = {}, existingMembers = [], memberships = [], duplicateMode = "skip", today = indiaISODate() } = {}) {
     const plansByKey = new Map(activePlans.map((plan) => [planKey(plan.name), plan]));
     const existingByPhone = new Map(existingMembers.map((member) => [String(member.phone || "").replace(/\D/g, "").slice(-10), member]));
     const newPlans = [];
@@ -255,7 +256,9 @@ export function planImport(importRows, { activePlans = [], planChoices = {}, exi
         }
 
         const existing = row.phone ? existingByPhone.get(row.phone) : null;
-        const entry = { ...row, plan, startDate, endDate, existing: existing || null, reasons };
+        // Saved as they are, but shown in the preview so the owner can check them.
+        const warnings = plan ? memberWarnings({ startDate, today }).warnings : [];
+        const entry = { ...row, plan, startDate, endDate, existing: existing || null, reasons, warnings };
         if (reasons.length) { problems.push(entry); continue; }
         if (existing && duplicateMode !== "update") { duplicates.push(entry); continue; }
         if (existing && plan) {

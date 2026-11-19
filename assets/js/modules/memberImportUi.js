@@ -252,7 +252,8 @@ function renderPreview() {
     const table = (rows, head, cells, empty) => rows.length
         ? `<div class="table-wrap"><table class="import-table"><thead><tr>${head.map((label) => `<th>${label}</th>`).join("")}</tr></thead><tbody>${rows.slice(0, PREVIEW_LIMIT).map((row) => `<tr>${cells(row).map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${rows.length > PREVIEW_LIMIT ? `<p class="helper-text">Showing the first ${PREVIEW_LIMIT} of ${rows.length}.</p>` : ""}`
         : `<p class="helper-text">${empty}</p>`;
-    const dates = (row) => (row.plan ? `${formatDate(row.startDate)} – ${formatDate(row.endDate)}` : "—");
+    const dates = (row) => (row.plan ? `${formatDate(row.startDate)} – ${formatDate(row.endDate)}${(row.warnings || []).map((text) => `<small class="cell-sub import-warning">⚠ ${escapeHTML(text)}</small>`).join("")}` : "—");
+    const warned = ready.filter((row) => row.warnings?.length).length;
     openModal({
         title: "Check before saving",
         subtitle: `${escapeHTML(job.fileName)} · ${plural(job.rows.length, "row")}`,
@@ -267,6 +268,7 @@ function renderPreview() {
                 <label class="checkbox-label"><input type="radio" name="import-duplicates" value="update" data-import="duplicates" ${job.duplicateMode === "update" ? "checked" : ""}> Update those members</label>
                 <p class="helper-text">${duplicateNote}</p></fieldset>` : ""}
             <h3 class="import-heading">Ready to save · ${newMembers} new${updates ? ` · ${updates} updated` : ""}</h3>
+            ${warned ? `<p class="note-box import-warnings" role="note">${plural(warned, "row has a date", "rows have dates")} worth checking (marked ⚠). They will be saved as they are; go Back to fix your file if they are wrong.</p>` : ""}
             ${table(ready, ["Row", "Name", "Phone", "Plan", "Dates", "Paid"], (row) => [row.rowNumber, `${escapeHTML(row.name)}${row.existing ? " <span class=\"badge-soft\">update</span>" : ""}`, escapeHTML(formatPhone(row.phone)), planLabel(row), dates(row), row.plan && row.amountPaid ? formatINR(row.amountPaid) : "—"], "No rows are ready to save.")}
             ${problems.length ? `<h3 class="import-heading">Need attention · left out</h3>${table(problems, ["Row", "Name", "Phone", "What to fix"], (row) => [row.rowNumber, escapeHTML(row.name || "—"), escapeHTML(row.phoneText || "—"), escapeHTML(row.reasons.join("; "))], "")}` : ""}
             ${duplicates.length ? `<h3 class="import-heading">Already in GymPulse · skipped</h3>${table(duplicates, ["Row", "Name in your file", "Phone", "Member in GymPulse"], (row) => [row.rowNumber, escapeHTML(row.name), escapeHTML(formatPhone(row.phone)), escapeHTML(row.existing.name)], "")}` : ""}

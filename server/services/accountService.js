@@ -40,6 +40,20 @@ export function supportWhatsApp(environment = process.env) {
     return /^[6-9]\d{9}$/.test(phone) ? `91${phone}` : "";
 }
 
+/**
+ * Logged once when the server starts: without a valid SUPPORT_WHATSAPP_NUMBER, Settings › Help hides
+ * "Report a problem" (owners never see a message about it). Returns the warning, or "" if all is well.
+ */
+export function warnIfNoSupportWhatsApp(environment = process.env, log = logger) {
+    if (supportWhatsApp(environment)) return "";
+    const raw = String(environment.SUPPORT_WHATSAPP_NUMBER || "").trim();
+    const message = raw
+        ? "SUPPORT_WHATSAPP_NUMBER is not a valid Indian mobile number; \"Report a problem\" is hidden in Settings › Help."
+        : "SUPPORT_WHATSAPP_NUMBER is not set; \"Report a problem\" is hidden in Settings › Help.";
+    log.warn(message);
+    return message;
+}
+
 /** The deletion fields of a gym row, as the app sees them. */
 export function deletionState(gym) {
     if (!gym?.deletion_scheduled_for) return null;

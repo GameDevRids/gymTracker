@@ -1,34 +1,22 @@
+/* The app's light theme (assets/css/theme.css "Renewal board"): same colours, light only. */
 :root {
-    --legal-bg: #f6f8f6;
-    --legal-card: #ffffff;
-    --legal-text: #17251d;
-    --legal-muted: #53625a;
-    --legal-line: #dfe6df;
-    --legal-accent: #1f7a4d;
-    --legal-note-bg: #fff6df;
-    --legal-note-line: #e8c76a;
+    --legal-bg: #F2F4F5;        /* --canvas */
+    --legal-card: #FFFFFF;      /* --surface */
+    --legal-text: #1E2D3A;      /* --ink */
+    --legal-muted: #52606B;     /* --ink-3 */
+    --legal-line: #DFE5E9;      /* --line */
+    --legal-accent: #1D7A4F;    /* --leaf */
+    --legal-note-bg: #FFF1D2;   /* --marigold-tint */
+    --legal-note-line: #F4A51C; /* --marigold */
     color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-    :root {
-        --legal-bg: #101613;
-        --legal-card: #17201b;
-        --legal-text: #e6eee9;
-        --legal-muted: #a9b8b0;
-        --legal-line: #2b3832;
-        --legal-accent: #6fcf9b;
-        --legal-note-bg: #2c2614;
-        --legal-note-line: #7a6626;
-        color-scheme: dark;
-    }
-}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--legal-bg); color: var(--legal-text); font: 16px/1.65 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { margin: 0; background: var(--legal-bg); color: var(--legal-text); font: 17px/1.65 "Mukta", system-ui, -apple-system, "Segoe UI", sans-serif; }
 .legal { width: min(100% - 32px, 760px); margin: 24px auto 48px; padding: 28px; border: 1px solid var(--legal-line); border-radius: 16px; background: var(--legal-card); }
 .legal-brand { display: inline-flex; gap: 8px; align-items: center; color: inherit; font-weight: 700; text-decoration: none; }
 .legal-brand img { width: 28px; height: 28px; }
-h1 { margin: 18px 0 4px; font: 700 28px/1.25 Manrope, Inter, sans-serif; }
-h2 { margin: 30px 0 6px; font: 700 19px/1.3 Manrope, Inter, sans-serif; }
+h1 { margin: 18px 0 4px; font: 700 30px/1.2 "Anek Latin", system-ui, sans-serif; }
+h2 { margin: 30px 0 6px; font: 700 21px/1.3 "Anek Latin", system-ui, sans-serif; }
 h3 { margin: 18px 0 4px; font-size: 16px; }
 p, li { color: var(--legal-text); }
 .legal-meta { margin: 0 0 18px; color: var(--legal-muted); }

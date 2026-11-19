@@ -2,7 +2,7 @@
 // Check-ins stored in the database. The gym uses one method (Settings > Attendance):
 // - member QR card: staff scan the member's QR with the camera on the Check-in screen;
 // - entrance poster: members scan a poster with their own phone; staff approve new phones here.
-// Both have "Can't scan? Check in manually". Also: the Visits page, a member's visits and linked
+// Both have one "Check in manually" button at the top. Also: the Visits page, a member's visits and linked
 // phones, the member card with its QR, and the one-time import of browser-only check-ins.
 import { state, getMember, memberFromApiRow, legacyAttendance } from "../state.js";
 import { apiClient } from "../api/apiClient.js";
@@ -146,22 +146,19 @@ export function renderVisitsSection() {
     let table;
     if (view.status === "loading" || view.status === "idle") table = `<div class="empty-state" role="status">Loading visits…</div>`;
     else if (view.status === "error") table = `<div class="empty-state" role="alert"><p>${escapeHTML(view.message || attendanceFeed.message)}</p><button class="button button-secondary" data-action="retry-visits">Try again</button></div>`;
-    else if (!view.rows.length) table = `${day === today ? emptyState("No check-ins yet today. They appear here as members check in.", `<button class="button button-secondary" type="button" data-action="checkin-by-name">Check in manually</button>`) : emptyState(`No check-ins on ${formatDate(day)}.`)}`;
+    else if (!view.rows.length) table = `${day === today ? emptyState("No check-ins yet today. They appear here as members check in.") : emptyState(`No check-ins on ${formatDate(day)}.`)}`;
     else {
         table = `<div class="table-wrap"><table class="visits-table"><thead><tr><th>Time</th><th>Member</th><th>Method</th><th>Membership</th></tr></thead><tbody>${view.rows.map((record) => {
             const name = record.memberName || getMember(record.memberId)?.name || "Removed member";
             return `<tr data-attendance-row><td data-label="Time">${escapeHTML(timeText(record.checkedInAt))}</td><td data-label="Member"><button class="text-button" data-action="profile" data-id="${escapeHTML(record.memberId)}">${escapeHTML(name)}</button><small class="cell-sub">${escapeHTML(record.memberCode)}</small></td><td data-label="Method">${escapeHTML(methodLabel(record.source))}</td><td data-label="Membership">${statusPill(record.status)}</td></tr>`;
         }).join("")}</tbody></table></div>`;
     }
-    // Who may check in follows the member's status: grace is let in with a warning, lapsed is not,
-    // and a plan on hold is resumed by the poster (or by staff) first.
-    const policy = "Members in grace are checked in with a warning; lapsed members are asked to renew at the desk; a plan on hold is resumed when the member checks in on the poster, or by staff.";
     return `<div class="section-heading"><h2>Visits</h2><p>Check-ins at the entrance, stored for your gym.</p></div>
         ${pending ? `<div class="note-box import-note" role="status"><span><strong>${plural(pending, "check-in")}</strong> saved only in this browser by an older version.</span><button class="button button-secondary button-small" data-action="open-local-data">Move my saved data to the cloud</button></div>` : ""}
         <div class="summary-row"><span class="summary-chip"><strong>${todayCount}</strong> today</span><span class="summary-chip"><strong>${weekCount}</strong> this week</span><span class="summary-chip"><strong>${monthVisitors}</strong> unique visitors this month</span></div>
         <div class="toolbar"><label class="sr-only" for="visits-date">Day</label><input class="field-control" id="visits-date" type="date" value="${escapeHTML(day)}" max="${escapeHTML(today)}"><input class="search-field" id="attendance-search" type="search" placeholder="Search member…" aria-label="Search visits"></div>
         <section class="card table-card">${table}</section>
-        <p class="helper-text" style="margin-top:11px">One check-in per member per day (India time). ${escapeHTML(policy)}</p>`;
+        <p class="checkin-help-link"><button class="text-button" type="button" data-action="checkin-help">How check-in works</button></p>`;
 }
 
 /**
@@ -294,17 +291,22 @@ export function watchApprovals(onChange) {
     approvalsTimer = setInterval(tick, APPROVALS_POLL_MS);
 }
 
-function renderApprovals() {
+/**
+ * Phones waiting for approval: one slim line when nobody is waiting ("No phones waiting"), the full
+ * card with a count badge when someone is.
+ */
+export function renderApprovals() {
     let body;
-    if (pendingDevices.status === "error") body = `<div class="empty-state" role="alert"><p>${escapeHTML(pendingDevices.message)}</p></div>`;
-    else if (pendingDevices.status !== "ready") body = `<div class="empty-state" role="status">Loading…</div>`;
-    else if (!pendingDevices.rows.length) body = `<p class="helper-text">No phones waiting. A member who scans the poster for the first time enters their mobile number and appears here.</p>`;
-    else {
+    const line = (text, role = "status") => `<section class="card checkin-card approvals-line" id="device-approvals"><p role="${role}">${escapeHTML(text)}</p></section>`;
+    if (pendingDevices.status === "error") return line(pendingDevices.message, "alert");
+    if (pendingDevices.status !== "ready") return line("Checking for phones waiting…");
+    if (!pendingDevices.rows.length) return line("No phones waiting");
+    {
         body = `<ul class="device-list">${pendingDevices.rows.map((device) => `<li class="device-row approval-row"><div><strong>${escapeHTML(device.member ? displayName(device.member.full_name) : "Member")}</strong><small>${escapeHTML(device.member?.member_code || "")}${device.member?.phone_last4 ? ` · ••••${escapeHTML(device.member.phone_last4)}` : ""} · ${escapeHTML(device.device_label || "Phone")} · ${escapeHTML(timeText(device.created_at))}</small></div>
             <div class="approval-code" aria-label="Code on the phone: ${escapeHTML(device.code.split("").join(" "))}"><small>Code on phone</small><strong>${escapeHTML(device.code)}</strong></div>
             <span class="button-row"><button class="button button-primary button-small" type="button" data-action="device-approve" data-id="${escapeHTML(device.id)}">Approve</button><button class="button button-secondary button-small" type="button" data-action="device-reject" data-id="${escapeHTML(device.id)}">Reject</button></span></li>`).join("")}</ul>`;
     }
-    return `<section class="card checkin-card" id="device-approvals"><div class="card-header"><div><h2>Phones waiting for approval${pendingDevices.rows.length ? ` <span class="count-pill">${pendingDevices.rows.length}</span>` : ""}</h2><p>Approve only when the code matches the one on the member's phone in front of you.</p></div></div>${body}</section>`;
+    return `<section class="card checkin-card" id="device-approvals"><div class="card-header"><div><h2>Phones waiting for approval <span class="count-pill">${pendingDevices.rows.length}</span></h2><p>Approve only when the code matches the one on the member's phone in front of you.</p></div></div>${body}</section>`;
 }
 
 async function changeDevice(action, element, onChange) {
@@ -391,7 +393,7 @@ function askResumeAndCheckIn(data) {
     });
 }
 
-// ---------- "Can't scan? Check in manually" ----------
+// ---------- "Check in manually" ----------
 
 let searchTimer;
 let searchRequest = 0;
@@ -444,7 +446,29 @@ function resultBox() {
     return document.querySelector("#checkin-root #scan-result");
 }
 
-const manualButton = `<button class="button button-secondary manual-checkin-button" type="button" data-action="checkin-by-name">Can't scan? Check in manually</button>`;
+// The page's one "Check in manually" button: search by name or the last 4 digits of the phone.
+const manualButton = `<button class="button button-secondary manual-checkin-button" type="button" data-action="checkin-by-name">Check in manually</button>`;
+
+/**
+ * Who may check in, in a short help panel (it used to be a long paragraph under the visits). Who may
+ * check in follows the member's status: grace is let in with a warning, lapsed is not, and a plan on
+ * hold is resumed by the poster (or by staff) first.
+ */
+export const CHECKIN_RULES = [
+    "One check-in per member per day (India time).",
+    "Members in grace are checked in, with a warning to renew.",
+    "Lapsed members are not checked in; they are asked to renew at the desk.",
+    "A plan on hold is resumed when the member checks in on the poster, or by staff here.",
+    "With the entrance poster, a member's new phone is approved once here: check the code matches."
+];
+
+export function openCheckInHelp() {
+    openModal({
+        title: "How check-in works",
+        body: `<ul class="checkin-rules">${CHECKIN_RULES.map((rule) => `<li>${escapeHTML(rule)}</li>`).join("")}</ul>`,
+        footer: `<button class="button button-secondary" type="button" data-action="close-modal">Close</button>`
+    });
+}
 
 function deskResultHtml() {
     if (!lastResult || lastResult.until < Date.now()) return `<div class="scan-result desk-result" id="scan-result" hidden aria-live="assertive"></div>`;
@@ -476,8 +500,8 @@ export function renderCheckInPage() {
             <div id="visits-section" class="visits-section">${renderVisitsSection()}</div></div>`;
     }
     return `<div id="checkin-root" data-method="entrance_poster">${heading("Members scan the poster at the entrance with their own phone. Approve new phones here.", `<button class="button button-secondary" data-view="settings" data-section="attendance">Poster settings</button>`)}
-        ${deskResultHtml()}
         <div class="manual-row">${manualButton}</div>
+        ${deskResultHtml()}
         ${renderApprovals()}
         <div id="visits-section" class="visits-section">${renderVisitsSection()}</div></div>`;
 }
@@ -551,7 +575,7 @@ function showCameraProblem(message) {
     const result = scannerElement("#scan-result");
     result.hidden = false;
     result.className = "scan-result scan-grey";
-    result.innerHTML = `<p class="scan-title">Camera unavailable</p><p class="scan-line">${escapeHTML(message)}</p><div class="scan-actions"><button class="button button-primary" type="button" data-action="checkin-by-name">Check in manually</button><button class="button button-secondary" type="button" data-action="scanner-retry">Try again</button></div>`;
+    result.innerHTML = `<p class="scan-title">Camera unavailable</p><p class="scan-line">${escapeHTML(message)} Use Check in manually below the camera.</p><div class="scan-actions"><button class="button button-secondary" type="button" data-action="scanner-retry">Try again</button></div>`;
 }
 
 function loadScript(src) {
@@ -970,6 +994,7 @@ export async function importLegacyCheckIns() {
 export function handleAttendanceAction(action, element, onChange) {
     switch (action) {
         case "checkin-by-name": openCheckInByName(); return true;
+        case "checkin-help": openCheckInHelp(); return true;
         case "checkin-member": closeModal(); manualCheckIn(element.dataset.id, onChange); return true;
         case "checkin-resume": closeModal(); manualCheckIn(element.dataset.id, onChange, { resumeHold: true }); return true;
         case "scanner-continue": continueScanning(); return true;

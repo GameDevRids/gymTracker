@@ -386,8 +386,8 @@ export function reportProblemUrl({ view = "", version = "" } = {}) {
 }
 
 /** Settings › Help: "Report a problem" (only when SUPPORT_WHATSAPP_NUMBER is set) and the legal pages. */
-export function renderSupportSettings() {
-    const report = accountStatus?.support_whatsapp
+export function renderSupportSettings(status = accountStatus) {
+    const report = status?.support_whatsapp
         ? `<p class="helper-text">Something not working? Send us a WhatsApp message. The app version and screen are filled in for you.</p><button class="button button-secondary" type="button" data-action="report-problem">Report a problem</button>`
         : "";
     return `<section class="card settings-section"><h2>Help and legal</h2>${report}<p class="helper-text"><a href="/terms" target="_blank" rel="noopener">Terms of Service</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a></p></section>`;

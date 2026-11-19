@@ -28,43 +28,46 @@ const css = readFileSync(new URL("../../assets/css/theme.css", import.meta.url),
 
 // ---------- Today: Needs attention ----------
 
-test("Needs attention shows what has a count, each opening its list; the rest collapse into one line", () => {
+test("Needs attention shows only what has a count, in order, each opening its list", () => {
     const summary = { status_counts: { expiring: 3, in_grace: 0 }, members_with_balance: 2, outstanding_total: 4500 };
-    const html = renderNeedsAttention(summary, 5);
-    const buttons = [...html.matchAll(/<button class="attention-item" type="button" data-view="([a-z]+)"(?: data-tab="([a-z]+)")?><strong>(\d+)<\/strong><span>([^<]+)/g)].map((m) => m.slice(1));
-    assert.deepEqual(buttons, [["renewals", "expiring", "3", "Expiring this week"], ["payments", undefined, "2", "Dues"], ["renewals", "followups", "5", "Follow-ups"]]);
-    assert.match(html, /All caught up: In grace · Enquiries to follow up</, "the zero items share one muted line");
+    const html = renderNeedsAttention(summary, 5, 0, 1);
+    const buttons = [...html.matchAll(/<button class="attention-item" type="button" data-view="([a-z]+)"(?: data-tab="([a-z_]+)")?><strong>(\d+)<\/strong><span>([^<]+)/g)].map((m) => m.slice(1));
+    assert.deepEqual(buttons, [["payments", undefined, "2", "Dues"], ["renewals", "followups", "5", "Follow-ups"], ["members", "on_hold", "1", "Holds ending this week"], ["renewals", "expiring", "3", "Expiring this week"]]);
     assert.match(html, /₹4,500 outstanding/);
-    assert.equal((html.match(/All caught up/g) || []).length, 1);
+    assert.doesNotMatch(html, /All caught up/, "zero items are simply left out");
 });
 
-test("with nothing to do, Needs attention is a single 'All caught up' line and no buttons", () => {
-    const html = renderNeedsAttention({ status_counts: { expiring: 0, in_grace: 0 }, members_with_balance: 0, outstanding_total: 0 }, 0);
-    assert.match(html, /All caught up\. Nothing needs your attention today\./);
-    assert.equal(html.includes("attention-item"), false);
+test("with nothing to do, Needs attention is one line: All caught up for today", () => {
+    const html = renderNeedsAttention({ status_counts: { expiring: 0, in_grace: 0 }, members_with_balance: 0, outstanding_total: 0 }, 0, 0, 0);
+    assert.equal(html, `<p class="attention-clear is-all" role="status">✓ All caught up for today</p>`);
 });
 
 test("Needs attention reads the shared status counts, and the older summary figure when they are missing", () => {
-    assert.equal(attentionItems({ status_counts: { expiring: 4, in_grace: 1 } }, 0)[0].value, 4);
-    assert.equal(attentionItems({ status_counts: null, expiring_in_7_days: 6 }, 0)[0].value, 6);
+    const expiring = (summary) => attentionItems(summary, 0).find((item) => item.key === "expiring").value;
+    assert.equal(expiring({ status_counts: { expiring: 4, in_grace: 1 } }), 4);
+    assert.equal(expiring({ status_counts: null, expiring_in_7_days: 6 }), 6);
+    assert.deepEqual(attentionItems({}, 0).map((item) => item.key), ["dues", "followups", "enquiries", "in_grace", "holds_ending", "expiring"]);
     assert.equal(attentionItems({}, 0).every((item) => item.value === 0), true);
 });
 
 // ---------- Members: one action and a menu ----------
 
 test("a member's row: Renew, and a menu with Edit, Record payment, Assign plan (no plan only), Put on hold (running plan only), Delete", () => {
-    const labels = (status) => memberMenuItems({ memberStatus: status }).map((item) => item.label);
-    assert.deepEqual(labels("none"), ["Edit", "Record payment", "Assign plan", "Delete member"]);
-    assert.deepEqual(labels("active"), ["Edit", "Record payment", "Put on hold", "Delete member"]);
-    assert.deepEqual(labels("expiring"), ["Edit", "Record payment", "Put on hold", "Delete member"]);
-    for (const status of ["in_grace", "lapsed", "old", "upcoming", "on_hold"]) {
-        assert.deepEqual(labels(status), ["Edit", "Record payment", "Delete member"], status);
+    // Review stage 5: Renew is in the menu when it is not the row's button; a divider before Delete.
+    const labels = (status) => memberMenuItems({ memberStatus: status }).map((item) => item.label || "—");
+    assert.deepEqual(labels("none"), ["Edit", "Record payment", "Assign plan", "—", "Delete member"]);
+    assert.deepEqual(labels("active"), ["Renew", "Edit", "Record payment", "Put on hold", "—", "Delete member"]);
+    assert.deepEqual(labels("expiring"), ["Edit", "Record payment", "Put on hold", "—", "Delete member"]);
+    assert.deepEqual(labels("on_hold"), ["Resume", "Edit", "Record payment", "—", "Delete member"]);
+    assert.deepEqual(labels("upcoming"), ["Renew", "Edit", "Record payment", "—", "Delete member"]);
+    for (const status of ["in_grace", "lapsed", "old"]) {
+        assert.deepEqual(labels(status), ["Edit", "Record payment", "—", "Delete member"], status);
     }
     assert.equal(memberMenuItems({ memberStatus: "active" }).at(-1).danger, true);
 });
 
 test("the Members list draws Renew and the menu in each row, and no row of text links", () => {
-    state.members = [memberFromApiRow({ id: "00000000-0000-4000-8000-000000000001", full_name: "Riya Shah", member_code: "GP-101", phone: "9876543210", member_status: "active", status_detail: {} })];
+    state.members = [memberFromApiRow({ id: "00000000-0000-4000-8000-000000000001", full_name: "Riya Shah", member_code: "GP-101", phone: "9876543210", member_status: "expiring", status_detail: { days_left: 3 } })];
     const html = renderMembers({});
     assert.equal((html.match(/data-action="renew-member"/g) || []).length, 1);
     assert.match(html, /class="row-menu-button"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"[^>]*aria-label="More actions for Riya Shah"/);

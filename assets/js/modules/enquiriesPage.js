@@ -194,9 +194,9 @@ export async function openEnquiryForm(id = "", onChange = () => {}) {
     openModal({
         title: existing ? "Edit enquiry" : "Add enquiry",
         subtitle: existing ? "" : "Someone visited and asked about joining.",
-        body: `<form id="enquiry-form" class="form-grid enquiry-form" data-id="${escapeHTML(existing?.id || "")}" novalidate>
+        body: `<form id="enquiry-form" autocomplete="off" class="form-grid enquiry-form" data-id="${escapeHTML(existing?.id || "")}" novalidate>
             <div class="field"><label for="enquiry-name">Name *</label><input id="enquiry-name" name="full_name" required maxlength="120" autocomplete="off" autocapitalize="words" value="${value("full_name")}"></div>
-            <div class="field"><label for="enquiry-phone">Phone *</label><input id="enquiry-phone" name="phone" type="tel" inputmode="tel" required maxlength="16" placeholder="98765 43210" value="${existing ? escapeHTML(last10(existing.phone)) : ""}"></div>
+            <div class="field"><label for="enquiry-phone">Phone *</label><input id="enquiry-phone" name="phone" type="tel" autocomplete="off" inputmode="tel" required maxlength="16" placeholder="98765 43210" value="${existing ? escapeHTML(last10(existing.phone)) : ""}"></div>
             <div class="field"><label for="enquiry-interest">Interested in</label><select id="enquiry-interest" name="interest_plan_id">${options}</select></div>
             <fieldset class="field full"><legend>How they heard about us</legend><div class="renew-methods enquiry-sources-pick">${sources}</div></fieldset>
             <div class="field full"><label for="enquiry-note">Note (optional)</label><textarea id="enquiry-note" name="note" rows="2" maxlength="500">${value("note")}</textarea></div>

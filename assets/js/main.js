@@ -40,7 +40,7 @@ import { renderRenewalsPage } from "./modules/renewalsPage.js";
 import { dueEnquiries, enquiries, enquiryTab, handleEnquiryAction, linkEnquiryToMember, loadEnquiries, recordEnquiryMessage, renderEnquiriesPage, setEnquiryTab } from "./modules/enquiriesPage.js";
 import { handleEnquiryTemplateAction, handleEnquiryTemplateEvent, handleEnquiryTemplateSubmit, loadEnquiryTemplates } from "./modules/enquiryTemplateUi.js";
 import { settingsPage, showSettingsList, showSettingsSection } from "./modules/settingsPage.js";
-import { openModal, closeModal } from "./components/modal.js";
+import { openModal, closeModal, onModalClose } from "./components/modal.js";
 import { toast } from "./components/toast.js";
 import { applyNavigationTranslations, getLanguage, isSupportedLanguage, setLanguage, t } from "./i18n.js";
 import { loadWelcomeFacts, loadWelcomeLog, loadWelcomeTemplates, welcomeBlocker } from "./modules/welcome.js";
@@ -52,7 +52,8 @@ import { handleAttendanceAction, loadAttendanceFeed, loadMemberAttendance, loadM
 import { handleCheckinSettingsAction, loadCheckinSettings, saveAttendanceSettings } from "./modules/checkinSettingsUi.js";
 import { editPhotoField, handlePhotoAction, hydratePhotos, loadProfilePhoto, mountEditPhoto, mountFormPhoto, photoFormField, saveFormPhoto } from "./modules/memberPhotos.js";
 import { usesMemberQr } from "./modules/checkinMethod.js";
-import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, openMemberAddedDialog } from "./modules/welcomeUi.js";
+import { handleWelcomeAction, handleWelcomeTemplateEvent, handleWelcomeTemplateSubmit, prepareWelcomeCard } from "./modules/welcomeUi.js";
+import { PHONE_ERROR, PHONE_HELP, addMemberFieldsHtml, addedActions, consentStepHtml, formPayment, toggleAddQr, updateAddPayment } from "./modules/addMember.js";
 import { expiryReminderTemplate, handleReminderTemplateAction, handleReminderTemplateEvent, handleReminderTemplateSubmit, loadReminderTemplates, recordExpiryReminder } from "./modules/expiryReminder.js";
 import { currentSummary, loadSummary } from "./modules/summary.js";
 import { forgetEmptyLocalData, handleLocalDataAction, localDataToMove, openLocalDataDialog } from "./modules/localData.js";
@@ -64,7 +65,10 @@ import { startErrorReporting } from "./errorReporting.js";
 import { handleRenewSubmit, openRenewSheet } from "./modules/renewSheet.js";
 import { handleHoldAction, handleHoldSubmit, loadMemberHolds } from "./modules/holds.js";
 import { STATUS_LABELS } from "./memberStatus.js";
-import { loadRenewalSettings, saveRenewalSettings } from "./modules/renewalSettingsUi.js";
+import { watchDialogAutofill } from "./components/autofill.js";
+import { gymArea, watchPageTitle } from "./layout.js";
+import { confirmWarnings, memberWarnings } from "./memberChecks.js";
+import { loadRenewalSettings, saveRenewalSettings, syncHoldFeeField } from "./modules/renewalSettingsUi.js";
 import { dropFromLapsed, handleLapsedClick, lapsedCount, loadLapsed, reloadLapsed, renderLapsedBody, setLapsedList } from "./modules/lapsed.js";
 import { hideSetupChecklist, loadSetupPlans } from "./modules/setupChecklist.js";
 
@@ -316,6 +320,7 @@ function render() {
     updateEnquiriesBadge();
     document.querySelector("#gym-name-label").textContent = state.gym.name;
     document.querySelector(".gym-avatar").textContent = state.gym.name.trim().slice(0, 1).toUpperCase() || "G";
+    showGymArea();
     const now = new Date();
     document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(now);
     try {
@@ -327,6 +332,15 @@ function render() {
     }
     // Member photos load after the page is drawn, from short-lived signed URLs.
     hydratePhotos(page);
+    watchPageTitle(page, document.querySelector(".topbar"));
+}
+
+// Under the gym's name in the menu: its city or area from the address, or nothing.
+function showGymArea() {
+    const label = document.querySelector("#gym-area-label");
+    if (!label) return;
+    label.textContent = gymArea(state.gym.address);
+    label.hidden = !label.textContent;
 }
 
 // The Renewals badge: members still to remind plus members in grace (the number that needs action).
@@ -473,6 +487,11 @@ function navigate(id, tab) {
         renewalsTab = resolveTab(target.tab || tab || renewalsTab);
         setLapsedList(renewalsTab);
         saveUiPreferences({ renewalsTab });
+    }
+    // A link to Members with a status (Today › Holds ending this week) opens the list filtered to it.
+    if (view === "members" && MEMBER_FILTERS.includes(tab)) {
+        memberFilters = { ...memberFilters, filter: tab, page: 1 };
+        saveUiPreferences({ memberFilter: tab });
     }
     if (view === "enquiries") {
         setEnquiryTab(target.tab || tab || enquiryTab());
@@ -708,7 +727,7 @@ function safePersist(message = "Changes saved.") {
 }
 
 function setField(name, label, value = "", type = "text", required = false, extra = "") {
-    return `<div class="field"><label for="form-${name}">${label}${required ? " *" : ""}</label><input id="form-${name}" name="${name}" type="${type}" value="${escapeHTML(value)}" ${required ? "required" : ""} ${extra}></div>`;
+    return `<div class="field"><label for="form-${name}">${label}${required ? " *" : ""}</label><input id="form-${name}" name="${name}" type="${type}" value="${escapeHTML(value)}" autocomplete="off" ${required ? "required" : ""} ${extra}></div>`;
 }
 
 function memberPlanOptions(plans, selected = "") {
@@ -730,29 +749,31 @@ function renderMemberPlanField(status, plans = []) {
 
 function renderMemberFormBody(member, planStatus = "loading", plans = []) {
     const isEdit = Boolean(member);
-    const body = `<form id="member-form" data-mode="${isEdit ? "update" : "create"}" data-id="${escapeHTML(member?.id || "")}" data-plans-state="${isEdit ? "not-needed" : planStatus}" class="form-grid" novalidate>
-            ${isEdit ? editPhotoField(member) : ""}
-            ${nameField("form", member?.nameMissing ? "" : member?.name || "")}
-            <div class="field"><label for="form-phone">Phone number *</label><input id="form-phone" name="phone" type="tel" value="${escapeHTML(member?.phone || "")}" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="form-phone-error"><span id="form-phone-error" class="helper-text phone-error" role="alert" hidden>Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.</span></div>
-            ${setField("email", "Email address", member?.email || "", "email")}
-            ${setField("dob", "Date of birth", member?.dob || "", "date")}
-            <div class="field"><label for="form-gender">Gender</label><select id="form-gender" name="gender"><option value="">Not specified</option>${["Female", "Male", "Prefer not to say"].map((item) => `<option ${member?.gender === item ? "selected" : ""}>${item}</option>`).join("")}</select></div>
-            <div id="member-plan-field">${isEdit ? `<div class="field full"><label>Membership plan</label><p class="helper-text">Manage membership plans and dates using Assign plan.</p></div>` : renderMemberPlanField(planStatus, plans)}</div>
-            ${isEdit
-                ? `${setField("startDate", "Membership start date", member.startDate || "", "date", false, 'readonly aria-readonly="true"')}${setField("expiryDate", "Membership expiry date", member.expiryDate || "", "date", false, 'readonly aria-readonly="true"')}`
-                : `${setField("assignmentStartDate", "Membership start date", localISODate(), "date", true)}<div class="field"><span class="field-label" id="form-expiry-label">Membership expiry</span><p class="readonly-value" id="form-expiry-text" aria-labelledby="form-expiry-label" aria-live="polite">${EXPIRY_PLACEHOLDER}</p><input type="hidden" name="assignmentEndDate" value=""><span class="helper-text">Calculated from the plan and start date.</span></div>`}
-            ${isEdit
-                ? `<div class="field"><span class="field-label">Total billed fees</span><p class="readonly-value">${formatINR(member.totalFees || 0)}</p><span class="helper-text">Fees are saved with each plan assignment and cannot be edited here.</span></div>`
-                : setField("totalFees", "Membership fee (₹)", "", "number", true, 'min="0" step="1"')}
-            ${!isEdit ? setField("initialPayment", "Amount collected now (₹)", 0, "number", false, 'min="0" step="1"') : ""}
-            ${setField("emergencyContact", "Emergency contact", member?.emergencyContact || "", "tel")}
+    const open = `<form id="member-form" autocomplete="off" data-mode="${isEdit ? "update" : "create"}" data-id="${escapeHTML(member?.id || "")}" data-plans-state="${isEdit ? "not-needed" : planStatus}" class="form-grid" novalidate>`;
+    // Add member: the desk order, with the rest under "More details" (modules/addMember.js).
+    if (!isEdit) {
+        return `${open}${addMemberFieldsHtml({
+            nameField: nameField("form", ""),
+            planField: renderMemberPlanField(planStatus, plans),
+            photoField: photoFormField("form"),
+            expiryPlaceholder: EXPIRY_PLACEHOLDER
+        })}</form>`;
+    }
+    return `${open}
+            ${editPhotoField(member)}
+            ${nameField("form", member.nameMissing ? "" : member.name || "")}
+            <div class="field"><label for="form-phone">Phone number *</label><input id="form-phone" name="phone" type="tel" value="${escapeHTML(member.phone || "")}" autocomplete="off" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="form-phone-help form-phone-error"><span id="form-phone-help" class="helper-text">${PHONE_HELP}</span><span id="form-phone-error" class="helper-text phone-error" role="alert" hidden>${PHONE_ERROR}</span></div>
+            ${setField("email", "Email address", member.email || "", "email")}
+            ${setField("dob", "Date of birth", member.dob || "", "date", false, `max="${localISODate()}"`)}
+            <div class="field"><label for="form-gender">Gender</label><select id="form-gender" name="gender"><option value="">Not specified</option>${["Female", "Male", "Prefer not to say"].map((item) => `<option ${member.gender === item ? "selected" : ""}>${item}</option>`).join("")}</select></div>
+            <div id="member-plan-field"><div class="field full"><label>Membership plan</label><p class="helper-text">Manage membership plans and dates using Assign plan.</p></div></div>
+            ${setField("startDate", "Membership start date", member.startDate || "", "date", false, 'readonly aria-readonly="true"')}${setField("expiryDate", "Membership expiry date", member.expiryDate || "", "date", false, 'readonly aria-readonly="true"')}
+            <div class="field"><span class="field-label">Total billed fees</span><p class="readonly-value">${formatINR(member.totalFees || 0)}</p><span class="helper-text">Fees are saved with each plan assignment and cannot be edited here.</span></div>
+            ${setField("emergencyContact", "Emergency contact", member.emergencyContact || "", "tel")}
             <p class="helper-text field full" id="member-assignment-error" role="alert" hidden></p>
-            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member?.whatsappOptIn === true ? "checked" : ""}> Member agrees to receive WhatsApp updates</label><span class="helper-text">${member?.whatsappOptIn && member.whatsappOptInAt ? `Consent recorded on ${escapeHTML(formatDate(member.whatsappOptInAt.slice(0, 10)))}. ` : ""}Only tick this when the member has agreed. Every change is kept in their consent history, and reminders skip members without consent.</span></div>
-            ${!isEdit ? photoFormField("form") : ""}
-            <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes">${escapeHTML(member?.notes || "")}</textarea></div>
-            <p class="helper-text field full">Each member needs their own phone number.</p>
+            <div class="field full"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="whatsappOptIn" ${member.whatsappOptIn === true ? "checked" : ""}> Member agrees to receive WhatsApp updates</label><span class="helper-text">${member.whatsappOptIn && member.whatsappOptInAt ? `Consent recorded on ${escapeHTML(formatDate(member.whatsappOptInAt.slice(0, 10)))}. ` : ""}Only change this when the member asks. Every change is kept in their consent history, and reminders skip members without consent.</span></div>
+            <div class="field full"><label for="form-notes">Notes</label><textarea id="form-notes" name="notes" autocomplete="off">${escapeHTML(member.notes || "")}</textarea></div>
         </form>`;
-    return body;
 }
 
 async function loadMemberFormPlans(form) {
@@ -773,6 +794,7 @@ async function loadMemberFormPlans(form) {
         form.elements.totalFees.value = "";
         if (submit) submit.disabled = status !== "ready";
         updateMemberAssignmentPreview(form);
+        updateAddPayment(form, addPaymentDetails(form));
     } catch {
         if (!form.isConnected || form.dataset.planRequest !== String(requestId)) return;
         form.dataset.plansState = "error";
@@ -791,8 +813,8 @@ function openMemberForm(memberId = "", fromEnquiry = null) {
     if (memberId && !member) return toast("Member was not found.", "error");
     const isEdit = Boolean(member);
     openModal({
-        title: isEdit ? "Edit member" : "Add a member",
-        subtitle: isEdit ? `Update ${member.name}'s profile and membership.` : "Add someone new to your gym community.",
+        title: isEdit ? "Edit member" : "Add member",
+        subtitle: isEdit ? `Update ${member.name}'s profile and membership.` : "Name, phone, plan and payment. The rest can wait.",
         wide: true,
         body: renderMemberFormBody(member, isEdit ? "not-needed" : "loading"),
         footer: `<button class="button button-secondary" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit" form="member-form" ${isEdit ? "" : "disabled"}>${isEdit ? "Save changes" : "Add member"}</button>`
@@ -804,7 +826,9 @@ function openMemberForm(memberId = "", fromEnquiry = null) {
     } else {
         loadMemberFormPlans(form);
         mountFormPhoto(form);
+        updateAddPayment(form);
         if (fromEnquiry) fillFromEnquiry(form, fromEnquiry);
+        form.elements.name?.focus();
     }
 }
 
@@ -815,11 +839,10 @@ function fillFromEnquiry(form, enquiry) {
     // The visitor agreed on the staff phone when they enquired: that consent comes with them.
     if (enquiry.whatsappOptIn) {
         form.dataset.enquiryConsent = "true";
-        form.elements.whatsappOptIn.checked = true;
         const note = document.createElement("span");
         note.className = "helper-text";
-        note.textContent = `Agreed when they enquired${enquiry.consentAt ? `, on ${formatDate(String(enquiry.consentAt).slice(0, 10))}` : ""}.`;
-        form.elements.whatsappOptIn.closest(".field")?.append(note);
+        note.textContent = `WhatsApp messages: agreed when they enquired${enquiry.consentAt ? `, on ${formatDate(String(enquiry.consentAt).slice(0, 10))}` : ""}. They won't be asked again.`;
+        form.elements.phone.closest(".field")?.append(note);
     }
 }
 
@@ -828,61 +851,6 @@ const EXPIRY_PLACEHOLDER = "Choose a plan to see the expiry date";
 // A grey input-sized placeholder shown while a select's options load.
 function fieldSkeleton(label) {
     return `<div class="skeleton-field" role="status"><span class="sr-only">${escapeHTML(label)}</span><span class="skeleton-block" aria-hidden="true"></span></div>`;
-}
-
-function renderQuickAddPlanField(status, plans = []) {
-    if (status === "loading") {
-        return `<div class="field"><span class="field-label">${t("plan")} *</span>${fieldSkeleton("Loading plans…")}</div>`;
-    }
-    if (status === "error") {
-        return `<div class="field"><label for="quick-planId">${t("plan")} *</label><p class="helper-text" role="alert">Plans could not be loaded.</p><button class="button button-secondary" type="button" data-action="retry-quick-add-plans">Try again</button></div>`;
-    }
-    if (!plans.length) {
-        return `<div class="field"><label for="quick-planId">${t("plan")} *</label><p class="helper-text" role="status">No active plans available. Create a plan first.</p></div>`;
-    }
-    return `<div class="field"><label for="quick-planId">${t("plan")} *</label><select id="quick-planId" name="planId" required><option value="">Select a plan</option>${memberPlanOptions(plans)}</select></div>`;
-}
-
-async function loadQuickAddPlans(form) {
-    const submit = document.querySelector('[type="submit"][form="quick-member-form"]');
-    form.dataset.plansState = "loading";
-    if (submit) submit.disabled = true;
-    form.querySelector("#quick-plan-field").innerHTML = renderQuickAddPlanField("loading");
-    try {
-        const plans = await fetchActivePlans();
-        if (!form.isConnected) return;
-        form.dataset.plansState = plans.length ? "ready" : "empty";
-        form.querySelector("#quick-plan-field").innerHTML = renderQuickAddPlanField(form.dataset.plansState, plans);
-        if (submit) submit.disabled = !plans.length;
-    } catch (error) {
-        if (!form.isConnected) return;
-        form.dataset.plansState = "error";
-        form.querySelector("#quick-plan-field").innerHTML = renderQuickAddPlanField("error");
-        if (submit) submit.disabled = true;
-        console.error("Unable to load plans for quick add.", error);
-    }
-}
-
-function openQuickAddMemberForm() {
-    openModal({
-        title: t("quickAdd"),
-        subtitle: t("quickAddSubtitle"),
-        body: `<form id="quick-member-form" class="quick-add-form" data-plans-state="loading" novalidate>
-            ${nameField("quick", "", t("name"))}
-            <div class="field"><label for="quick-phone">${t("phone")} *</label><input id="quick-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="13" pattern="(?:\\+91)?[6-9][0-9]{9}" placeholder="9876543210 or +919876543210" required aria-describedby="quick-phone-error"><span id="quick-phone-error" class="helper-text phone-error" role="alert" hidden>${t("phoneHelp")}</span></div>
-            <div id="quick-plan-field">${renderQuickAddPlanField("loading")}</div>
-            ${consentField()}
-            ${photoFormField("quick")}
-            <p class="helper-text" id="quick-assignment-error" role="alert" hidden></p>
-        </form>`,
-        footer: `<button class="button button-secondary" type="button" data-action="close-modal">${t("cancel")}</button><button class="button button-primary" type="submit" form="quick-member-form" disabled>${t("addAssign")}</button>`
-    });
-    loadQuickAddPlans(document.querySelector("#quick-member-form"));
-    mountFormPhoto(document.querySelector("#quick-member-form"));
-}
-
-function consentField() {
-    return `<div class="field consent-field"><label class="checkbox-label"><input type="checkbox" name="whatsappOptIn"> Member agrees to receive WhatsApp updates</label><span class="helper-text">Only tick this when the member has agreed. It is kept in their consent history.</span></div>`;
 }
 
 // Records consent through the consent endpoint (migration 009), after the member exists.
@@ -899,70 +867,60 @@ async function recordFormConsent(memberId, optIn, source = "staff_form") {
     if (currentView === "profile" && profileId === memberId) loadProfileConsent(memberId);
 }
 
-// After a successful save: the welcome dialog when the member consented, otherwise a toast.
-async function finishMemberSave(memberId, message) {
+/**
+ * The member's own WhatsApp consent, on the staff phone: "<Gym> may send you WhatsApp messages about
+ * your membership. [I agree] [No thanks]". I agree is recorded with source member_desk (migration
+ * 026); No thanks records nothing (new members start without consent). Resolves true when the
+ * dialog is still open afterwards (false if staff closed it).
+ */
+function askMemberConsent(memberId) {
     const member = getMember(memberId);
-    if (member && !welcomeBlocker(member)) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const done = (open) => { if (!settled) { settled = true; resolve(open); } };
+        openModal(consentStepHtml({ gymName: state.gym.name, memberName: member?.name || "Member" }));
+        onModalClose(() => done(false));
+        const buttons = [...document.querySelectorAll("[data-member-consent]")];
+        buttons.forEach((button) => button.addEventListener("click", async () => {
+            if (button.dataset.memberConsent !== "yes") return done(true);
+            buttons.forEach((item) => { item.disabled = true; });
+            try {
+                await setWhatsAppConsentOnApi(memberId, true, "member_desk");
+                done(true);
+            } catch (error) {
+                buttons.forEach((item) => { item.disabled = false; });
+                const box = document.querySelector("#member-consent-error");
+                if (box) {
+                    box.textContent = `${String(error.message || "The answer could not be saved").replace(/\.+$/, "")}. Tap I agree again, or No thanks to continue without it.`;
+                    box.hidden = false;
+                }
+            }
+        }));
+    });
+}
+
+/**
+ * After Add member saved the member, their plan and any payment: the consent step (skipped when they
+ * agreed as an enquiry or already have consent), then "Member added" with Send welcome card and
+ * Send receipt.
+ */
+async function finishAddMember(memberId, { paymentId = "", paid = 0, balance = 0 } = {}) {
+    safePersist(null);
+    let member = getMember(memberId);
+    if (member && member.whatsappOptIn !== true) {
+        const stillOpen = await askMemberConsent(memberId);
         safePersist(null);
-        if (await openMemberAddedDialog(member)) return;
+        if (!stillOpen) return toast("Member added.");
     }
-    closeModal();
-    safePersist(message);
+    member = getMember(memberId);
+    const canWelcome = Boolean(member) && !welcomeBlocker(member);
+    if (canWelcome) prepareWelcomeCard(member);
+    openModal({ title: "Member added", subtitle: `${escapeHTML(member?.name || "The member")} is saved with their plan.`, ...addedActions({ memberId, canWelcome, paymentId, paid, balance }) });
 }
 
 function nameField(prefix, value, label = "Full name") {
-    return `<div class="field"><label for="${prefix}-name">${escapeHTML(label)} *</label><input id="${prefix}-name" name="name" type="text" value="${escapeHTML(value)}" autocomplete="name" maxlength="200" placeholder="Member name" required aria-describedby="${prefix}-name-error"><span id="${prefix}-name-error" class="helper-text name-error" role="alert" hidden></span></div>`;
-}
 
-async function saveQuickMember(form) {
-    const name = cleanMemberName(form.elements.name.value);
-    const enteredPhone = String(form.elements.phone.value || "").trim();
-    const phone = normalizeIndianPhone(enteredPhone);
-    const nameIssue = memberNameIssue(name);
-    if (nameIssue) throw new Error(MEMBER_NAME_MESSAGES[nameIssue]);
-    if (!isValidIndianPhone(enteredPhone)) throw new Error("Enter a valid Indian mobile number: 10 digits starting with 6–9, optionally with +91.");
-    if (form.dataset.plansState !== "ready") throw new Error("An active membership plan is required.");
-    const planId = form.dataset.createdPlanId || form.elements.planId.value;
-    if (!planId) throw new Error("Select an active membership plan.");
-    const startDate = form.dataset.createdStartDate || localISODate();
-    let member;
-    if (form.dataset.createdMemberId) {
-        member = getMember(form.dataset.createdMemberId);
-        if (!member) throw new Error("The member was saved, but could not be reloaded. Refresh the member list before retrying.");
-    } else {
-        const duplicate = state.members.find((item) => normalizeIndianPhone(item.phone) === phone);
-        if (duplicate) throw new Error(`This phone number already belongs to ${duplicate.name}.`);
-        member = await createMemberOnApi({ name, phone });
-        if (!member?.id) throw new Error("The member was not returned by the backend.");
-        updateMemberCount();
-        form.dataset.createdMemberId = member.id;
-        form.dataset.createdPlanId = planId;
-        form.dataset.createdStartDate = startDate;
-        form.elements.name.readOnly = true;
-        form.elements.phone.readOnly = true;
-        form.elements.planId.disabled = true;
-    }
-    const priorAssignments = await fetchMemberMembershipHistory(member.id);
-    const assignment = priorAssignments.find((item) => item.plan_id === planId && item.start_date === startDate)
-        || await createMemberPlanAssignment(member.id, planId, startDate);
-    if (!assignment) throw new Error("The assignment API did not return the saved membership.");
-    setMemberCurrentMembership(member.id, assignment);
-    const updatedMember = {
-        ...member,
-        planId: assignment.plan_id,
-        currentMembership: assignment,
-        membershipStatus: assignment.effective_status || "active",
-        startDate: assignment.start_date,
-        expiryDate: assignment.end_date
-    };
-    const index = state.members.findIndex((item) => item.id === member.id);
-    if (index >= 0) state.members[index] = updatedMember;
-    await recordFormConsent(member.id, form.elements.whatsappOptIn.checked);
-    await saveFormPhoto(form, member.id);
-    const error = form.querySelector("#quick-assignment-error");
-    if (error) error.hidden = true;
-    refreshTotals(member.id);
-    await finishMemberSave(member.id, "Member added and plan assigned.");
+    return `<div class="field"><label for="${prefix}-name">${escapeHTML(label)} *</label><input id="${prefix}-name" name="name" type="text" value="${escapeHTML(value)}" autocomplete="off" maxlength="200" placeholder="Member name" required aria-describedby="${prefix}-name-error"><span id="${prefix}-name-error" class="helper-text name-error" role="alert" hidden></span></div>`;
 }
 
 // ---------- Record payment ----------
@@ -987,7 +945,7 @@ async function openPaymentForm(memberId = "", membershipId = "") {
     openModal({
         title: t("recordPayment"),
         subtitle: t("paymentSubtitle"),
-        body: `<form id="payment-form" class="form-grid" data-membership-id="${escapeHTML(membershipId)}" data-request-key="${escapeHTML(newRequestKey())}" novalidate>
+        body: `<form id="payment-form" autocomplete="off" class="form-grid" data-membership-id="${escapeHTML(membershipId)}" data-request-key="${escapeHTML(newRequestKey())}" novalidate>
             <div class="field full"><label for="form-memberId">${t("member")} *</label><select id="form-memberId" name="memberId" required><option value="">${t("selectMember")}</option>${choices}</select></div>
             <div class="field full" id="payment-plan-field" hidden><label for="form-membershipId">Plan</label><select id="form-membershipId" name="membershipId"></select><span class="helper-text">More than one plan has money due. Choose which one this payment is for.</span></div>
             <div class="payment-balance field full" id="payment-balance" role="status" aria-live="polite">${member ? "Checking the balance due…" : "Choose a member to see what is due."}</div>
@@ -1172,10 +1130,14 @@ function handleAction(action, target) {
         case "hide-setup": hideSetupChecklist(); render(); break;
         case "sign-out": signOut(); break;
         case "add-member": openMemberForm(); break;
-        case "quick-add-member": openQuickAddMemberForm(); break;
         case "mobile-more": openMobileMenu(); break;
         case "edit-member": openMemberForm(id); break;
         case "profile": profileId = id; navigate("profile"); break;
+        case "clear-member-filters":
+            memberFilters = { ...memberFilters, search: "", filter: "all", page: 1 };
+            saveUiPreferences({ memberFilter: "all" });
+            render();
+            break;
         case "delete-member": askDeleteMember(id); break;
         case "confirm-delete-member": {
             (async () => {
@@ -1248,6 +1210,15 @@ function updateMemberFormDefaults(target) {
     if (form.id === "member-form" && target.name === "assignmentStartDate") {
         updateMemberAssignmentPreview(form);
     }
+    if (form.id === "member-form" && form.dataset.mode === "create" && ["planId", "totalFees", "partAmount", "paymentChoice", "paymentMethod"].includes(target.name)) {
+        updateAddPayment(form, addPaymentDetails(form));
+        if (target.name === "paymentChoice" && target.value === "part") form.elements.partAmount?.focus();
+    }
+}
+
+// What the UPI QR note says on Add member: the plan (the member code comes only after saving).
+function addPaymentDetails(form) {
+    return { memberCode: "", planName: form.elements.planId?.selectedOptions[0]?.dataset.name || "" };
 }
 
 function updateMemberAssignmentPreview(form) {
@@ -1303,12 +1274,23 @@ async function saveMember(form) {
         : null;
     const totalFees = isNewMember ? Number(values.get("totalFees")) : Number(current?.totalFees || 0);
     if (!Number.isFinite(totalFees) || totalFees < 0) throw new Error("Membership fees must be zero or more.");
-    const initialPayment = Number(values.get("initialPayment") || 0);
-    if (!Number.isFinite(initialPayment) || initialPayment < 0 || initialPayment > totalFees) throw new Error("Initial payment must be between zero and the membership fee.");
+    // Paid in full (the fee), Part payment (less than the fee) or Not yet.
+    const payNow = isNewMember ? formPayment(form) : { amount: 0, balance: 0, method: "cash", problem: "" };
+    if (payNow.problem) throw new Error(payNow.problem);
+    const initialPayment = payNow.amount;
     const startDate = isNewMember
         ? form.dataset.pendingStartDate || form.elements.assignmentStartDate.value
         : current?.startDate || "";
     if (isNewMember && !startDate) throw new Error("Choose a membership start date.");
+    // Start date, date of birth and fee: a future birthday is refused, the rest asked about once.
+    if (!form.dataset.createdMemberId) {
+        const checks = memberWarnings({
+            dob: String(values.get("dob") || ""),
+            ...(isNewMember ? { startDate, fee: values.get("totalFees"), planPrice: plan.price } : {})
+        });
+        if (checks.block) throw new Error(checks.block);
+        if (!(await confirmWarnings(form, checks.warnings, { anchor: form.querySelector("#member-assignment-error") }))) return { cancelled: true };
+    }
 
     const record = {
         memberCode: current?.memberCode || "",
@@ -1369,7 +1351,10 @@ async function saveMember(form) {
 
     // Consent changes go through their own endpoint so the database records them in the history.
     // Consent the visitor gave when they enquired (Join now) is recorded as such.
-    await recordFormConsent(saved.id, record.whatsappOptIn, record.whatsappOptIn && form.dataset.enquiryConsent === "true" ? "enquiry" : "staff_form");
+    // Edit member: the consent box, recorded as staff. Add member: the member taps their own answer
+    // after saving (finishAddMember), unless they already agreed when they enquired.
+    if (!isNewMember) await recordFormConsent(saved.id, record.whatsappOptIn, "staff_form");
+    else if (form.dataset.enquiryConsent === "true") await recordFormConsent(saved.id, true, "enquiry");
     if (isNewMember) await saveFormPhoto(form, saved.id);
     if (isNewMember && form.dataset.enquiryId) await linkEnquiryToMember(form.dataset.enquiryId, saved.id, rerenderEnquiries);
 
@@ -1380,13 +1365,15 @@ async function saveMember(form) {
             membership_id: createdAssignment?.id || null,
             amount: initialPayment,
             paid_on: localISODate(),
-            method: "upi",
-            note: "Initial payment",
+            method: payNow.method,
+            note: "Paid when they joined",
             idempotency_key: form.dataset.paymentKey
         });
         if (!payment) throw new Error("The payments API did not return the initial payment.");
         const mappedPayment = mapPayment(payment);
-        addPaidAmount(saved.id, mappedPayment.amount);
+        if (form.dataset.paymentId !== payment.id) addPaidAmount(saved.id, mappedPayment.amount);
+        form.dataset.paymentId = payment.id;
+        try { saveUiPreferences({ renewMethod: payNow.method }); } catch { /* only a convenience */ }
         state.apiMemberPayments[saved.id] = [
             mappedPayment,
             ...(state.apiMemberPayments[saved.id] || []).filter((item) => item.id !== mappedPayment.id)
@@ -1395,7 +1382,7 @@ async function saveMember(form) {
 
     if (isNewMember) refreshTotals(saved.id);
     if (isNewMember) {
-        await finishMemberSave(saved.id, "New member added and plan assigned.");
+        await finishAddMember(saved.id, { paymentId: form.dataset.paymentId || "", paid: initialPayment, balance: payNow.balance });
         return;
     }
     closeModal();
@@ -1808,20 +1795,19 @@ async function handleSubmit(event) {
     }
     const handlers = {
         "member-form": saveMember,
-        "quick-member-form": saveQuickMember,
         "payment-form": savePayment,
         "settings-form": saveSettings
     };
     const handler = handlers[form.id];
     if (!handler) return;
     event.preventDefault();
-    if (form.id === "member-form" || form.id === "quick-member-form") {
+    if (form.id === "member-form") {
         const nameValid = validateMemberName(form, true);
         const phoneValid = validateMemberPhone(form, true);
         if (!nameValid || !phoneValid) return;
     }
     if (!form.reportValidity()) return;
-    if (form.id === "member-form" || form.id === "quick-member-form") {
+    if (form.id === "member-form") {
         if (memberSaving) return;
         memberSaving = true;
         form.dataset.submitting = "true";
@@ -1831,22 +1817,13 @@ async function handleSubmit(event) {
             await handler(form);
         } catch (error) {
             if (error?.stage === "consent") {
-                const errorElement = form.querySelector(form.id === "quick-member-form" ? "#quick-assignment-error" : "#member-assignment-error");
+                const errorElement = form.querySelector("#member-assignment-error");
                 if (errorElement) {
                     errorElement.textContent = error.message;
                     errorElement.hidden = false;
                 }
                 if (submitButton) submitButton.textContent = "Retry saving consent";
                 toast(error.message, "error");
-            } else if (form.id === "quick-member-form" && form.dataset.createdMemberId) {
-                const assignmentError = form.querySelector("#quick-assignment-error");
-                const message = `Member saved, but plan assignment failed: ${error.message || "Please retry."} Use the button to retry without creating another member.`;
-                if (assignmentError) {
-                    assignmentError.textContent = message;
-                    assignmentError.hidden = false;
-                }
-                if (submitButton) submitButton.textContent = "Retry plan assignment";
-                toast(message, "error");
             } else if (form.id === "member-form" && form.dataset.createdMemberId && form.dataset.assignmentPending === "true") {
                 const assignmentError = form.querySelector("#member-assignment-error");
                 const message = `Member was saved, but plan assignment failed: ${error.message || "Please retry."} The form will retry assignment without creating another member.`;
@@ -1862,7 +1839,8 @@ async function handleSubmit(event) {
             memberSaving = false;
             form.dataset.submitting = "false";
             if (submitButton?.isConnected) {
-                submitButton.disabled = form.dataset.plansState !== "ready";
+                // Edit member has no plans to load (data-plans-state="not-needed").
+                submitButton.disabled = form.dataset.plansState !== "ready" && form.dataset.plansState !== "not-needed";
             }
         }
         return;
@@ -1875,6 +1853,15 @@ async function handleSubmit(event) {
 }
 
 document.addEventListener("click", (event) => {
+    // Members: a tap anywhere on a row (outside its buttons and menu) opens the profile.
+    const memberRow = event.target.closest("tr[data-row-profile]");
+    if (memberRow && !event.target.closest("button, a, input, select, label, .row-menu-wrap")) {
+        profileId = memberRow.dataset.rowProfile;
+        navigate("profile");
+        return;
+    }
+    const addQr = event.target.closest('#member-form [data-add="qr"]');
+    if (addQr) { toggleAddQr(addQr.form, addPaymentDetails(addQr.form)); return; }
     // The WhatsApp link still opens normally; this only records and animates the reminder.
     const reminderLink = event.target.closest("a[data-remind-key]");
     if (reminderLink) {
@@ -1935,11 +1922,6 @@ document.addEventListener("click", (event) => {
         if (action.dataset.action === "retry-member-plans") {
             const form = document.querySelector("#member-form");
             if (form && form.dataset.mode === "create") loadMemberFormPlans(form);
-            return;
-        }
-        if (action.dataset.action === "retry-quick-add-plans") {
-            const form = document.querySelector("#quick-member-form");
-            if (form) loadQuickAddPlans(form);
             return;
         }
         // Synchronous up to window.open / navigator.share, so phones treat it as the user's tap.
@@ -2004,6 +1986,7 @@ document.addEventListener("change", (event) => {
     const target = event.target;
     if (target.closest("#modal-root") && handleImportChange(target)) return;
     if (handleWelcomeTemplateEvent(target)) return;
+    if (syncHoldFeeField(target)) return;
     if (handleReminderTemplateEvent(target)) return;
     if (handleEnquiryTemplateEvent(target)) return;
     if (onPaymentFormEdit(target)) return;
@@ -2046,13 +2029,14 @@ document.addEventListener("input", (event) => {
     if (target.id === "enquiry-template-body") { handleEnquiryTemplateEvent(target); return; }
     if (target.dataset.importNew !== undefined) { handleImportChange(target); return; }
     if (target.id === "checkin-search") { searchCheckInMembers(target.value); return; }
+    if (target.form?.id === "member-form" && ["totalFees", "partAmount"].includes(target.name)) { updateAddPayment(target.form, addPaymentDetails(target.form)); return; }
     if (target.form?.id === "payment-form" && ["amount", "upiReference"].includes(target.name)) { onPaymentFormEdit(target); return; }
     if (target.id === "setting-upiId" || target.id === "setting-upiPayeeName") { updateUpiTestQr(target.form); return; }
-    if (target.matches('#member-form [name="phone"], #quick-member-form [name="phone"]')) {
+    if (target.matches('#member-form [name="phone"]')) {
         target.value = target.value.replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "").slice(0, 13);
         validateMemberPhone(target.form, false);
     }
-    if (target.matches('#member-form [name="name"], #quick-member-form [name="name"]')) {
+    if (target.matches('#member-form [name="name"]')) {
         validateMemberName(target.form, target.getAttribute("aria-invalid") === "true");
     }
     if (target.matches("#membership-assignment-form [name='start_date']")) updateAssignmentForm(target);
@@ -2146,7 +2130,7 @@ function validateMemberPhone(form, showError) {
 
 document.addEventListener("keydown", (event) => {
     const target = event.target;
-    if (target.matches?.('#member-form [name="phone"], #quick-member-form [name="phone"]')
+    if (target.matches?.('#member-form [name="phone"]')
         && !event.ctrlKey && !event.metaKey && !event.altKey
         && event.key.length === 1
         && !/[0-9]/.test(event.key)
@@ -2204,6 +2188,7 @@ async function registerServiceWorker() {
 }
 
 startErrorReporting({ view: () => currentView });
+watchDialogAutofill();
 bindAuthPasswordLinks();
 registerServiceWorker();
 // The camera is released whenever the app is hidden, and comes back on the Check-in screen.

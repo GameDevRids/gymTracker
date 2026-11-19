@@ -1,4 +1,4 @@
-const CACHE_NAME = "gympulse-shell-v31";
+const CACHE_NAME = "gympulse-shell-v34";
 const APP_SHELL = [
     "/",
     "/index.html",
@@ -24,8 +24,10 @@ const APP_SHELL = [
     "/assets/js/lapsedMessage.js",
     "/assets/js/modules/lapsed.js",
     "/assets/js/navigation.js",
+    "/assets/js/layout.js",
     "/assets/js/enquiries.js",
     "/assets/js/paymentRules.js",
+    "/assets/js/memberChecks.js",
     "/assets/js/modules/paymentVoid.js",
     "/assets/js/modules/enquiriesPage.js",
     "/assets/js/modules/enquiryTemplateUi.js",
@@ -45,6 +47,7 @@ const APP_SHELL = [
     "/assets/js/api/membershipsApi.js",
     "/assets/js/api/paymentsApi.js",
     "/assets/js/api/plansApi.js",
+    "/assets/js/components/autofill.js",
     "/assets/js/components/charts.js",
     "/assets/js/components/modal.js",
     "/assets/js/components/skeleton.js",
@@ -56,6 +59,7 @@ const APP_SHELL = [
     "/assets/js/modules/memberImportUi.js",
     "/assets/js/spreadsheet.js",
     "/assets/js/modules/memberMemberships.js",
+    "/assets/js/modules/addMember.js",
     "/assets/js/modules/members.js",
     "/assets/js/modules/operations.js",
     "/assets/js/modules/plans.js",

@@ -45,7 +45,32 @@ export async function listPlans({ page, limit, status, search, gymId }, client =
 
     const { data, count, error } = await query;
     if (error) throwDatabaseError(error, "list");
-    return { plans: data || [], total: count ?? 0 };
+    return { plans: await withUsage(data || [], gymId, client), total: count ?? 0 };
+}
+
+/**
+ * Marks each plan used: true when any membership of this gym (even a cancelled one) was made from it.
+ * The database refuses to delete those plans; the Plans page says "Deactivate it instead" up front.
+ * If the check itself fails, used is null and the database still has the last word on delete.
+ */
+export async function withUsage(plans, gymId, client = supabaseClient) {
+    if (!plans.length) return plans;
+    try {
+        // One small lookup per plan on the page (at most 12): is there any membership at all?
+        const used = await Promise.all(plans.map(async (plan) => {
+            const { data, error } = await client
+                .from("member_memberships")
+                .select("id")
+                .eq("gym_id", gymId)
+                .eq("plan_id", plan.id)
+                .limit(1);
+            if (error || !Array.isArray(data)) throw error || new Error("No rows");
+            return data.length > 0;
+        }));
+        return plans.map((plan, index) => ({ ...plan, used: used[index] }));
+    } catch {
+        return plans.map((plan) => ({ ...plan, used: null }));
+    }
 }
 
 export async function getPlan(id, gymId, client = supabaseClient) {

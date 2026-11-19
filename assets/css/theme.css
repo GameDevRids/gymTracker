@@ -30,7 +30,7 @@
 
     --ink: #1E2D3A;
     --ink-2: #44535F;
-    --ink-3: #5E6C77;
+    --ink-3: #52606B; /* darkened in review stage 6: at least 4.5:1 on every surface it is used on */
     --line: #DFE5E9;
     --line-strong: #C9D2D9;
 
@@ -185,7 +185,7 @@ tbody tr:hover { background: #F7F9FA; }
 .member-cell small { color: var(--ink-3); font-size: 12px; }
 
 /* ---------- Status: one meaning per colour ---------- */
-.status { color: var(--leaf); background: var(--leaf-tint); font-size: 12px; }
+.status { color: var(--leaf-strong); background: var(--leaf-tint); font-size: 12px; } /* 6.3:1 (review stage 6) */
 .status-expired, .status-overdue, .status-cancelled { color: var(--brick); background: var(--brick-tint); }
 .status-suspended, .status-pending, .status-upcoming, .status-expiring { color: var(--marigold-ink); background: var(--marigold-tint); }
 .status-inactive, .status-unassigned { color: var(--ink-3); background: var(--slate-soft); }
@@ -306,7 +306,6 @@ tbody tr:hover { background: #F7F9FA; }
 .toast-icon { color: var(--leaf); background: var(--leaf-tint); }
 .toast-error { border-color: #F2C9BF; color: var(--brick); }
 .toast-error .toast-icon { color: var(--brick); background: var(--brick-tint); }
-.quick-add-form .field input:not([type="checkbox"]):not([type="radio"]), .quick-add-form .field select { border-radius: 12px; font-size: 17px; }
 
 /* ---------- WhatsApp inbox colours ---------- */
 .wa-contact:hover, .wa-contact.selected { background: #F4F7F9; }
@@ -571,4 +570,56 @@ tr.is-voided td { color: var(--ink-3); }
 @media (max-width: 767px) {
     .payment-row-actions { display: flex; width: 100%; }
     .payment-row-actions .button { flex: 1 1 0; min-height: 44px; }
+}
+
+/* ---------- Today (review stage 3) ---------- */
+/* A small greeting: the page is about what to do, not the welcome. */
+.today-heading h1 { font-size: clamp(20px, 1.6vw, 24px); letter-spacing: -.2px; }
+.today-heading p { margin-top: 2px; }
+/* Nothing to do: one line instead of a card. */
+p.attention-clear.is-all { margin: 0 0 15px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface, #fff); }
+/* Get started once 3 steps are done: one slim line with the next step. */
+.setup-slim { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin: 0 0 15px; padding: 6px 8px 6px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface, #fff); color: var(--ink-2); font-size: 14px; }
+.setup-slim .text-button { min-height: 44px; padding: 0 8px; }
+.activity-card { margin-bottom: 15px; }
+
+/* ---------- Members (review stage 5) ---------- */
+.row-menu-divider { height: 1px; margin: 6px 4px; background: var(--line); }
+.members-table tbody tr.member-row { cursor: pointer; }
+.members-table tbody tr.member-row:hover td { background: var(--slate-soft); }
+.heading-actions .row-menu-wrap { flex: none; }
+
+/* ---------- Check-in (review stage 5) ---------- */
+.approvals-line { padding: 12px 16px; }
+.approvals-line p { margin: 0; color: var(--ink-2); font-size: 14px; }
+.checkin-help-link { margin: 8px 0 0; }
+.checkin-help-link .text-button, .text-button.inline-help { min-height: 44px; }
+.checkin-rules { margin: 0; padding-left: 20px; display: grid; gap: 8px; line-height: 1.5; }
+
+/* ---------- Plans (review stage 5) ---------- */
+.plan-card-heading .status { margin-left: auto; }
+.plan-card-heading .plan-menu { flex: none; }
+.plan-rules { margin: 10px 0 0; }
+
+/* ---------- Consistency and accessibility (review stage 6) ---------- */
+/* The page title shows once: the big title on the page; the top bar shows it only after scrolling past. */
+.topbar .topbar-title { opacity: 0; transition: opacity .15s ease; }
+.topbar.title-shown .topbar-title { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .topbar .topbar-title { transition: none; } }
+/* Text links used as buttons: at least 44px tall on every screen size, not only phones. */
+.text-button { display: inline-flex; align-items: center; min-height: 44px; }
+.gym-label small:empty { display: none; }
+/* Links in Settings › Help and legal: a full 44px tap height. */
+.settings-section .helper-text a { display: inline-flex; align-items: center; min-height: 44px; }
+/* Members on desktop: long names and status notes wrap, so the actions column (Renew and "⋯") is
+   never pushed out of the card at 1280px. */
+@media (min-width: 768px) {
+    .members-table td[data-label="Member"], .members-table td[data-label="Status"] { white-space: normal; }
+    .members-table td[data-label="Member"] { min-width: 180px; }
+    .members-table td[data-label="Status"] .cell-sub { display: block; max-width: 220px; }
+    .members-table td[data-label="Actions"] .row-actions { justify-content: flex-end; }
+}
+@media (min-width: 768px) and (max-width: 1199px) {
+    .members-table th, .members-table td { padding-right: 9px; padding-left: 9px; }
+    .members-table td[data-label="Member"] { min-width: 150px; }
 }

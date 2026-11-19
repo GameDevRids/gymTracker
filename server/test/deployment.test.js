@@ -93,7 +93,7 @@ test("frontend HTML and static assets load with the expected content security po
     const workerResponse = await fetch(`${baseUrl}/sw.js`);
     assert.equal(workerResponse.status, 200);
     const workerSource = await workerResponse.text();
-    assert.match(workerSource, /gympulse-shell-v31/);
+    assert.match(workerSource, /gympulse-shell-v34/);
     // Member photos (signed Storage URLs and the photo API) are never cached by the worker.
     assert.match(workerSource, /if \(isMemberPhoto\(url\)\) return;/);
     assert.match(workerSource, /fetch\(new Request\(request, \{ cache: "no-cache" \}\)\)[\s\S]*?cache\.put\(url\.pathname, copy\)/);

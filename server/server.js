@@ -19,7 +19,7 @@ import enquiriesRouter from "./routes/enquiries.js";
 import exportRouter from "./routes/export.js";
 import clientErrorsRouter from "./routes/clientErrors.js";
 import accountRouter from "./routes/account.js";
-import { startGymDeletionSweep } from "./services/accountService.js";
+import { startGymDeletionSweep, warnIfNoSupportWhatsApp } from "./services/accountService.js";
 import attendanceRouter from "./routes/attendance.js";
 import memberDevicesRouter from "./routes/memberDevices.js";
 import memberPhotosRouter from "./routes/memberPhotos.js";
@@ -175,6 +175,7 @@ function startServer() {
     const server = app.listen(port, host, () => {
         logger.info({ host, port, hostSource, portSource }, `GymPulse server listening on ${host}:${port}.`);
     });
+    warnIfNoSupportWhatsApp();
     let shuttingDown = false;
     const shutdown = (signal) => {
         if (shuttingDown) return;

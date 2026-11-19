@@ -115,7 +115,8 @@ test("plan listing applies pagination, status, and name search", async () => {
         { page: 2, limit: 10, status: "inactive", search: "quarter", gymId },
         mock.client
     );
-    assert.deepEqual(result, { plans: [planRecord], total: 1 });
+    // This mock has no member_memberships table, so whether the plan was used is unknown (null).
+    assert.deepEqual(result, { plans: [{ ...planRecord, used: null }], total: 1 });
     assert.ok(mock.calls[0].operations.some(([name, field, value]) => name === "eq" && field === "gym_id" && value === gymId));
     assert.ok(mock.calls[0].operations.some(([name, field, value]) => name === "eq" && field === "is_active" && value === false));
     assert.ok(mock.calls[0].operations.some(([name, field, value]) => name === "ilike" && field === "name" && value === "%quarter%"));
